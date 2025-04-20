@@ -1,7 +1,8 @@
 ugf() {
     local GITIGNORE_OPT=""
     [[ -f .gitignore ]] && GITIGNORE_OPT="--exclude-from=.gitignore"
-    local UG_CMD="ugrep -RU --color=always --line-number --ignore-binary --no-heading $GITIGNORE_OPT"
+
+    local UG_CMD="ugrep -RU --color=always --sort=rname --line-number --ignore-binary --no-heading $GITIGNORE_OPT"
 
     if [[ "$1" =~ ^--glob= ]]; then
         local patterns="${1#--glob=}"
@@ -9,14 +10,14 @@ ugf() {
         shift
     fi
 
-    FZF_DEFAULT_COMMAND="$UG_CMD '${*:-}' ." \
-    fzf --ansi --delimiter : --no-sort --style=full --wrap \
-        --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+    UG_CMD="$UG_CMD '${*:-}' ."
+
+    FZF_DEFAULT_COMMAND="$UG_CMD" \
+    fzf --ansi --delimiter : --no-sort --style=full --wrap --exact \
+        --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline:reverse,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --preview 'batcat --color=always {1} --highlight-line {2}' \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
-        --phony -q "${*:-}" \
-        --bind "change:reload:$UG_CMD {q} . || echo 'No results found'" \
-        --bind "ctrl-r:reload:$UG_CMD {q} . || echo 'No results found'" \
+        --bind "ctrl-r:reload:$UG_CMD || echo 'No results found'" \
         --bind "ctrl-l:toggle-preview" \
         --bind 'home:last,end:first' \
         --bind="alt-up:preview-page-up" \
@@ -33,11 +34,8 @@ ugf() {
 rgf() {
     # Content search mode using rg with line numbers and context
     rg --color=always --line-number --no-heading  "${*:-}" | \
-    fzf --ansi \
-        --exact \
-        --style=full \
-        --wrap \
-        --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+    fzf --ansi --exact --style=full --wrap \
+        --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline:reverse,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --delimiter : \
         --preview 'batcat --color=always {1} --highlight-line {2}' \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
@@ -56,12 +54,8 @@ rgf() {
 rgfS() {
     # Content search mode using rg with line numbers and context
     rg --color=always --line-number --no-heading  "${*:-}" | LC_ALL=C sort -r | \
-    fzf --ansi \
-        --exact \
-        --no-sort \
-        --style=full \
-        --wrap \
-        --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+    fzf --ansi --exact --no-sort --style=full --wrap \
+        --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline:reverse,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --delimiter : \
         --preview 'batcat --color=always {1} --highlight-line {2}' \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
