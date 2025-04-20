@@ -8,6 +8,7 @@ A collection of efficient and flexible search tools to search inside file conten
 
 - [✨ Features](#-features)
 - [🧭 Usage](#-usage)
+- [🎹 Keyboard Shortcuts](#-keyboard-shortcuts)
 - [🔧 Installation](#-installation)
 - [🖼️ Examples](#-examples)
 - [🧰 Recommended Tools](#-recommended-tools)
@@ -70,6 +71,22 @@ fh   # also includes hidden files
 ugf 'search string'
 rgf 'search string'
 ```
+
+---
+
+## 🎹 Keyboard Shortcuts
+
+These shortcuts apply when using the interactive search tools (`fzf`, `ugrep-fzf`, `rga-fzf`, etc.):
+
+| Shortcut | Action                                   |
+|----------|------------------------------------------|
+| `Enter`  | Open the selected file                   |
+| `Ctrl-e` | Open file location in file manager       |
+| `Ctrl-c` | Copy relative path of selected file      |
+| `Ctrl-t` | Open selected file in a new tmux window  |
+| `Ctrl-p` | Pop out the preview in a separate tmux pane |
+
+> These are customizable if you tweak your FZF or terminal bindings.
 
 ---
 
