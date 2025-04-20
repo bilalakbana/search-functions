@@ -11,7 +11,6 @@ A collection of efficient and flexible search tools to search inside file conten
 - [🎹 Keyboard Shortcuts](#-keyboard-shortcuts)
 - [🔧 Installation](#-installation)
 - [🖼️ Examples](#-examples)
-- [🧰 Recommended Tools](#-recommended-tools)
 - [🙌 Credits](#-credits)
 
 ---
@@ -120,16 +119,6 @@ source ~/.SearchFunctions/sub-functions/git_logs          # gfzf
 
 ## 🖼️ Examples
 To be added
----
-
-## 🧰 Recommended Tools
-
-- [`fzf`](https://github.com/junegunn/fzf): Blazing fast fuzzy finder  
-- [`ugrep`](https://github.com/Genivia/ugrep): Ultimate grep with Unicode support  
-- [`ripgrep`](https://github.com/BurntSushi/ripgrep): Lightning-fast recursive search  
-- [`ripgrep-all`](https://github.com/phiresky/ripgrep-all): Enables `ripgrep` to search PDFs, DOCX, etc.  
-- [`git-delta`](https://github.com/dandavison/delta): Syntax-highlighting pager for `git diff`  
-- [`git-split-diffs`](https://github.com/banga/git-split-diffs): Pretty split-view diffs in GitHub  
 
 ---
 
