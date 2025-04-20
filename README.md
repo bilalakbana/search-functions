@@ -135,6 +135,12 @@ To be added
 
 ## 🙌 Credits
 
-Built and maintained by Bilal Akbana.
+Built and maintained with ❤️ by [YourName].
 
-> Feel free to fork, modify, and contribute — PRs are welcome!
+A special thanks to the developers and contributors of the incredible open-source tools that power this project:
+
+[`fzf`](https://github.com/junegunn/fzf) [`ugrep`](https://github.com/Genivia/ugrep) [`ripgrep`](https://github.com/BurntSushi/ripgrep) [`ripgrep-all`](https://github.com/phiresky/ripgrep-all) [`git-delta`](https://github.com/dandavison/delta) [`git-split-diffs`](https://github.com/bryanbraun/git-split-diffs)
+
+Without your dedication to open source, this project wouldn't exist — thank you!
+
+> 💬 Pull Requests are welcome! If you have improvements, ideas, or bugfixes, feel free to contribute.
