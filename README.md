@@ -129,7 +129,7 @@ To be added
 - [`ripgrep`](https://github.com/BurntSushi/ripgrep): Lightning-fast recursive search  
 - [`ripgrep-all`](https://github.com/phiresky/ripgrep-all): Enables `ripgrep` to search PDFs, DOCX, etc.  
 - [`git-delta`](https://github.com/dandavison/delta): Syntax-highlighting pager for `git diff`  
-- [`git-split-diffs`](https://github.com/bryanbraun/git-split-diffs): Pretty split-view diffs in GitHub  
+- [`git-split-diffs`](https://github.com/banga/git-split-diffs): Pretty split-view diffs in GitHub  
 
 ---
 
@@ -139,7 +139,7 @@ Built and maintained by Bilal Akbana.
 
 A special thanks to the developers and contributors of the incredible open-source tools that power this project:
 
-[`fzf`](https://github.com/junegunn/fzf) [`ugrep`](https://github.com/Genivia/ugrep) [`ripgrep`](https://github.com/BurntSushi/ripgrep) [`ripgrep-all`](https://github.com/phiresky/ripgrep-all) [`git-delta`](https://github.com/dandavison/delta) [`git-split-diffs`](https://github.com/bryanbraun/git-split-diffs)
+[`fzf`](https://github.com/junegunn/fzf) [`ugrep`](https://github.com/Genivia/ugrep) [`ripgrep`](https://github.com/BurntSushi/ripgrep) [`ripgrep-all`](https://github.com/phiresky/ripgrep-all) [`git-delta`](https://github.com/dandavison/delta) [`git-split-diffs`](https://github.com/banga/git-split-diffs)
 
 Without your dedication to open source, this project wouldn't exist — thank you!
 
