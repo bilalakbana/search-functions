@@ -1,7 +1,7 @@
 fbr() {
     declare -f |
     perl -0 -pe 's/^}\n/}\0/gm' |
-    bat --plain --language bash --color always |
+    batcat --plain --language bash --color always |
     fzf --read0 \
         --ansi \
         --multi \
