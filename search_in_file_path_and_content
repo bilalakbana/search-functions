@@ -1,7 +1,7 @@
 ugf() {
     local search_pattern="${*:-}"
     # Content search mode using ugrep with line numbers and context
-    ug --color=always --sort=rname --line-number -U --no-heading --ignore-binary --hidden "${search_pattern}" | \
+    ug --color=always --sort=rname --line-number -U --no-heading --ignore-binary  "${search_pattern}" | \
     fzf --ansi \
         --exact --style=full \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
@@ -25,44 +25,44 @@ ugf() {
 }
 # generic and not sorted -> faster
 rgf() {
-        # Content search mode using rg with line numbers and context
-        rg --color=always --line-number --no-heading --hidden "${*:-}" | \
-        fzf --ansi \
-            --exact \
-            --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
-            --delimiter : \
-            --preview 'batcat --color=always {1} --highlight-line {2}' \
-            --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
-			--bind "ctrl-r:reload(rg --color=always --line-number --no-heading \"${*:-}\" || rg --files || echo 'No results found')" --header "Press Ctrl-R to reload results after adding files or changes" \
-            --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-            --bind="ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {1}\" || tmux new-window -n 'nvim' \"nvim {1} -c '/{q}' -c 'set hlsearch'\")" \
-            --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
-            --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-            --bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1} '{q}'\")" \
-            --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
-            --bind="ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file {1} '{q}'\")" \
-            --bind "ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
-            --bind "ctrl-l:toggle-preview"
+    # Content search mode using rg with line numbers and context
+    rg --color=always --line-number --no-heading  "${*:-}" | \
+    fzf --ansi \
+        --exact \
+        --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+        --delimiter : \
+        --preview 'batcat --color=always {1} --highlight-line {2}' \
+        --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
+        --bind "ctrl-r:reload(rg --color=always --line-number --no-heading \"${*:-}\" || rg --files || echo 'No results found')" --header "Press Ctrl-R to reload results after adding files or changes" \
+        --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
+        --bind="ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {1}\" || tmux new-window -n 'nvim' \"nvim {1} -c '/{q}' -c 'set hlsearch'\")" \
+        --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
+        --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
+        --bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1} '{q}'\")" \
+        --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
+        --bind="ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file {1} '{q}'\")" \
+        --bind "ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
+        --bind "ctrl-l:toggle-preview"
 }
 # generic and sorted
 rgfS() {
-        # Content search mode using rg with line numbers and context
-        rg --color=always --line-number --no-heading --hidden "${*:-}" | LC_ALL=C sort -r | \
-        fzf --ansi \
-            --exact \
-			--no-sort \
-            --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
-            --delimiter : \
-            --preview 'batcat --color=always {1} --highlight-line {2}' \
-            --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
-			--bind "ctrl-r:reload(rg --color=always --line-number --no-heading \"${*:-}\" | LC_ALL=C sort -r || echo 'No results found')" --header "Press Ctrl-R to reload results after adding files or changes" \
-            --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-            --bind="ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {1}\" || tmux new-window -n 'nvim' \"nvim {1} -c '/{q}' -c 'set hlsearch'\")" \
-            --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
-            --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-            --bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1} '{q}'\")" \
-            --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
-            --bind="ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file {1} '{q}'\")" \
-            --bind "ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
-            --bind "ctrl-l:toggle-preview"
+    # Content search mode using rg with line numbers and context
+    rg --color=always --line-number --no-heading  "${*:-}" | LC_ALL=C sort -r | \
+    fzf --ansi \
+        --exact \
+        --no-sort \
+        --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+        --delimiter : \
+        --preview 'batcat --color=always {1} --highlight-line {2}' \
+        --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
+        --bind "ctrl-r:reload(rg --color=always --line-number --no-heading \"${*:-}\" | LC_ALL=C sort -r || echo 'No results found')" --header "Press Ctrl-R to reload results after adding files or changes" \
+        --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
+        --bind="ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {1}\" || tmux new-window -n 'nvim' \"nvim {1} -c '/{q}' -c 'set hlsearch'\")" \
+        --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
+        --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
+        --bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1} '{q}'\")" \
+        --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
+        --bind="ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file {1} '{q}'\")" \
+        --bind "ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
+        --bind "ctrl-l:toggle-preview"
 }
