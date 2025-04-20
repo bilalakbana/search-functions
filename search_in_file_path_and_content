@@ -35,6 +35,8 @@ rgf() {
     rg --color=always --line-number --no-heading  "${*:-}" | \
     fzf --ansi \
         --exact \
+        --style=full \
+        --wrap \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --delimiter : \
         --preview 'batcat --color=always {1} --highlight-line {2}' \
@@ -57,6 +59,8 @@ rgfS() {
     fzf --ansi \
         --exact \
         --no-sort \
+        --style=full \
+        --wrap \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --delimiter : \
         --preview 'batcat --color=always {1} --highlight-line {2}' \
