@@ -135,7 +135,7 @@ To be added
 
 ## 🙌 Credits
 
-Built and maintained with ❤️ by [YourName].
+Built and maintained by Bilal Akbana.
 
 A special thanks to the developers and contributors of the incredible open-source tools that power this project:
 
