@@ -1,0 +1,19 @@
+fbr() {
+    declare -f |
+    perl -0 -pe 's/^}\n/}\0/gm' |
+    bat --plain --language bash --color always |
+    fzf --read0 \
+        --ansi \
+        --multi \
+		--exact \
+		--wrap \
+		--color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+        --preview-window="up:60%" \
+        --preview "echo {} | batcat --language bash --color always" \
+        --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
+		--bind "ctrl-l:toggle-preview" \
+		--bind="alt-up:preview-page-up" \
+		--bind="alt-down:preview-page-down" \
+		--bind 'home:last,end:first' \
+        --bind 'enter:execute(echo {} | batcat --language bash --color always)'
+}

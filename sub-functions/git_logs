@@ -1,0 +1,42 @@
+show-logs() {
+    local file=$(readlink -f "$1")
+    local repo_root=$(git rev-parse --show-toplevel)
+    local submodule_path
+    COLUMNS=$(tput cols)
+    HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
+
+    submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp path | while read -r _ path; do
+        [[ "$file" == *"$path"* ]] && echo "$path" && break
+    done)
+
+    ([ -n "$submodule_path" ] && cd "$repo_root/$submodule_path" && \
+        git log --color=always --format=$'commit %Cblue%h%Creset%n%Cred→ Author:%Creset %an%n%Cgreen→ Date:%Creset %ad \033[33m(%ar)\033[0m%n%Cred→ Message:%Creset %s%n$HR' \
+        --date=format:'%Y-%m-%d %H:%M:%S' -p --no-prefix --unified=3 "${file#*$submodule_path/}" || \
+    git log --color=always --format=$'commit %Cblue%h%Creset%n%Cred→ Author:%Creset %an%n%Cgreen→ Date:%Creset %ad \033[33m(%ar)\033[0m%n%Cred→ Message:%Creset %s%n$HR' \
+        --date=format:'%Y-%m-%d %H:%M:%S' -p --no-prefix --unified=3 "$file") | \
+    awk '/^commit / { print "\n" $0; next } /^diff --git / { print "\n" $0; next } { print }' | \
+    git-split-diffs --color --width="${COLUMNS}" --full-width -- | less -RFX
+}
+gfzf() {
+    local filter=""
+    if [ -n "$*" ] && [ -e "$*" ]; then
+        filter="-- $*"
+    fi
+
+    export LESS='-R'
+    export BAT_PAGER='less -S -R -M -i'
+
+    git log \
+        --graph --color=always --abbrev=7 --glob="refs/heads/*" \
+        --format=format:"%C(bold blue)%h%C(reset) %C(dim white)%an%C(reset)%C(bold yellow)%d%C(reset) %C(white)%s%C(reset) %C(bold green)(%ar)%C(reset)" "$@" | \
+        fzf --exact --ansi --no-sort --wrap --layout=reverse --tiebreak=index \
+            --preview="f() { set -- \$(echo -- \$@ | rg -o '\b[a-f0-9]{7,}\b'); [ \$# -eq 0 ] || git show --color=always \$1 $filter | delta --line-numbers; }; f {}" \
+            --color 'fg:252,fg+:252,bg:234,bg+:235,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+            --bind="ctrl-j:preview-down,ctrl-k:preview-up,ctrl-f:preview-page-down,ctrl-b:preview-page-up" \
+            --bind="ctrl-m:execute:(rg -o '\b[a-f0-9]{7,}\b' | head -1 | xargs -I % -- git show --color=always %) <<< {}" \
+            --bind="ctrl-v:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); [[ -n \$TMUX ]] && tmux display -d0 \"\$(git branch --contains \$1 | sed 's/^\\*\\?\\s\\+//' | LC_ALL=C sort | paste -sd, - | sed -e 's/,/, /g' -e 's/^/#[bg=blue,italics] Branches #[none,fg=black,bg=default] /')\"; }; f)" \
+            --bind="ctrl-g:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); SUMMARY=\$(git show --format='%s' \$1 | head -1); [[ -n \$TMUX ]] && tmux display -d0 \"\$(git log --all --format='%H' -F --grep=\"\$SUMMARY\" | xargs -I{} -- git branch --contains {} | sed 's/^\\*\\?\\s\\+//' | LC_ALL=C sort | uniq | paste -sd, - | sed -e 's/,/, /g' -e 's/^/#[bg=blue,italics] Branches (Grep) #[none,fg=black,bg=default] /')\"; }; f)" \
+            --bind="ctrl-y:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); printf '%s' \$1 | clipboard; [[ -n \$TMUX ]] && tmux display \"#[bg=blue,italics] Yanked #[none,fg=black,bg=default] \$1\"; }; f)" \
+            --bind="ctrl-s:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); SUMMARY=\$(git show --format='%s' \$1 | head -1); printf '%s' \"\$SUMMARY\" | clipboard; [[ -n \$TMUX ]] && tmux display \"#[bg=blue,italics] Yanked #[none,fg=black,bg=default] \$SUMMARY\"; }; f)" \
+            --preview-window=up:40%:wrap
+}

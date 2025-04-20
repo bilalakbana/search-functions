@@ -1,0 +1,42 @@
+advancedsearch+() {
+    local SEARCH_PATTERN="$1" && shift
+    local GREP_ARGS=$(echo "${@}" | grep -o '\(-w\|--word-regexp\)') # only pass -w flag to ugrep in preview
+    ugrep+ -Rzil --sort --hidden --exclude='*.rar' ${@} -e "$SEARCH_PATTERN" 2>/dev/null | \
+    stdbuf -oL sed 's/\([^{]*\){[^}]*}/\1/' | \
+    stdbuf -oL awk '!seen[$0]++' | \
+    stdbuf -oL sed -E $'s/^([^/]+)$/\x1b[32m\\1/' | \
+    stdbuf -oL sed -E $'s/^(.+\\/)/\x1b[34m\\1\x1b[32m/' | \
+    stdbuf -oL sed "s/\//\x1b[33m\/\x1b[34m/g" | \
+    fzf --exact --no-sort --delimiter : --wrap --style=full --ansi \
+    --preview 'echo -e "\033[1;31mPattern :\033[1;31m '$SEARCH_PATTERN'"; file=$(echo {1} | tr -d "\047" | sed "s/\x1b\[[0-9;]*m//g"); file=${file#./}; dir=$(dirname "$file"); base=$(basename "$file"); if [ "$dir" = "." ]; then echo -e "\033[1;31mPath    :\033[1;32m $base"; else echo -e "\033[1;31mPath    :\033[1;34m $(echo "$dir" | sed "s/\//\x1b[1;33m\/\x1b[1;34m/g")\033[1;33m/\033[1;32m$base"; fi; echo -e "\033[1;37m═══════════════════════════════════════════════════════════════════\033[0m"; if [ -f "$file" ]; then if file -b "$file" | grep -q "binary\|executable\|data"; then matches=$(GREP_COLORS="ln=35:sl=33:cx=33:mt=1;31:fn=36" ugrep+ -zniao -B200 -A200 --color=always '"$GREP_ARGS"' -e "'"$SEARCH_PATTERN"'" "$file" 2>/dev/null); else matches=$(GREP_COLORS="ln=35:sl=33:cx=33:mt=1;31:fn=36" ugrep+ -znia --color=always '"$GREP_ARGS"' -e "'"$SEARCH_PATTERN"'" "$file" 2>/dev/null); fi; if [ ! -z "$matches" ]; then counter=1; echo "$matches" | while IFS= read -r line; do echo -e "\033[1;32mMatch #$counter \033[1;35m: \033[0m$line"; echo -e "\033[1;37m───────────────────────────────────────────────────────────────────\033[0m"; ((counter++)); done; else echo -e "\033[1;31mNo matches found\033[0m"; fi; else echo -e "\033[1;31mFile not accessible: $file\033[0m"; fi'\
+    --preview-window="up:50%:wrap" \
+    --color 'fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+    --bind "ctrl-l:toggle-preview" \
+    --bind 'home:last,end:first' \
+    --bind="alt-up:preview-page-up" \
+    --bind="alt-down:preview-page-down" \
+    --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
+    --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
+    --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)"
+}
+advancedsearch_respectgitignore_ignorehidden+() {
+    local SEARCH_PATTERN="$1" && shift
+    local GREP_ARGS=$(echo "${@}" | grep -o '\(-w\|--word-regexp\)') # only pass -w flag to ugrep in preview
+    ugrep+ -Rzil --sort --exclude-from=.gitignore --exclude='*.rar' ${@} -e "$SEARCH_PATTERN" 2>/dev/null | \
+    stdbuf -oL sed 's/\([^{]*\){[^}]*}/\1/' | \
+    stdbuf -oL awk '!seen[$0]++' | \
+    stdbuf -oL sed -E $'s/^([^/]+)$/\x1b[32m\\1/' | \
+    stdbuf -oL sed -E $'s/^(.+\\/)/\x1b[34m\\1\x1b[32m/' | \
+    stdbuf -oL sed "s/\//\x1b[33m\/\x1b[34m/g" | \
+    fzf --exact --no-sort --delimiter : --wrap --style=full --ansi \
+    --preview 'echo -e "\033[1;31mPattern :\033[1;31m '$SEARCH_PATTERN'"; file=$(echo {1} | tr -d "\047" | sed "s/\x1b\[[0-9;]*m//g"); file=${file#./}; dir=$(dirname "$file"); base=$(basename "$file"); if [ "$dir" = "." ]; then echo -e "\033[1;31mPath    :\033[1;32m $base"; else echo -e "\033[1;31mPath    :\033[1;34m $(echo "$dir" | sed "s/\//\x1b[1;33m\/\x1b[1;34m/g")\033[1;33m/\033[1;32m$base"; fi; echo -e "\033[1;37m═══════════════════════════════════════════════════════════════════\033[0m"; if [ -f "$file" ]; then if file -b "$file" | grep -q "binary\|executable\|data"; then matches=$(GREP_COLORS="ln=35:sl=33:cx=33:mt=1;31:fn=36" ugrep+ -zniao -B200 -A200 --color=always '"$GREP_ARGS"' -e "'"$SEARCH_PATTERN"'" "$file" 2>/dev/null); else matches=$(GREP_COLORS="ln=35:sl=33:cx=33:mt=1;31:fn=36" ugrep+ -znia --color=always '"$GREP_ARGS"' -e "'"$SEARCH_PATTERN"'" "$file" 2>/dev/null); fi; if [ ! -z "$matches" ]; then counter=1; echo "$matches" | while IFS= read -r line; do echo -e "\033[1;32mMatch #$counter \033[1;35m: \033[0m$line"; echo -e "\033[1;37m───────────────────────────────────────────────────────────────────\033[0m"; ((counter++)); done; else echo -e "\033[1;31mNo matches found\033[0m"; fi; else echo -e "\033[1;31mFile not accessible: $file\033[0m"; fi'\
+    --preview-window="up:50%:wrap" \
+    --color 'fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+    --bind "ctrl-l:toggle-preview" \
+    --bind 'home:last,end:first' \
+    --bind="alt-up:preview-page-up" \
+    --bind="alt-down:preview-page-down" \
+    --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
+    --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
+    --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)"
+}
