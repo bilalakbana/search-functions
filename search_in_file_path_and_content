@@ -23,7 +23,7 @@ ugf() {
         --bind="alt-up:preview-page-up" \
         --bind="alt-down:preview-page-down" \
         --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim '{1}'\")" \
+        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
         --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
         --bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
@@ -56,7 +56,7 @@ ugf+() {
         --bind="alt-up:preview-page-up" \
         --bind="alt-down:preview-page-down" \
         --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim '{1}'\")" \
+        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
         --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
         --bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
@@ -82,7 +82,7 @@ rgf() {
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind "ctrl-r:reload($RG_CMD || rg --files || echo 'No results found')" \
         --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim '{1}'\")" \
+        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
         --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
         --bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
@@ -109,7 +109,7 @@ rgfS() {
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind "ctrl-r:reload($RG_CMD | LC_ALL=C sort -r || echo 'No results found')" \
         --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim '{1}'\")" \
+        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
         --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
         --bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \

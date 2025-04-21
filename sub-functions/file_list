@@ -23,7 +23,7 @@ fzf --exact --no-sort --ansi --style=full --delimiter : \
     --bind "change:reload($reload_cmd | $process_cmd)" \
     --bind "ctrl-r:reload($reload_cmd | $process_cmd)" \
     --bind 'enter:execute-silent(nohup xdg-open {} >/dev/null 2>&1 &)' \
-    --bind="ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {1}\" || tmux new-window -n 'nvim' \"nvim {1} -c /{q} -c 'set hlsearch'\")+abort" \
+    --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")+abort" \
     --bind 'ctrl-e:execute-silent(echo {} | sed "s/{.*}//" | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
     --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
     --bind 'ctrl-l:toggle-preview' \

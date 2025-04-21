@@ -18,7 +18,7 @@ f() {
         --bind="ctrl-r:reload($reload_cmd | $process_cmd)" \
         --bind='ctrl-l:toggle-preview' \
         --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim '{1}'\")" \
+        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
         --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
 		--bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
@@ -50,7 +50,7 @@ fh() {
         --bind="ctrl-r:reload($reload_cmd | $process_cmd)" \
         --bind='ctrl-l:toggle-preview' \
         --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim '{1}'\")" \
+        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
         --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
 		--bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
@@ -81,7 +81,7 @@ fg() {
         --bind="ctrl-r:reload($reload_cmd | $process_cmd)" \
         --bind='ctrl-l:toggle-preview' \
         --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim '{1}'\")" \
+        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
         --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
 		--bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
