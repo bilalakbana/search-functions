@@ -1,35 +1,34 @@
 #!/bin/zsh
 
-# Name this script something like 'file-finder' and place it in your home directory
-# Make it executable with: chmod +x ~/file-finder
-
-fd_cmd=(fd --type f --exclude '*.html' "$@")
+fd_cmd=(fd --type f --no-ignore "$@")
 reload_cmd=$(printf "%q " "${fd_cmd[@]}")
 
-process_cmd='awk '\''{
-    if (/^\.[^/]+\//) print "1\t" $0; # hidden dirs second
-    else if (/\//) print "0\t" $0;    # normal dirs first
-    else print "2\t" $0;              # standalone files last
-}'\'' | LC_ALL=C sort -r -k1,1 -k2 | cut -f2- |
-sed -E '\''s#^(.+)/([^/]+)$#\x1b[34m\1\x1b[33m/\x1b[32m\2\x1b[0m#;
-/^[^/]+$/ s#^(.+)$#\x1b[32m\1\x1b[0m#;
-s#([^m])/#\1\x1b[33m/\x1b[34m#g'\'''
+process_cmd='
+awk -F"/" '\''{
+    if (NF > 1) {
+    dir=substr($0, 1, length($0)-length($NF))
+    gsub("/", "\x1b[33m/\x1b[34m", dir)
+    file=$NF
+    printf "0\t\x1b[34m%s\x1b[32m%s\x1b[0m\n", dir, file
+    } else {
+    printf "2\t\x1b[32m%s\x1b[0m\n", $1
+    }
+}'\'' | LC_ALL=C sort -r -k1,1 -k2 | cut -f2-'
 
 "${fd_cmd[@]}" | eval "$process_cmd" | \
-fzf --exact --no-sort --ansi --style=full --delimiter : \
-    --preview 'batcat --color=always {}' \
-    --preview-window 'hidden' \
-    --color 'fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
-    --bind "change:reload($reload_cmd | $process_cmd)" \
-    --bind "ctrl-r:reload($reload_cmd | $process_cmd)" \
+fzf --exact --no-sort --ansi --style=full --wrap --delimiter=: \
+    --preview='batcat --color=always {}' --preview-window='hidden' \
+    --color='fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+    --bind="ctrl-r:reload($reload_cmd | $process_cmd)" \
+    --bind='ctrl-l:toggle-preview' \
     --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-    --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")+abort" \
+    --bind="ctrl-o:execute-silent(tmux new-window -n 'nvim' zsh -ic \"nvim {1}\")" \
     --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
     --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-    --bind 'ctrl-l:toggle-preview' \
-    --bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")+abort" \
-    --bind "ctrl-u:execute-silent(tmux new-window -n search 'zsh -ic \"show-logs \\\"{}\\\"\"')+abort" \
-    --bind 'home:last,end:first' \
-    --bind="alt-up:preview-page-up" \
-    --bind="alt-down:preview-page-down" \
-    --preview-window="up:50%:wrap"
+    --bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
+    --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
+    --bind="ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
+    --bind='home:last,end:first' \
+    --bind='alt-up:preview-page-up' \
+    --bind='alt-down:preview-page-down' \
+    --preview-window='up:50%:wrap'
