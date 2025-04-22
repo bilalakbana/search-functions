@@ -13,23 +13,23 @@ ugf() {
     UG_CMD="$UG_CMD '${*:-}' ."
 
     FZF_DEFAULT_COMMAND="$UG_CMD" \
-    fzf --ansi --delimiter : --no-sort --style=full --wrap --exact \
+    fzf --ansi --delimiter : --no-sort --style full --wrap --exact \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline:reverse,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --preview 'batcat --color=always {1} --highlight-line {2}' \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind "ctrl-r:reload:$UG_CMD || echo 'No results found'" \
         --bind "ctrl-l:toggle-preview" \
         --bind 'home:last,end:first' \
-        --bind="alt-up:preview-page-up" \
-        --bind="alt-down:preview-page-down" \
+        --bind "alt-up:preview-page-up" \
+        --bind "alt-down:preview-page-down" \
         --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
+        --bind "ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
         --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-        --bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
-        --bind="ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
-        --bind="ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
-        --bind="ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')"
+        --bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
+        --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
+        --bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
+        --bind "ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')"
 }
 ugf+() {
     local GITIGNORE_OPT=""
@@ -46,23 +46,23 @@ ugf+() {
     UG_CMD="$UG_CMD '${*:-}' ."
 
     FZF_DEFAULT_COMMAND="$UG_CMD" \
-    fzf --ansi --delimiter : --no-sort --style=full --wrap --exact \
+    fzf --ansi --delimiter : --no-sort --style full --wrap --exact \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline:reverse,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --preview 'batcat --color=always {1} --highlight-line {2}' \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind "ctrl-r:reload:$UG_CMD || echo 'No results found'" \
         --bind "ctrl-l:toggle-preview" \
         --bind 'home:last,end:first' \
-        --bind="alt-up:preview-page-up" \
-        --bind="alt-down:preview-page-down" \
+        --bind "alt-up:preview-page-up" \
+        --bind "alt-down:preview-page-down" \
         --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
+        --bind "ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
         --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-        --bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
-        --bind="ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
-        --bind="ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
-        --bind="ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')"
+        --bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
+        --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
+        --bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
+        --bind "ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')"
 }
 rgf() {
     local RG_CMD="rg --color=always --line-number --no-heading"
@@ -75,20 +75,20 @@ rgf() {
     RG_CMD+=" '${*:-}'"
 
     eval "$RG_CMD" | \
-    fzf --ansi --exact --style=full --wrap \
+    fzf --ansi --exact --style full --wrap \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline:reverse,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --delimiter : \
         --preview 'batcat --color=always {1} --highlight-line {2}' \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind "ctrl-r:reload($RG_CMD || rg --files || echo 'No results found')" \
         --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
+        --bind "ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
         --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-        --bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
-        --bind="ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
-        --bind="ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
-        --bind="ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
+        --bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
+        --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
+        --bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
+        --bind "ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
         --bind "ctrl-l:toggle-preview"
 }
 rgfS() {
@@ -102,19 +102,19 @@ rgfS() {
     RG_CMD+=" '${*:-}'"
 
     eval "$RG_CMD" | LC_ALL=C sort -r | \
-    fzf --ansi --exact --no-sort --style=full --wrap \
+    fzf --ansi --exact --no-sort --style full --wrap \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline:reverse,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --delimiter : \
         --preview 'batcat --color=always {1} --highlight-line {2}' \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind "ctrl-r:reload($RG_CMD | LC_ALL=C sort -r || echo 'No results found')" \
         --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
+        --bind "ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
         --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-        --bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
-        --bind="ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
-        --bind="ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
-        --bind="ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
+        --bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
+        --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
+        --bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
+        --bind "ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
         --bind "ctrl-l:toggle-preview"
 }

@@ -16,19 +16,18 @@ awk -F"/" '\''{
 }'\'' | LC_ALL=C sort -r -k1,1 -k2 | cut -f2-'
 
 "${fd_cmd[@]}" | eval "$process_cmd" | \
-fzf --exact --no-sort --ansi --style=full --wrap --delimiter=: \
-    --preview='batcat --color=always {}' --preview-window='hidden' \
-    --color='fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
-    --bind="ctrl-r:reload($reload_cmd | $process_cmd)" \
-    --bind='ctrl-l:toggle-preview' \
-    --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-    --bind="ctrl-o:execute-silent(tmux new-window -n 'nvim' zsh -ic \"nvim {1}\")" \
-    --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
+fzf --exact --no-sort --ansi --style full --wrap --delimiter : \
+    --preview 'batcat --color always {}' --preview-window 'hidden' \
+    --color 'fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+    --bind "ctrl-r:reload($reload_cmd | $process_cmd)" \
+    --bind 'ctrl-l:toggle-preview' \
+    --bind "enter:execute-silent(nohup xdg-open {1})+abort" \
+    --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim' zsh -ic \"nvim {1}\")+abort" \
+    --bind "ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%")+abort" \
     --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-    --bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
-    --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
-    --bind="ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
-    --bind='home:last,end:first' \
-    --bind='alt-up:preview-page-up' \
-    --bind='alt-down:preview-page-down' \
+	--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")+abort" \
+	--bind "ctrl-u:execute-silent(tmux new-window -n search 'zsh -ic \"show-logs \\\"{1}\\\"\"')+abort" \
+    --bind 'home:last,end:first' \
+    --bind 'alt-up:preview-page-up' \
+    --bind 'alt-down:preview-page-down' \
     --preview-window='up:50%:wrap'

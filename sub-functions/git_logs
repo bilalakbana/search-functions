@@ -32,11 +32,11 @@ gfzf() {
         fzf --exact --ansi --no-sort --wrap --layout=reverse --tiebreak=index \
             --preview="f() { set -- \$(echo -- \$@ | rg -o '\b[a-f0-9]{7,}\b'); [ \$# -eq 0 ] || git show --color=always \$1 $filter | delta --line-numbers; }; f {}" \
             --color 'fg:252,fg+:252,bg:234,bg+:235,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
-            --bind="ctrl-j:preview-down,ctrl-k:preview-up,ctrl-f:preview-page-down,ctrl-b:preview-page-up" \
-            --bind="ctrl-m:execute:(rg -o '\b[a-f0-9]{7,}\b' | head -1 | xargs -I % -- git show --color=always %) <<< {}" \
-            --bind="ctrl-v:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); [[ -n \$TMUX ]] && tmux display -d0 \"\$(git branch --contains \$1 | sed 's/^\\*\\?\\s\\+//' | LC_ALL=C sort | paste -sd, - | sed -e 's/,/, /g' -e 's/^/#[bg=blue,italics] Branches #[none,fg=black,bg=default] /')\"; }; f)" \
-            --bind="ctrl-g:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); SUMMARY=\$(git show --format='%s' \$1 | head -1); [[ -n \$TMUX ]] && tmux display -d0 \"\$(git log --all --format='%H' -F --grep=\"\$SUMMARY\" | xargs -I{} -- git branch --contains {} | sed 's/^\\*\\?\\s\\+//' | LC_ALL=C sort | uniq | paste -sd, - | sed -e 's/,/, /g' -e 's/^/#[bg=blue,italics] Branches (Grep) #[none,fg=black,bg=default] /')\"; }; f)" \
-            --bind="ctrl-y:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); printf '%s' \$1 | clipboard; [[ -n \$TMUX ]] && tmux display \"#[bg=blue,italics] Yanked #[none,fg=black,bg=default] \$1\"; }; f)" \
-            --bind="ctrl-s:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); SUMMARY=\$(git show --format='%s' \$1 | head -1); printf '%s' \"\$SUMMARY\" | clipboard; [[ -n \$TMUX ]] && tmux display \"#[bg=blue,italics] Yanked #[none,fg=black,bg=default] \$SUMMARY\"; }; f)" \
-            --preview-window=up:40%:wrap
+            --bind "ctrl-j:preview-down,ctrl-k:preview-up,ctrl-f:preview-page-down,ctrl-b:preview-page-up" \
+            --bind "ctrl-m:execute:(rg -o '\b[a-f0-9]{7,}\b' | head -1 | xargs -I % -- git show --color=always %) <<< {}" \
+            --bind "ctrl-v:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); [[ -n \$TMUX ]] && tmux display -d0 \"\$(git branch --contains \$1 | sed 's/^\\*\\?\\s\\+//' | LC_ALL=C sort | paste -sd, - | sed -e 's/,/, /g' -e 's/^/#[bg=blue,italics] Branches #[none,fg=black,bg=default] /')\"; }; f)" \
+            --bind "ctrl-g:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); SUMMARY=\$(git show --format='%s' \$1 | head -1); [[ -n \$TMUX ]] && tmux display -d0 \"\$(git log --all --format='%H' -F --grep=\"\$SUMMARY\" | xargs -I{} -- git branch --contains {} | sed 's/^\\*\\?\\s\\+//' | LC_ALL=C sort | uniq | paste -sd, - | sed -e 's/,/, /g' -e 's/^/#[bg=blue,italics] Branches (Grep) #[none,fg=black,bg=default] /')\"; }; f)" \
+            --bind "ctrl-y:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); printf '%s' \$1 | clipboard; [[ -n \$TMUX ]] && tmux display \"#[bg=blue,italics] Yanked #[none,fg=black,bg=default] \$1\"; }; f)" \
+            --bind "ctrl-s:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); SUMMARY=\$(git show --format='%s' \$1 | head -1); printf '%s' \"\$SUMMARY\" | clipboard; [[ -n \$TMUX ]] && tmux display \"#[bg=blue,italics] Yanked #[none,fg=black,bg=default] \$SUMMARY\"; }; f)" \
+            --preview-window up:40%:wrap
 }
