@@ -32,7 +32,7 @@ fzf --ansi \
     --bind='home:first,end:last' \
     --bind="ctrl-l:toggle-preview" \
     --bind="enter:execute-silent(nohup xdg-open \"$FILE\" >/dev/null 2>&1 &)" \
-    --bind="ctrl-c:execute-silent(echo -n {2..} | wl-copy)" \
+    --bind="ctrl-c:execute-silent(echo -n \"$FILE\" | wl-copy)" \
     --bind="ctrl-o:execute-silent(tmux new-window -n \"$FILE\" \"nvim '$FILE'\")" \
     --bind="ctrl-e:execute-silent(nohup dolphin --select \"$FILE\" >/dev/null 2>&1 &)" \
     --bind="ctrl-t:execute-silent(tmux new-window -n search '~/.SearchFunctions/sub-functions/search_in_single_file \"$FILE\"')" \
