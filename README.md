@@ -103,7 +103,14 @@ cargo install ripgrep-all  # if using Rust
 ```bash
 mkdir ~/.SearchFunctions
 ```
-3. Then add those to your shell for example ~/.zshrc
+
+3. Following extraction files to the directory in step 2, make the followings executable
+```bash
+chmod +x ~/.SearchFunctions/sub-functions/file_list
+chmod +x ~/.SearchFunctions/sub-functions/search_in_single_file
+```
+
+4. Then add those to your shell for example ~/.zshrc
 ```bash
 source ~/.SearchFunctions/advancedsearch                  # advancedsearch | advancedsearch_respect_gitignore
 source ~/.SearchFunctions/advancedsearch+                 # advancedsearch+ | advancedsearch_respect_gitignore+
