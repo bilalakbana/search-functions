@@ -2,20 +2,17 @@ f() {
     fd_cmd=(fd --type f --no-ignore "$@")
     reload_cmd=$(printf "%q " "${fd_cmd[@]}")
 
-    process_cmd='awk '\''BEGIN { FS = "/" }
-    {
-        if (NF > 1) {
-            # Directory paths
-            printf("0\t");
-            for (i = 1; i < NF; i++) {
-                printf("\x1b[34m%s\x1b[33m/\x1b[34m", $i);
-            }
-            printf("\x1b[32m%s\x1b[0m\n", $NF);
-        } else {
-            # Standalone files
-            printf("2\t\x1b[32m%s\x1b[0m\n", $1);
-        }
-    }'\'' | LC_ALL=C sort -r -k1,1 -k2 | cut -f2-'
+	process_cmd='
+	awk -F"/" '\''{
+	  if (NF > 1) {
+		dir=substr($0, 1, length($0)-length($NF))
+		gsub("/", "\x1b[33m/\x1b[34m", dir)
+		file=$NF
+		printf "0\t\x1b[34m%s\x1b[32m%s\x1b[0m\n", dir, file
+	  } else {
+		printf "2\t\x1b[32m%s\x1b[0m\n", $1
+	  }
+	}'\'' | LC_ALL=C sort -r -k1,1 -k2 | cut -f2-'
 
     "${fd_cmd[@]}" | eval "$process_cmd" | \
     fzf --exact --no-sort --ansi --style=full --wrap --delimiter=: \
@@ -25,7 +22,7 @@ f() {
         --bind="ctrl-r:reload($reload_cmd | $process_cmd)" \
         --bind='ctrl-l:toggle-preview' \
         --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
+        --bind="ctrl-o:execute-silent(tmux new-window -n 'nvim' zsh -ic \"nvim {1}\")" \
         --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
 		--bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
@@ -40,20 +37,17 @@ fh() {
     fd_cmd=(fd --type f --no-ignore --hidden "$@")
     reload_cmd=$(printf "%q " "${fd_cmd[@]}")
 
-    process_cmd='awk '\''BEGIN { FS = "/" }
-    {
-        if (NF > 1) {
-            # Directory paths
-            printf("0\t");
-            for (i = 1; i < NF; i++) {
-                printf("\x1b[34m%s\x1b[33m/\x1b[34m", $i);
-            }
-            printf("\x1b[32m%s\x1b[0m\n", $NF);
-        } else {
-            # Standalone files
-            printf("2\t\x1b[32m%s\x1b[0m\n", $1);
-        }
-    }'\'' | LC_ALL=C sort -r -k1,1 -k2 | cut -f2-'
+	process_cmd='
+	awk -F"/" '\''{
+	  if (NF > 1) {
+		dir=substr($0, 1, length($0)-length($NF))
+		gsub("/", "\x1b[33m/\x1b[34m", dir)
+		file=$NF
+		printf "0\t\x1b[34m%s\x1b[32m%s\x1b[0m\n", dir, file
+	  } else {
+		printf "2\t\x1b[32m%s\x1b[0m\n", $1
+	  }
+	}'\'' | LC_ALL=C sort -r -k1,1 -k2 | cut -f2-'
 
     "${fd_cmd[@]}" | eval "$process_cmd" | \
     fzf --exact --no-sort --ansi --style=full --wrap --delimiter=: \
@@ -63,7 +57,7 @@ fh() {
         --bind="ctrl-r:reload($reload_cmd | $process_cmd)" \
         --bind='ctrl-l:toggle-preview' \
         --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
+        --bind="ctrl-o:execute-silent(tmux new-window -n 'nvim' zsh -ic \"nvim {1}\")" \
         --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
 		--bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
@@ -78,20 +72,17 @@ fg() {
     fd_cmd=(fd --type f "$@")
     reload_cmd=$(printf "%q " "${fd_cmd[@]}")
 
-    process_cmd='awk '\''BEGIN { FS = "/" }
-    {
-        if (NF > 1) {
-            # Directory paths
-            printf("0\t");
-            for (i = 1; i < NF; i++) {
-                printf("\x1b[34m%s\x1b[33m/\x1b[34m", $i);
-            }
-            printf("\x1b[32m%s\x1b[0m\n", $NF);
-        } else {
-            # Standalone files
-            printf("2\t\x1b[32m%s\x1b[0m\n", $1);
-        }
-    }'\'' | LC_ALL=C sort -r -k1,1 -k2 | cut -f2-'
+	process_cmd='
+	awk -F"/" '\''{
+	  if (NF > 1) {
+		dir=substr($0, 1, length($0)-length($NF))
+		gsub("/", "\x1b[33m/\x1b[34m", dir)
+		file=$NF
+		printf "0\t\x1b[34m%s\x1b[32m%s\x1b[0m\n", dir, file
+	  } else {
+		printf "2\t\x1b[32m%s\x1b[0m\n", $1
+	  }
+	}'\'' | LC_ALL=C sort -r -k1,1 -k2 | cut -f2-'
 
     "${fd_cmd[@]}" | eval "$process_cmd" | \
     fzf --exact --no-sort --ansi --style=full --wrap --delimiter=: \
@@ -101,7 +92,7 @@ fg() {
         --bind="ctrl-r:reload($reload_cmd | $process_cmd)" \
         --bind='ctrl-l:toggle-preview' \
         --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-        --bind="ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
+        --bind="ctrl-o:execute-silent(tmux new-window -n 'nvim' zsh -ic \"nvim {1}\")" \
         --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
 		--bind="ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
