@@ -1,0 +1,25 @@
+#!/bin/zsh
+
+fd_cmd=(fd --type d --no-ignore "$@")
+reload_cmd=$(printf "%q " "${fd_cmd[@]}")
+
+process_cmd='
+awk '\''{
+    dir=$0
+    gsub("/", "\x1b[33m/\x1b[34m", dir)
+    level=gsub("/", "/", $0)
+    printf "%d\t\x1b[34m%s\x1b[0m\n", level, dir
+}'\'' | LC_ALL=C sort -n | cut -f2-'
+
+"${fd_cmd[@]}" | eval "$process_cmd" | \
+fzf --exact --ansi --style full --wrap \
+    --preview 'ls --color=always {}' \
+    --color 'fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+    --bind "ctrl-r:reload($reload_cmd | $process_cmd)" \
+    --bind "enter:execute(tmux new-window -n 'search' 'cd \"{}\" && zsh -ic rgf')+abort" \
+    --bind "ctrl-e:execute-silent(echo {} | xargs -I % nohup dolphin --select "%")+abort" \
+    --bind 'ctrl-l:toggle-preview' \
+    --bind 'home:last,end:first' \
+    --bind 'alt-up:preview-page-up' \
+    --bind 'alt-down:preview-page-down' \
+    --preview-window='right:30%:wrap'
