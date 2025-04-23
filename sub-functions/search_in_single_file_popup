@@ -31,14 +31,12 @@ fzf --ansi \
     --bind "alt-down:preview-page-down" \
     --bind 'home:first,end:last' \
     --bind "ctrl-l:toggle-preview" \
-    --bind "enter:execute-silent(nohup xdg-open \"$FILE\")" \
+    --bind "enter:execute-silent(nohup xdg-open \"$FILE\")+abort" \
     --bind "ctrl-c:execute-silent(echo -n \"$FILE\" | wl-copy)" \
-    --bind "ctrl-o:execute-silent(tmux new-window -n \"$FILE\" \"nvim '$FILE'\")" \
-    --bind "ctrl-e:execute-silent(nohup dolphin --select \"$FILE\")" \
-    --bind "ctrl-t:execute-silent(tmux new-window -n search '~/.SearchFunctions/sub-functions/search_in_single_file \"$FILE\"')" \
-    --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs \\\"$FILE\\\"\"')" \
-    --bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/search_in_single_file_popup \"$FILE\"')" \
-    --bind "ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
+    --bind "ctrl-o:execute-silent(tmux new-window -n \"$FILE\" \"nvim '$FILE'\")+abort" \
+    --bind "ctrl-e:execute-silent(nohup dolphin --select \"$FILE\")+abort" \
+    --bind "ctrl-t:execute-silent(tmux new-window -n search '~/.SearchFunctions/sub-functions/search_in_single_file \"$FILE\"')+abort" \
+    --bind "ctrl-u:execute-silent(tmux new-window -n search 'zsh -ic \"show-logs \\\"$FILE\\\"\"')+abort" \
     --bind "change:reload(
         query={q}
         if [ -n \"\$query\" ]; then

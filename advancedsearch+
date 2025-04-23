@@ -36,7 +36,7 @@ advancedsearch_respectgitignore_ignorehidden+() {
     --bind 'home:last,end:first' \
     --bind "alt-up:preview-page-up" \
     --bind "alt-down:preview-page-down" \
-    --bind 'enter:execute-silent(nohup xdg-open {1} >/dev/null 2>&1 &)' \
-    --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%" >/dev/null 2>&1 &)' \
+    --bind 'enter:execute-silent(nohup xdg-open {1})' \
+    --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%")' \
     --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)"
 }

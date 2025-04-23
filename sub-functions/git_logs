@@ -29,8 +29,8 @@ gfzf() {
     git log \
         --graph --color=always --abbrev=7 --glob="refs/heads/*" \
         --format=format:"%C(bold blue)%h%C(reset) %C(dim white)%an%C(reset)%C(bold yellow)%d%C(reset) %C(white)%s%C(reset) %C(bold green)(%ar)%C(reset)" "$@" | \
-        fzf --exact --ansi --no-sort --wrap --layout=reverse --tiebreak=index \
-            --preview="f() { set -- \$(echo -- \$@ | rg -o '\b[a-f0-9]{7,}\b'); [ \$# -eq 0 ] || git show --color=always \$1 $filter | delta --line-numbers; }; f {}" \
+        fzf --exact --ansi --no-sort --wrap --layout reverse --tiebreak index \
+            --preview "f() { set -- \$(echo -- \$@ | rg -o '\b[a-f0-9]{7,}\b'); [ \$# -eq 0 ] || git show --color=always \$1 $filter | delta --line-numbers; }; f {}" \
             --color 'fg:252,fg+:252,bg:234,bg+:235,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
             --bind "ctrl-j:preview-down,ctrl-k:preview-up,ctrl-f:preview-page-down,ctrl-b:preview-page-up" \
             --bind "ctrl-m:execute:(rg -o '\b[a-f0-9]{7,}\b' | head -1 | xargs -I % -- git show --color=always %) <<< {}" \
