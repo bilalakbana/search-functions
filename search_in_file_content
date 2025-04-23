@@ -21,13 +21,13 @@ ugrep-fzf() {
         --bind 'home:last,end:first' \
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
-        --bind 'enter:execute-silent(nohup xdg-open {1})' \
-        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {1}\" || tmux new-window -n 'nvim' \"nvim {1} -c /{q} -c 'set hlsearch'\")" \
-        --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%")' \
-        --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1} {q}\")" \
-		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
-		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file_popup {1} {q}\")" \
+        --bind 'enter:execute-silent(nohup xdg-open {})' \
+        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {}\" || tmux new-window -n 'nvim' \"nvim {} -c /{q} -c 'set hlsearch'\")" \
+        --bind 'ctrl-e:execute-silent(echo {} | xargs -I % nohup dolphin --select "%")' \
+        --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {} {q}\")" \
+		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {}\"')" \
+		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file_popup {} {q}\")" \
 		--bind "ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
         --preview-window "up:70%:wrap"
 }
@@ -54,13 +54,13 @@ ugrep+fzf() {
         --bind 'home:last,end:first' \
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
-        --bind 'enter:execute-silent(nohup xdg-open {1})' \
-        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {1}\" || tmux new-window -n 'nvim' \"nvim {1} -c /{q} -c 'set hlsearch'\")" \
-        --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%")' \
-        --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1} {q}\")" \
-		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
-		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file_popup {1} {q}\")" \
+        --bind 'enter:execute-silent(nohup xdg-open {})' \
+        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {}\" || tmux new-window -n 'nvim' \"nvim {} -c /{q} -c 'set hlsearch'\")" \
+        --bind 'ctrl-e:execute-silent(echo {} | xargs -I % nohup dolphin --select "%")' \
+        --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {} {q}\")" \
+		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {}\"')" \
+		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file_popup {} {q}\")" \
 		--bind "ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
         --preview-window "up:70%:wrap"
 }
@@ -87,13 +87,13 @@ rga-fzf() {
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
         --bind "ctrl-l:toggle-preview" \
-        --bind 'enter:execute-silent(nohup xdg-open {1})' \
-        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {1}\" || tmux new-window -n 'nvim' \"nvim {1} -c /{q} -c 'set hlsearch'\")" \
-        --bind 'ctrl-e:execute-silent(echo {1} | xargs -I % nohup dolphin --select "%")' \
-        --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1} {q}\")" \
-		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
-		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file_popup {1} {q}\")" \
+        --bind 'enter:execute-silent(nohup xdg-open {})' \
+        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {}\" || tmux new-window -n 'nvim' \"nvim {} -c /{q} -c 'set hlsearch'\")" \
+        --bind 'ctrl-e:execute-silent(echo {} | xargs -I % nohup dolphin --select "%")' \
+        --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {} {q}\")" \
+		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {}\"')" \
+		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file_popup {} {q}\")" \
 		--bind "ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
         --preview-window "up:70%:wrap"
 }
