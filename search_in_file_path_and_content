@@ -29,9 +29,9 @@ ugf() {
         --bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
         --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
         --bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file_popup {1}\")" \
-        --bind "alt-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/folder_list_ugf')" \
+        --bind "alt-g:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/folder_list_ugf')" \
         --bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/git_log_file {}\")" \
-        --bind "ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')"
+        --bind "ctrl-g:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')"
 }
 ugf+() {
     local GITIGNORE_OPT=""
@@ -64,9 +64,9 @@ ugf+() {
         --bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
         --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
         --bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file_popup {1}\")" \
-        --bind "alt-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/folder_list_ugf+')" \
+        --bind "alt-g:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/folder_list_ugf+')" \
         --bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/git_log_file {}\")" \
-        --bind "ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')"
+        --bind "ctrl-g:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')"
 }
 rgf() {
     local RG_CMD="rg --color=always --line-number --no-heading"
@@ -92,9 +92,9 @@ rgf() {
         --bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
         --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
         --bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file_popup {1}\")" \
-        --bind "alt-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/folder_list_rgf')" \
+        --bind "alt-g:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/folder_list_rgf')" \
         --bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/git_log_file {}\")" \
-        --bind "ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
+        --bind "ctrl-g:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
         --bind "ctrl-l:toggle-preview"
 }
 rgfS() {
@@ -121,8 +121,8 @@ rgfS() {
         --bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
         --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
         --bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file {1}_popup\")" \
-        --bind "alt-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/folder_list_rgfS')" \
+        --bind "alt-g:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/folder_list_rgfS')" \
         --bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/git_log_file {}\")" \
-        --bind "ctrl-i:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
+        --bind "ctrl-g:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
         --bind "ctrl-l:toggle-preview"
 }
