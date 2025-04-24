@@ -19,6 +19,14 @@ void extract_exec(char *line, char *out) {
     sscanf(p, "%s", out); // read the first word (executable)
 }
 
+// Check if a given Flatpak app ID is installed
+int is_flatpak_installed(const char *app_id) {
+    char command[256];
+    snprintf(command, sizeof(command), "flatpak list --app --columns=application | grep -Fxq \"%s\"", app_id);
+    int result = system(command);
+    return result == 0;
+}
+
 int main(int argc, char *argv[]) {
     if (argc != 2) {
         fprintf(stderr, "Usage: %s /path/to/file\n", argv[0]);
@@ -26,7 +34,7 @@ int main(int argc, char *argv[]) {
     }
 
     char *filepath = argv[1];
-    char *desktop_file = NULL;
+
     FILE *fp = popen("xdg-mime query default inode/directory", "r");
     if (!fp) {
         perror("popen failed");
@@ -40,26 +48,29 @@ int main(int argc, char *argv[]) {
         return 1;
     }
     pclose(fp);
+    desktop_name[strcspn(desktop_name, "\n")] = 0; // trim newline
 
-    // remove newline
-    desktop_name[strcspn(desktop_name, "\n")] = 0;
-
-    char path[512];
-    snprintf(path, sizeof(path), "/usr/share/applications/%s", desktop_name);
-    FILE *df = fopen(path, "r");
+    // Check both global and user application dirs
+    char desktop_path[512];
+    snprintf(desktop_path, sizeof(desktop_path), "/usr/share/applications/%s", desktop_name);
+    FILE *df = fopen(desktop_path, "r");
 
     if (!df) {
-        snprintf(path, sizeof(path), "%s/.local/share/applications/%s", getenv("HOME"), desktop_name);
-        df = fopen(path, "r");
+        snprintf(desktop_path, sizeof(desktop_path), "%s/.local/share/applications/%s", getenv("HOME"), desktop_name);
+        df = fopen(desktop_path, "r");
         if (!df) {
-            fprintf(stderr, "Could not find .desktop file\n");
+            fprintf(stderr, "Could not find .desktop file: %s\n", desktop_name);
             return 1;
         }
     }
 
-    char line[MAX_LINE], exec_cmd[256] = "";
+    char line[MAX_LINE];
+    char exec_cmd[256] = "";
+    char full_exec_line[512] = "";
+
     while (fgets(line, sizeof(line), df)) {
         if (strncasecmp(line, "Exec=", 5) == 0) {
+            strncpy(full_exec_line, line + 5, sizeof(full_exec_line) - 1);
             extract_exec(line, exec_cmd);
             break;
         }
@@ -71,21 +82,44 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    // Handle flatpak case
     char command[MAX_CMD];
+    char *dir = strdup(filepath);
+
+    if (strcmp(exec_cmd, "flatpak") == 0 && strstr(full_exec_line, "run")) {
+        // Try to extract the Flatpak app ID (2nd token in the Exec line)
+        char *run_ptr = strstr(full_exec_line, "run ");
+        if (run_ptr) {
+            char app_id[256];
+            sscanf(run_ptr + 4, "%255s", app_id); // read after "run "
+
+            if (is_flatpak_installed(app_id)) {
+                if (strstr(app_id, "dolphin")) {
+                    snprintf(command, sizeof(command), "nohup flatpak run %s --select \"%s\" &>/dev/null &", app_id, filepath);
+                } else if (strstr(app_id, "nemo")) {
+                    snprintf(command, sizeof(command), "nohup flatpak run %s \"%s\" &>/dev/null &", app_id, filepath);
+                } else {
+                    snprintf(command, sizeof(command), "nohup flatpak run %s \"%s\" &>/dev/null &", app_id, dirname(dir));
+                }
+                free(dir);
+                system(command);
+                return 0;
+            }
+        }
+    }
+
+    // Handle regular installed file managers
     if (strcmp(exec_cmd, "dolphin") == 0) {
         snprintf(command, sizeof(command), "nohup dolphin --select \"%s\" &>/dev/null &", filepath);
     } else if (strcmp(exec_cmd, "nemo") == 0) {
         snprintf(command, sizeof(command), "nohup nemo \"%s\" &>/dev/null &", filepath);
     } else if (strcmp(exec_cmd, "nautilus") == 0 || strcmp(exec_cmd, "thunar") == 0 || strcmp(exec_cmd, "pcmanfm") == 0) {
-        char *dir = strdup(filepath);
         snprintf(command, sizeof(command), "nohup %s \"%s\" &>/dev/null &", exec_cmd, dirname(dir));
-        free(dir);
     } else {
-        char *dir = strdup(filepath);
         snprintf(command, sizeof(command), "nohup xdg-open \"%s\" &>/dev/null &", dirname(dir));
-        free(dir);
     }
 
+    free(dir);
     system(command);
     return 0;
 }
