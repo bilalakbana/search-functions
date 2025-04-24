@@ -23,7 +23,7 @@ f() {
         --bind 'ctrl-l:toggle-preview' \
         --bind 'enter:execute-silent(nohup xdg-open {})' \
         --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim' zsh -ic \"nvim {}\")" \
-        --bind 'ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})' \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {}\")" \
 		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {}\"')" \
@@ -60,7 +60,7 @@ fh() {
         --bind 'ctrl-l:toggle-preview' \
         --bind 'enter:execute-silent(nohup xdg-open {})' \
         --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim' zsh -ic \"nvim {}\")" \
-        --bind 'ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})' \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {}\")" \
 		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {}\"')" \
@@ -97,7 +97,7 @@ fg() {
         --bind 'ctrl-l:toggle-preview' \
         --bind 'enter:execute-silent(nohup xdg-open {})' \
         --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim' zsh -ic \"nvim {}\")" \
-        --bind 'ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})' \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {}\")" \
 		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {}\"')" \

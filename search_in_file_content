@@ -23,7 +23,7 @@ ugrep-fzf() {
         --bind "alt-down:preview-page-down" \
         --bind 'enter:execute-silent(nohup xdg-open {})' \
         --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {}\" || tmux new-window -n 'nvim' \"nvim {} -c /{q} -c 'set hlsearch'\")" \
-        --bind 'ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})' \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {} {q}\")" \
 		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {}\"')" \
@@ -58,7 +58,7 @@ ugrep+fzf() {
         --bind "alt-down:preview-page-down" \
         --bind 'enter:execute-silent(nohup xdg-open {})' \
         --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {}\" || tmux new-window -n 'nvim' \"nvim {} -c /{q} -c 'set hlsearch'\")" \
-        --bind 'ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})' \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {} {q}\")" \
 		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {}\"')" \
@@ -93,7 +93,7 @@ rga-fzf() {
         --bind "ctrl-l:toggle-preview" \
         --bind 'enter:execute-silent(nohup xdg-open {})' \
         --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {}\" || tmux new-window -n 'nvim' \"nvim {} -c /{q} -c 'set hlsearch'\")" \
-        --bind 'ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})' \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {} {q}\")" \
 		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {}\"')" \

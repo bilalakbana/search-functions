@@ -17,7 +17,7 @@ detailedsearch() {
     --bind "alt-up:preview-page-up" \
     --bind "alt-down:preview-page-down" \
     --bind 'enter:execute-silent(nohup xdg-open {1})' \
-    --bind 'ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})' \
+    --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
     --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)"
 }
 detailedsearch_respectgitignore_ignorehidden() {
@@ -41,6 +41,6 @@ detailedsearch_respectgitignore_ignorehidden() {
     --bind "alt-up:preview-page-up" \
     --bind "alt-down:preview-page-down" \
     --bind 'enter:execute-silent(nohup xdg-open {1})' \
-    --bind 'ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})' \
+    --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
     --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)"
 }

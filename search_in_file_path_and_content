@@ -24,7 +24,7 @@ ugf() {
         --bind "alt-down:preview-page-down" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
         --bind "ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
-        --bind 'ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})' \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
         --bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
         --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
@@ -59,7 +59,7 @@ ugf+() {
         --bind "alt-down:preview-page-down" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
         --bind "ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
-        --bind 'ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})' \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
         --bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
         --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
@@ -87,7 +87,7 @@ rgf() {
         --bind "ctrl-r:reload($RG_CMD || rg --files || echo 'No results found')" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
         --bind "ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
-        --bind 'ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})' \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
         --bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
         --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
@@ -116,7 +116,7 @@ rgfS() {
         --bind "ctrl-r:reload($RG_CMD | LC_ALL=C sort -r || echo 'No results found')" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
         --bind "ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
-        --bind 'ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})' \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
         --bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {1}\")" \
         --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {1}\"')" \
