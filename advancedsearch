@@ -42,3 +42,7 @@ advancedsearch_respectgitignore_ignorehidden() {
     --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
     --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)"
 }
+# Following flags can be added here since ugrep (without plus) itself cannot view content of this file types but can still search in embedded scripts
+# If user is not interested in embedded texts of those file types can add those the main ugrep commands. _plus functions can process content of thos file types
+#--exclude='*.pdf' --exclude='*.docx' --exclude='*.odt' --exclude='*.epub' \
+# --exclude='*.jpg' --exclude='*.jpeg' --exclude='*.png' --exclude='*.gif' --exclude='*.bmp' --exclude='*.tiff'
