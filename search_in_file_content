@@ -33,7 +33,7 @@ ugrep-fzf() {
 		--bind "ctrl-j:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
         --preview-window "up:70%:wrap"
 }
-ugrep-fzf_plus() {
+ugrep-fzf-plus() {
     local GITIGNORE_OPT=""
     [[ -f .gitignore ]] && GITIGNORE_OPT="--exclude-from=.gitignore"
     local UG_PREFIX="ugrep+ -RU --sort=rname --files-with-matches --smart-case --ignore-binary $GITIGNORE_OPT"

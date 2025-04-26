@@ -33,7 +33,7 @@ ugf() {
         --bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/git_log_file {}\")" \
         --bind "ctrl-j:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')"
 }
-ugf_plus() {
+ugf-plus() {
     local GITIGNORE_OPT=""
     [[ -f .gitignore ]] && GITIGNORE_OPT="--exclude-from=.gitignore"
 
