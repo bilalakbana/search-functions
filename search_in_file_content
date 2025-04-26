@@ -33,7 +33,7 @@ ugrep-fzf() {
 		--bind "ctrl-j:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
         --preview-window "up:70%:wrap"
 }
-ugrep+fzf() {
+ugrep-fzf_plus() {
     local GITIGNORE_OPT=""
     [[ -f .gitignore ]] && GITIGNORE_OPT="--exclude-from=.gitignore"
     local UG_PREFIX="ugrep+ -RU --sort=rname --files-with-matches --smart-case --ignore-binary $GITIGNORE_OPT"
@@ -63,7 +63,7 @@ ugrep+fzf() {
 		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {} {q}\")" \
 		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {}\"')" \
 		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file_popup {} {q}\")" \
-		--bind "alt-j:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/folder_list_ugrep+')" \
+		--bind "alt-j:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/folder_list_ugrep_plus')" \
 		--bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/git_log_file {}\")" \
 		--bind "ctrl-j:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
         --preview-window "up:70%:wrap"
