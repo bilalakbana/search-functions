@@ -15,6 +15,8 @@ ugrep-fzf() {
         --preview 'printf "\033[31mFile Path :\033[0m " && echo {} | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g";if [[ ! -z {q} ]]; then printf "\033[31mMatches   :\033[31m ";ugrep -o --smart-case -U -- {q} {} 2>/dev/null | wc -l;echo;GREP_COLORS="ln=32:sl=35:cx=35:mt=1;31:fn=32" ugrep --smart-case -U --color=always -n -C 8 -- {q} {} | tr -d "\r";else printf "\033[31mMatches   :\033[31m \n\n";ugrep -U --color=always -n --colors=line=32,sl=35,ms=35,mc=35 "" {} | tr -d "\r";fi' \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --phony -q "$1" \
+        --border top \
+        --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --bind "change:reload:$UG_PREFIX {q} . | $COLOR_AND_SORT || true" \
         --bind "ctrl-r:reload:$UG_PREFIX {q} . | $COLOR_AND_SORT || true" \
         --bind "ctrl-l:toggle-preview" \
@@ -50,6 +52,8 @@ ugrep-fzf-plus() {
         --preview 'printf "\033[31mFile Path :\033[0m " && echo {} | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g";if [[ ! -z {q} ]]; then printf "\033[31mMatches   :\033[31m ";ugrep+ -o --smart-case -U -- {q} {} 2>/dev/null | wc -l;echo;GREP_COLORS="ln=32:sl=35:cx=35:mt=1;31:fn=32" ugrep+ --smart-case -U --color=always -n -C 8 -- {q} {} | tr -d "\r";else printf "\033[31mMatches   :\033[31m \n\n";ugrep+ -U --color=always -n --colors=line=32,sl=35,ms=35,mc=35 "" {} | tr -d "\r";fi' \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --phony -q "$1" \
+        --border top \
+        --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --bind "change:reload:$UG_PREFIX {q} . | $COLOR_AND_SORT || true" \
         --bind "ctrl-r:reload:$UG_PREFIX {q} . | $COLOR_AND_SORT || true" \
         --bind "ctrl-l:toggle-preview" \
@@ -85,6 +89,8 @@ rga-fzf() {
         --preview 'printf "\033[31mFile Path:\033[0m %s\n" {};if [[ ! -z {q} ]]; then printf "\033[31mMatches:\033[0m ";rga -o {q} {} 2>/dev/null | wc -l;echo;rga --pretty --context 10 {q} {} 2>/dev/null;else printf "\033[31mMatches:\033[0m \n\n";rga --pretty --context 10 "" {} 2>/dev/null;fi' \
         --color 'fg:bright-cyan,fg+:bright-cyan,preview-fg:bright-magenta,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --phony -q "$1" \
+        --border top \
+        --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --bind "change:reload:$RG_PREFIX {q} 2>/dev/null || true" \
         --bind "ctrl-r:reload:$RG_PREFIX {q} 2>/dev/null || true" \
         --bind 'home:last,end:first' \
@@ -120,6 +126,8 @@ rga-fzfS() {
         --preview 'printf "\033[31mFile Path:\033[0m %s\n" {};if [[ ! -z {q} ]]; then printf "\033[31mMatches:\033[0m ";rga -o {q} {} 2>/dev/null | wc -l;echo;rga --pretty --context 10 {q} {} 2>/dev/null;else printf "\033[31mMatches:\033[0m \n\n";rga --pretty --context 10 "" {} 2>/dev/null;fi' \
         --color 'fg:bright-cyan,fg+:bright-cyan,preview-fg:bright-magenta,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --phony -q "$1" \
+        --border top \
+        --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --bind "change:reload:$RG_PREFIX {q} 2>/dev/null || true" \
         --bind "ctrl-r:reload:$RG_PREFIX {q} 2>/dev/null || true" \
         --bind 'home:last,end:first' \

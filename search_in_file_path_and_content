@@ -16,6 +16,8 @@ ugf() {
     fzf --ansi --delimiter : --no-sort --style full --wrap --exact \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline:reverse,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --preview 'batcat --color=always {1} --highlight-line {2}' \
+        --border top \
+        --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind "ctrl-r:reload:$UG_CMD || echo 'No results found'" \
         --bind "ctrl-l:toggle-preview" \
@@ -51,6 +53,8 @@ ugf-plus() {
     fzf --ansi --delimiter : --no-sort --style full --wrap --exact \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline:reverse,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --preview 'batcat --color=always {1} --highlight-line {2}' \
+        --border top \
+        --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind "ctrl-r:reload:$UG_CMD || echo 'No results found'" \
         --bind "ctrl-l:toggle-preview" \
@@ -83,6 +87,8 @@ rgf() {
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline:reverse,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --delimiter : \
         --preview 'batcat --color=always {1} --highlight-line {2}' \
+        --border top \
+        --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind "ctrl-r:reload($RG_CMD || rg --files || echo 'No results found')" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
@@ -112,6 +118,8 @@ rgfS() {
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline:reverse,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --delimiter : \
         --preview 'batcat --color=always {1} --highlight-line {2}' \
+        --border top \
+        --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind "ctrl-r:reload($RG_CMD | LC_ALL=C sort -r || echo 'No results found')" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
