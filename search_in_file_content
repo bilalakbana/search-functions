@@ -103,3 +103,38 @@ rga-fzf() {
 		--bind "ctrl-j:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
         --preview-window "up:70%:wrap"
 }
+rga-fzfS() {
+    local GLOB_PATTERN=()
+    if [[ "$1" == "--glob="* ]]; then
+        patterns="${1#--glob=}"
+        for pattern in $(echo "$patterns" | tr ',' ' '); do
+            GLOB_PATTERN+=("-g")
+            GLOB_PATTERN+=("'$pattern'")
+        done
+        shift 1
+    fi
+
+    local RG_PREFIX="rga --files-with-matches ${GLOB_PATTERN[@]}"
+    FZF_DEFAULT_COMMAND="$RG_PREFIX '$1' | LC_ALL=C sort -r 2>/dev/null || true" \
+        fzf --sort --ansi --style full \
+        --preview 'printf "\033[31mFile Path:\033[0m %s\n" {};if [[ ! -z {q} ]]; then printf "\033[31mMatches:\033[0m ";rga -o {q} {} 2>/dev/null | wc -l;echo;rga --pretty --context 10 {q} {} 2>/dev/null;else printf "\033[31mMatches:\033[0m \n\n";rga --pretty --context 10 "" {} 2>/dev/null;fi' \
+        --color 'fg:bright-cyan,fg+:bright-cyan,preview-fg:bright-magenta,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+        --phony -q "$1" \
+        --bind "change:reload:$RG_PREFIX {q} 2>/dev/null || true" \
+        --bind "ctrl-r:reload:$RG_PREFIX {q} 2>/dev/null || true" \
+        --bind 'home:last,end:first' \
+        --bind "alt-up:preview-page-up" \
+        --bind "alt-down:preview-page-down" \
+        --bind "ctrl-l:toggle-preview" \
+        --bind 'enter:execute-silent(nohup xdg-open {})' \
+        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {}\" || tmux new-window -n 'nvim' \"nvim {} -c /{q} -c 'set hlsearch'\")" \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
+        --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {} {q}\")" \
+		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {}\"')" \
+		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file_popup {} {q}\")" \
+		--bind "alt-j:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/folder_list_ripgrepS')" \
+		--bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/git_log_file {}\")" \
+		--bind "ctrl-j:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/file_list')" \
+        --preview-window "up:70%:wrap"
+}
