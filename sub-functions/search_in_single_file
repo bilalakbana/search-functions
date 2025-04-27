@@ -33,7 +33,7 @@ fzf --ansi \
     --bind "ctrl-l:toggle-preview" \
     --bind "enter:execute-silent(nohup xdg-open \"$FILE\")" \
     --bind "ctrl-c:execute-silent(echo -n \"$FILE\" | wl-copy)" \
-    --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim \"$FILE\"\" || tmux new-window -n 'nvim' \"nvim \"$FILE\" -c /{q} -c 'set hlsearch'\")" \
+    --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim '$FILE'\" || tmux new-window -n 'nvim' \"nvim '$FILE' -c /{q} -c 'set hlsearch'\")" \
     --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager \"$FILE\")" \
     --bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file '$FILE'\")" \
     --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/show_logs '$FILE'\")" \
