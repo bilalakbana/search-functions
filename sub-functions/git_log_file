@@ -3,7 +3,7 @@
 COLUMNS=$(tput cols)
 HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
 FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
-DATEOPT="--date=format:'%Y-%m-%d %H:%M:%S'"
+DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
 
 file=$(readlink -f "$1")
 repo_root=$(git rev-parse --show-toplevel)
@@ -18,7 +18,7 @@ done)
 
 if [[ -n "$submodule_path" ]]; then
     echo "==> $file (in submodule: $submodule_path)"
-    (cd "$repo_root/$submodule_path" && git log --color=always --pretty=format:"$FORMAT" $DATEOPT --name-status -- "${file#*$submodule_path/}")
+    (cd "$repo_root/$submodule_path" && git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status -- "${file#*$submodule_path/}")
 else
-    git log --color=always --pretty=format:"$FORMAT" $DATEOPT --name-status -- "$file"
+    git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status -- "$file"
 fi
