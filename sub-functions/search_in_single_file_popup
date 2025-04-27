@@ -31,10 +31,10 @@ fzf --ansi \
     --bind "alt-down:preview-page-down" \
     --bind 'home:first,end:last' \
     --bind "ctrl-l:toggle-preview" \
-    --bind "enter:execute-silent(nohup xdg-open \"$FILE\")+abort" \
-    --bind "ctrl-c:execute-silent(echo -n \"$FILE\" | wl-copy)" \
-    --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim '$FILE'\" || tmux new-window -n 'nvim' \"nvim '$FILE' -c /{q} -c 'set hlsearch'\")+abort" \
-    --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager \"$FILE\")+abort" \
+    --bind "enter:execute-silent(nohup xdg-open '$FILE')+abort" \
+    --bind "ctrl-c:execute-silent(echo -n '$FILE' | wl-copy)" \
+    --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim' $SHELL -ic \"nvim '$FILE'\")+abort" \
+    --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager '$FILE')+abort" \
     --bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file '$FILE'\")+abort" \
     --bind "ctrl-u:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/show_logs '$FILE'\")+abort" \
     --bind "alt-u:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/git_log_file '$FILE'\")+abort" \
