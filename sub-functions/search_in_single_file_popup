@@ -1,6 +1,6 @@
 #!/bin/bash
 
-FILE="$1"
+FILE=$(realpath "$1")
 QUERY="$2"
 
 [[ -z "$FILE" ]] && { echo "Please provide a file name"; exit 1; }
