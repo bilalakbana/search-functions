@@ -22,11 +22,11 @@ f() {
         --bind "ctrl-r:reload($reload_cmd | $process_cmd)" \
         --bind 'ctrl-l:toggle-preview' \
         --bind 'enter:execute-silent(nohup xdg-open {})' \
-        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim' zsh -ic \"nvim {}\")" \
+        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim' $SHELL -ic \"nvim {}\")" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {}\")" \
-		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {}\"')" \
+		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && $SHELL -ic \"show-logs {}\"')" \
 		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file_popup {}\")" \
 		--bind "alt-j:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/folder_list_ugrep')" \
 		--bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/git_log_file {}\")" \
@@ -59,11 +59,11 @@ fh() {
         --bind "ctrl-r:reload($reload_cmd | $process_cmd)" \
         --bind 'ctrl-l:toggle-preview' \
         --bind 'enter:execute-silent(nohup xdg-open {})' \
-        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim' zsh -ic \"nvim {}\")" \
+        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim' $SHELL -ic \"nvim {}\")" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {}\")" \
-		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {}\"')" \
+		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && $SHELL -ic \"show-logs {}\"')" \
 		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file_popup {}\")" \
 		--bind "alt-j:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/folder_list_ugrep')" \
 		--bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/git_log_file {}\")" \
@@ -96,11 +96,11 @@ fg() {
         --bind "ctrl-r:reload($reload_cmd | $process_cmd)" \
         --bind 'ctrl-l:toggle-preview' \
         --bind 'enter:execute-silent(nohup xdg-open {})' \
-        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim' zsh -ic \"nvim {}\")" \
+        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim' $SHELL -ic \"nvim {}\")" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {}\")" \
-		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && zsh -ic \"show-logs {}\"')" \
+		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && $SHELL -ic \"show-logs {}\"')" \
 		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/search_in_single_file_popup {}\")" \
 		--bind "alt-j:execute-silent(tmux popup -E -w 95% -h 95% 'cd \"$PWD\" && ~/.SearchFunctions/sub-functions/folder_list_ugrep')" \
 		--bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/git_log_file {}\")" \

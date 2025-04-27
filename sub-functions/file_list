@@ -22,11 +22,11 @@ fzf --exact --no-sort --ansi --style full --wrap --delimiter : \
     --bind "ctrl-r:reload($reload_cmd | $process_cmd)" \
     --bind 'ctrl-l:toggle-preview' \
     --bind "enter:execute-silent(nohup xdg-open {})+abort" \
-    --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim' bash -ic \"nvim {}\")+abort" \
+    --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim' $SHELL -ic \"nvim {}\")+abort" \
     --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})+abort" \
     --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
 	--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file {}\")+abort" \
-	--bind "ctrl-u:execute-silent(tmux new-window -n search 'bash -ic \"show-logs \\\"{1}\\\"\"')+abort" \
+	--bind "ctrl-u:execute-silent(tmux new-window -n search '$SHELL -ic \"show-logs \\\"{1}\\\"\"')+abort" \
 	--bind "alt-u:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/git_log_file {}\")+abort" \
     --bind 'home:last,end:first' \
     --bind 'alt-up:preview-page-up' \

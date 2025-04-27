@@ -16,7 +16,7 @@ fzf --exact --ansi --style full --wrap \
     --preview 'ls --color=always {}' \
     --color 'fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
     --bind "ctrl-r:reload($reload_cmd | $process_cmd)" \
-    --bind "enter:execute(tmux new-window -n 'search' 'bash -ic \"cd $(realpath {}) && ugrep+fzf\"')+abort" \
+    --bind "enter:execute(tmux new-window -n 'search' '$SHELL -ic \"cd $(realpath {}) && ugrep+fzf\"')+abort" \
     --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})+abort" \
     --bind 'ctrl-l:toggle-preview' \
     --bind 'home:last,end:first' \
