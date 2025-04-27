@@ -6,19 +6,28 @@ FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) 
 DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
 
 file=$(readlink -f "$1")
-repo_root=$(git rev-parse --show-toplevel)
+
+# ⚡ Make sure we are inside the file's git repository
+cd "$(dirname "$file")" || { echo "Cannot cd into file directory."; exit 1; }
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "Not inside a Git repository."; exit 1; }
 
 # Set up a temporary Git configuration that exits the script after pager
 export GIT_PAGER="less -R -+F -X; exit"
 
 # More efficient submodule detection - directly query .gitmodules
-submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp path | while read -r _ path; do
+submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp path 2>/dev/null | while read -r _ path; do
     [[ "$file" == *"$path"* ]] && echo "$path" && break
 done)
 
 if [[ -n "$submodule_path" ]]; then
     echo "==> $file (in submodule: $submodule_path)"
-    (cd "$repo_root/$submodule_path" && git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status -- "${file#*$submodule_path/}")
+    (
+        cd "$repo_root/$submodule_path" && \
+        git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status -- "${file#*$submodule_path/}"
+    )
 else
-    git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status -- "$file"
+    (
+        cd "$repo_root" && \
+        git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status -- "${file#$repo_root/}"
+    )
 fi
