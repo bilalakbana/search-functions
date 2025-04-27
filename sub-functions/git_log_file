@@ -7,27 +7,34 @@ DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
 
 file=$(readlink -f "$1")
 
-# ⚡ Make sure we are inside the file's git repository
-cd "$(dirname "$file")" || { echo "Cannot cd into file directory."; exit 1; }
-repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "Not inside a Git repository."; exit 1; }
+cd "$(dirname "$file")" || { echo -e "\033[31mCannot cd into file directory.\033[0m"; echo "Press any key to exit..."; read -n 1; exit; }
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo -e "\033[31mNot inside a Git repository.\033[0m"; echo "Press any key to exit..."; read -n 1; exit; }
 
-# Set up a temporary Git configuration that exits the script after pager
 export GIT_PAGER="less -R -+F -X; exit"
 
-# More efficient submodule detection - directly query .gitmodules
 submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp path 2>/dev/null | while read -r _ path; do
     [[ "$file" == *"$path"* ]] && echo "$path" && break
 done)
 
 if [[ -n "$submodule_path" ]]; then
+    relative_path="${file#*$submodule_path/}"
+    cd "$repo_root/$submodule_path" || { echo -e "\033[31mCannot cd into submodule.\033[0m"; echo "Press any key to exit..."; read -n 1; exit; }
+    if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
+        echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
+        echo "Press any key to exit..."
+        read -n 1
+        exit
+    fi
     echo "==> $file (in submodule: $submodule_path)"
-    (
-        cd "$repo_root/$submodule_path" && \
-        git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status -- "${file#*$submodule_path/}"
-    )
+    git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status -- "$relative_path"
 else
-    (
-        cd "$repo_root" && \
-        git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status -- "${file#$repo_root/}"
-    )
+    relative_path="${file#$repo_root/}"
+    cd "$repo_root" || { echo -e "\033[31mCannot cd into repo root.\033[0m"; echo "Press any key to exit..."; read -n 1; exit; }
+    if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
+        echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
+        echo "Press any key to exit..."
+        read -n 1
+        exit
+    fi
+    git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status -- "$relative_path"
 fi

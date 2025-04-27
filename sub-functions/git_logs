@@ -1,39 +1,3 @@
-show-logs() {
-    local file=$(readlink -f "$1")
-    local dir=$(dirname "$file")
-
-    # Move into the file's directory first to resolve correct git repo
-    cd "$dir" || return
-
-    local repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
-    if [[ -z "$repo_root" ]]; then
-        echo "Not inside a Git repository."
-        return 1
-    fi
-
-    local submodule_path
-    local COLUMNS=$(tput cols)
-    local HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
-
-    export LESS="-RX -+F"
-
-    submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp path 2>/dev/null | while read -r _ path; do
-        [[ "$file" == *"$path"* ]] && echo "$path" && break
-    done)
-
-    (
-        if [ -n "$submodule_path" ]; then
-            cd "$repo_root/$submodule_path" && \
-            git log --color=always --format=$'commit %Cblue%h%Creset%n%Cred→ Author:%Creset %an%n%Cgreen→ Date:%Creset %ad \033[33m(%ar)\033[0m%n%Cred→ Message:%Creset %s%n'"$HR" \
-                --date=format:'%Y-%m-%d %H:%M:%S' -p --no-prefix --unified=3 "${file#*$submodule_path/}"
-        else
-            cd "$repo_root" && \
-            git log --color=always --format=$'commit %Cblue%h%Creset%n%Cred→ Author:%Creset %an%n%Cgreen→ Date:%Creset %ad \033[33m(%ar)\033[0m%n%Cred→ Message:%Creset %s%n'"$HR" \
-                --date=format:'%Y-%m-%d %H:%M:%S' -p --no-prefix --unified=3 "${file#$repo_root/}"
-        fi
-    ) | awk '/^commit / { print "\n" $0; next } /^diff --git / { print "\n" $0; next } { print }' \
-      | git-split-diffs --color --width="${COLUMNS}" --full-width -- | less
-}
 gfzf() {
     local filter=""
     if [ -n "$*" ] && [ -e "$*" ]; then
@@ -58,4 +22,53 @@ gfzf() {
             --bind "ctrl-y:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); printf '%s' \$1 | clipboard; [[ -n \$TMUX ]] && tmux display \"#[bg=blue,italics] Yanked #[none,fg=black,bg=default] \$1\"; }; f)" \
             --bind "ctrl-s:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); SUMMARY=\$(git show --format='%s' \$1 | head -1); printf '%s' \"\$SUMMARY\" | clipboard; [[ -n \$TMUX ]] && tmux display \"#[bg=blue,italics] Yanked #[none,fg=black,bg=default] \$SUMMARY\"; }; f)" \
             --preview-window up:40%:wrap
+}
+logs() {
+    COLUMNS=$(tput cols)
+    HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
+    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
+    DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
+
+    # Check if last argument is a file
+    if [[ -f "${@: -1}" ]]; then
+        file=$(readlink -f "${@: -1}")
+
+        # ⚡ Move into file's directory first to ensure correct Git context
+        cd "$(dirname "$file")" || { echo -e "\033[31mCannot cd into file directory.\033[0m"; return; }
+        repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo -e "\033[31mNot inside a Git repository.\033[0m"; return; }
+
+        # Only do submodule check if .gitmodules exists
+        if [[ -f "$repo_root/.gitmodules" ]]; then
+            submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp path 2>/dev/null | while read -r _ path; do
+                [[ "$file" == *"$path"* ]] && echo "$path" && break
+            done)
+
+            if [[ -n "$submodule_path" ]]; then
+                relative_path="${file#*$submodule_path/}"
+                cd "$repo_root/$submodule_path" || { echo -e "\033[31mCannot cd into submodule.\033[0m"; return; }
+
+                if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
+                    echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
+                    return
+                fi
+
+                (git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status "${@:1:$#-1}" -- "$relative_path")
+                return
+            fi
+        fi
+
+        relative_path="${file#$repo_root/}"
+        cd "$repo_root" || { echo -e "\033[31mCannot cd into repo root.\033[0m"; return; }
+
+        if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
+            echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
+            return
+        fi
+
+        (git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status "${@:1:$#-1}" -- "$relative_path")
+        return
+    fi
+
+    # Default case - regular git log (if not file input)
+    git log --color=always --pretty=format:"$FORMAT" $DATEOPT --name-status "$@"
 }

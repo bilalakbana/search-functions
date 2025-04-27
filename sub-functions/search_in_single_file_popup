@@ -35,9 +35,9 @@ fzf --ansi \
     --bind "ctrl-c:execute-silent(echo -n \"$FILE\" | wl-copy)" \
     --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim \"$FILE\"\" || tmux new-window -n 'nvim' \"nvim \"$FILE\" -c /{q} -c 'set hlsearch'\")+abort" \
     --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager \"$FILE\")+abort" \
-    --bind "ctrl-t:execute-silent(tmux new-window -n search '~/.SearchFunctions/sub-functions/search_in_single_file \"$FILE\"')+abort" \
-    --bind "ctrl-u:execute-silent(tmux new-window -n search '$SHELL -ic \"show-logs \\\"$FILE\\\"\"')+abort" \
-    --bind "alt-u:execute-silent(tmux new-window -n search '~/.SearchFunctions/sub-functions/git_log_file \"$FILE\"')+abort" \
+    --bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file '$FILE'\")+abort" \
+    --bind "ctrl-u:execute-silent(tmux new-window -n search \" ~/.SearchFunctions/sub-functions/show_logs '$FILE'\")+abort" \
+    --bind "alt-u:execute-silent(tmux new-window -n search \" ~/.SearchFunctions/sub-functions/git_log_file '$FILE'\")+abort" \
     --bind "change:reload(
         query={q}
         if [ -n \"\$query\" ]; then
