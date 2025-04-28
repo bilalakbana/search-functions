@@ -7,7 +7,7 @@ QUERY="$2"
 
 export GREP_COLORS="ms=01;31:mc=01;31:sl=:cx=35:fn=35:ln=32:bn=32:se=36"
 
-FZF_DEFAULT_COMMAND="ugrep -Un --color=always --smart-case \"$QUERY\" '$FILE' | tr -d '\r'" \
+FZF_DEFAULT_COMMAND="ugrep -Un --color=always --smart-case \"$QUERY\" \"$FILE\" | tr -d '\r'" \
 fzf --ansi \
     --no-sort \
     --exact \
@@ -19,7 +19,7 @@ fzf --ansi \
     --delimiter : \
     --preview '
         LINE={1}
-        ugrep -Un "" '"'$FILE'"' | tr -d "\r" | awk -v line=$LINE '"'"'
+        ugrep -Un "" '"\"$FILE\""' | tr -d '"\r"' | awk -v line=$LINE '"'"'
             BEGIN {FS=":"}
             $1 == line {printf "\033[32m%4d\033[0m:\033[33m%s\033[0m\n", $1, substr($0,length($1)+2); next}
             {printf "\033[32m%4d\033[0m:%s\n", $1, substr($0,length($1)+2)}
@@ -33,12 +33,11 @@ fzf --ansi \
     --bind "ctrl-l:toggle-preview" \
     --bind "enter:execute-silent(nohup xdg-open '$FILE')" \
     --bind "ctrl-c:execute-silent(echo -n '$FILE' | wl-copy)" \
-    --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim' $SHELL -ic \"nvim '$FILE'\")" \
-    --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager '$FILE')" \
-    --bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file '$FILE'\")" \
-    --bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/show_logs '$FILE'\")" \
-    --bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/search_in_single_file_popup '$FILE'\")" \
-    --bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/git_log_file '$FILE'\")" \
+    --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim \"$FILE\")" \
+	--bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager '$FILE')" \
+	--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$FILE\")" \
+	--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$FILE\")" \
+	--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$FILE\")" \
     --bind "change:reload(
         query={q}
         if [ -n \"\$query\" ]; then

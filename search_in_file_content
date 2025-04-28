@@ -24,15 +24,14 @@ ugrep-fzf() {
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
         --bind 'enter:execute-silent(nohup xdg-open {})' \
-        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {}\" || tmux new-window -n 'nvim' \"nvim {} -c /{q} -c 'set hlsearch'\")" \
+        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' nvim {} || tmux new-window -n 'nvim' nvim {} -c /{q} -c \"set hlsearch\")" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file $(realpath {}) {q}\")" \
-		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/show_logs $(realpath {})\")" \
-		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/search_in_single_file_popup $(realpath {}) {q}\")" \
-		--bind "alt-j:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/folder_list_ugrep\")" \
-		--bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/git_log_file $(realpath {})\")" \
-		--bind "ctrl-j:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/file_list\")" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{}\"\") {q})" \
+		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{}\"\"))" \
+		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugrep)" \
+		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{}\"\"))" \
+		--bind "ctrl-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/file_list)" \
         --preview-window "up:70%:wrap"
 }
 ugrep-fzf-plus() {
@@ -61,15 +60,14 @@ ugrep-fzf-plus() {
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
         --bind 'enter:execute-silent(nohup xdg-open {})' \
-        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {}\" || tmux new-window -n 'nvim' \"nvim {} -c /{q} -c 'set hlsearch'\")" \
+        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' nvim {} || tmux new-window -n 'nvim' nvim {} -c /{q} -c \"set hlsearch\")" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file $(realpath {}) {q}\")" \
-		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/show_logs $(realpath {})\")" \
-		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/search_in_single_file_popup $(realpath {}) {q}\")" \
-		--bind "alt-j:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/folder_list_ugrep\")" \
-		--bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/git_log_file $(realpath {})\")" \
-		--bind "ctrl-j:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/file_list\")" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{}\"\") {q})" \
+		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{}\"\"))" \
+		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugrep_plus)" \
+		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{}\"\"))" \
+		--bind "ctrl-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/file_list)" \
         --preview-window "up:70%:wrap"
 }
 rga-fzf() {
@@ -99,15 +97,14 @@ rga-fzf() {
         --bind "alt-down:preview-page-down" \
         --bind "ctrl-l:toggle-preview" \
         --bind 'enter:execute-silent(nohup xdg-open {})' \
-        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {}\" || tmux new-window -n 'nvim' \"nvim {} -c /{q} -c 'set hlsearch'\")" \
+        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' nvim {} || tmux new-window -n 'nvim' nvim {} -c /{q} -c \"set hlsearch\")" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file $(realpath {}) {q}\")" \
-		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/show_logs $(realpath {})\")" \
-		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/search_in_single_file_popup $(realpath {}) {q}\")" \
-		--bind "alt-j:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/folder_list_ugrep\")" \
-		--bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/git_log_file $(realpath {})\")" \
-		--bind "ctrl-j:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/file_list\")" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{}\"\") {q})" \
+		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{}\"\"))" \
+		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ripgrep)" \
+		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{}\"\"))" \
+		--bind "ctrl-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/file_list)" \
         --preview-window "up:70%:wrap"
 }
 rga-fzfS() {
@@ -137,14 +134,13 @@ rga-fzfS() {
         --bind "alt-down:preview-page-down" \
         --bind "ctrl-l:toggle-preview" \
         --bind 'enter:execute-silent(nohup xdg-open {})' \
-        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' \"nvim {}\" || tmux new-window -n 'nvim' \"nvim {} -c /{q} -c 'set hlsearch'\")" \
+        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' nvim {} || tmux new-window -n 'nvim' nvim {} -c /{q} -c \"set hlsearch\")" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file $(realpath {}) {q}\")" \
-		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/show_logs $(realpath {})\")" \
-		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/search_in_single_file_popup $(realpath {}) {q}\")" \
-		--bind "alt-j:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/folder_list_ugrep\")" \
-		--bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/git_log_file $(realpath {})\")" \
-		--bind "ctrl-j:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/file_list\")" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{}\"\") {q})" \
+		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{}\"\"))" \
+		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ripgrepS)" \
+		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{}\"\"))" \
+		--bind "ctrl-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/file_list)" \
         --preview-window "up:70%:wrap"
 }

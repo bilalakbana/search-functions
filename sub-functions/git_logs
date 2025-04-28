@@ -47,6 +47,7 @@ logs() {
                 relative_path="${file#*$submodule_path/}"
                 cd "$repo_root/$submodule_path" || { echo -e "\033[31mCannot cd into submodule.\033[0m"; return; }
 
+                # Check if file is tracked
                 if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
                     echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
                     return
@@ -60,6 +61,7 @@ logs() {
         relative_path="${file#$repo_root/}"
         cd "$repo_root" || { echo -e "\033[31mCannot cd into repo root.\033[0m"; return; }
 
+        # Check if file is tracked
         if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
             echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
             return

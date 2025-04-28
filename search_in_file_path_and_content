@@ -25,15 +25,14 @@ ugf() {
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
-        --bind "ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
+        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1})" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file $(realpath {1})\")" \
-		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/show_logs $(realpath {1})\")" \
-		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/search_in_single_file_popup $(realpath {1})\")" \
-		--bind "alt-j:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/folder_list_ugrep\")" \
-		--bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/git_log_file $(realpath {1})\")" \
-		--bind "ctrl-j:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/file_list\")" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"))" \
+		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"))" \
+		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugf)" \
+		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"))" \
+		--bind "ctrl-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/file_list)"
 }
 ugf-plus() {
     local GITIGNORE_OPT=""
@@ -62,15 +61,14 @@ ugf-plus() {
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
-        --bind "ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
+        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1})" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file $(realpath {1})\")" \
-		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/show_logs $(realpath {1})\")" \
-		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/search_in_single_file_popup $(realpath {1})\")" \
-		--bind "alt-j:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/folder_list_ugrep\")" \
-		--bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/git_log_file $(realpath {1})\")" \
-		--bind "ctrl-j:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/file_list\")" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"))" \
+		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"))" \
+		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugf_plus)" \
+		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"))" \
+		--bind "ctrl-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/file_list)"
 }
 rgf() {
     local RG_CMD="rg --color=always --line-number --no-heading"
@@ -92,15 +90,14 @@ rgf() {
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind "ctrl-r:reload($RG_CMD || rg --files || echo 'No results found')" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
-        --bind "ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
+        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1})" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file $(realpath {1})\")" \
-		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/show_logs $(realpath {1})\")" \
-		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/search_in_single_file_popup $(realpath {1})\")" \
-		--bind "alt-j:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/folder_list_ugrep\")" \
-		--bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/git_log_file $(realpath {1})\")" \
-		--bind "ctrl-j:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/file_list\")" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"))" \
+		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"))" \
+		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_rgf)" \
+		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"))" \
+		--bind "ctrl-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/file_list)" \
         --bind "ctrl-l:toggle-preview"
 }
 rgfS() {
@@ -123,14 +120,13 @@ rgfS() {
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind "ctrl-r:reload($RG_CMD | LC_ALL=C sort -r || echo 'No results found')" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
-        --bind "ctrl-o:execute(tmux new-window -n 'nvim' \"nvim {1}\")" \
+        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1})" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/search_in_single_file $(realpath {1})\")" \
-		--bind "ctrl-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/show_logs $(realpath {1})\")" \
-		--bind "ctrl-p:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/search_in_single_file_popup $(realpath {1})\")" \
-		--bind "alt-j:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/folder_list_ugrep\")" \
-		--bind "alt-u:execute-silent(tmux popup -E -w 95% -h 95% \"~/.SearchFunctions/sub-functions/git_log_file $(realpath {1})\")" \
-		--bind "ctrl-j:execute-silent(tmux popup -E -w 95% -h 95% \"cd '$PWD' && ~/.SearchFunctions/sub-functions/file_list\")" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"))" \
+		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"))" \
+		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_rgfS)" \
+		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"))" \
+		--bind "ctrl-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/file_list)" \
         --bind "ctrl-l:toggle-preview"
 }

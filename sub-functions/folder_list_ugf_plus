@@ -12,16 +12,16 @@ awk '\''{
 }'\'' | LC_ALL=C sort -n | cut -f2-'
 
 "${fd_cmd[@]}" | eval "$process_cmd" | \
-fzf --exact --ansi --style full --wrap \
+fzf --exact --ansi --style full --wrap --delimiter : \
     --preview 'ls --color=always {}' \
     --border top \
     --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
     --color 'fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
     --bind "ctrl-r:reload($reload_cmd | $process_cmd)" \
-    --bind "enter:execute(tmux new-window -n 'search' '$SHELL -ic \"cd $(realpath {1}) && ugf+\"')+abort" \
+    --bind "enter:execute-silent(tmux respawn-pane -k bash -c \"~/.SearchFunctions/sub-functions/launchers/launch_ugf_plus.sh {1}\")" \
     --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})+abort" \
-	--bind "ctrl-u:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/show_logs $(realpath {1})\")+abort" \
-	--bind "alt-u:execute-silent(tmux new-window -n search \"~/.SearchFunctions/sub-functions/git_log_file $(realpath {1})\")+abort" \
+	--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"))+abort" \
+	--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"))+abort" \
     --bind 'ctrl-l:toggle-preview' \
     --bind 'home:last,end:first' \
     --bind 'alt-up:preview-page-up' \
