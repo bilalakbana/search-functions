@@ -29,7 +29,7 @@ ugrep-fzf() {
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{}\"\") {q})" \
 		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{}\"\"))" \
-		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugrep)" \
+		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugrep; tmux select-pane -T folder-list)" \
 		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{}\"\"))" \
 		--bind "ctrl-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/file_list)" \
         --preview-window "up:70%:wrap"
@@ -65,7 +65,7 @@ ugrep-fzf-plus() {
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{}\"\") {q})" \
 		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{}\"\"))" \
-		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugrep_plus)" \
+		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugrep_plus; tmux select-pane -T folder-list)" \
 		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{}\"\"))" \
 		--bind "ctrl-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/file_list)" \
         --preview-window "up:70%:wrap"
@@ -102,7 +102,7 @@ rga-fzf() {
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{}\"\") {q})" \
 		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{}\"\"))" \
-		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ripgrep)" \
+		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ripgrep; tmux select-pane -T folder-list)" \
 		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{}\"\"))" \
 		--bind "ctrl-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/file_list)" \
         --preview-window "up:70%:wrap"
@@ -139,7 +139,7 @@ rga-fzfS() {
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{}\"\") {q})" \
 		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{}\"\"))" \
-		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ripgrepS)" \
+		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ripgrepS; tmux select-pane -T folder-list)" \
 		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{}\"\"))" \
 		--bind "ctrl-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/file_list)" \
         --preview-window "up:70%:wrap"
