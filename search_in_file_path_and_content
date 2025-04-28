@@ -28,7 +28,7 @@ ugf() {
         --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1})" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"))" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \
 		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"))" \
 		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugf; tmux select-pane -T folder-list)" \
 		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"))" \
@@ -64,7 +64,7 @@ ugf-plus() {
         --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1})" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"))" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \
 		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"))" \
 		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugf_plus; tmux select-pane -T folder-list)" \
 		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"))" \
@@ -93,7 +93,7 @@ rgf() {
         --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1})" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"))" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \
 		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"))" \
 		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_rgf; tmux select-pane -T folder-list)" \
 		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"))" \
@@ -123,7 +123,7 @@ rgfS() {
         --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1})" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"))" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \
 		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"))" \
 		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_rgfS; tmux select-pane -T folder-list)" \
 		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"))" \
