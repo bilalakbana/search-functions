@@ -7,8 +7,13 @@ DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
 
 file=$(readlink -f "$1")
 
-cd "$(dirname "$file")" || { echo -e "\033[31mCannot cd into file directory.\033[0m"; echo "Press any key to exit..."; read -n 1; exit; }
-repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo -e "\033[31mNot inside a Git repository.\033[0m"; echo "Press any key to exit..."; read -n 1; exit; }
+if [[ -z "$file" ]]; then
+    echo -e "\033[31mNo file or folder provided.\033[0m"
+    exit 1
+fi
+
+cd "$(dirname "$file")" || { echo -e "\033[31mCannot cd into file directory.\033[0m"; read -n 1 -r -p "Press any key to exit..."; exit 1; }
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo -e "\033[31mNot inside a Git repository.\033[0m"; read -n 1 -r -p "Press any key to exit..."; exit 1; }
 
 export GIT_PAGER="less -R -+F -X; exit"
 
@@ -18,23 +23,26 @@ done)
 
 if [[ -n "$submodule_path" ]]; then
     relative_path="${file#*$submodule_path/}"
-    cd "$repo_root/$submodule_path" || { echo -e "\033[31mCannot cd into submodule.\033[0m"; echo "Press any key to exit..."; read -n 1; exit; }
-    if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
-        echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
-        echo "Press any key to exit..."
-        read -n 1
-        exit
-    fi
-    echo "==> $file (in submodule: $submodule_path)"
-    git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status -- "$relative_path"
+    cd "$repo_root/$submodule_path" || { echo -e "\033[31mCannot cd into submodule.\033[0m"; read -n 1 -r -p "Press any key to exit..."; exit 1; }
 else
     relative_path="${file#$repo_root/}"
-    cd "$repo_root" || { echo -e "\033[31mCannot cd into repo root.\033[0m"; echo "Press any key to exit..."; read -n 1; exit; }
+    cd "$repo_root" || { echo -e "\033[31mCannot cd into repo root.\033[0m"; read -n 1 -r -p "Press any key to exit..."; exit 1; }
+fi
+
+# Check if it's a directory or file and validate accordingly
+if [[ -d "$file" ]]; then
+    if ! git ls-files "$relative_path" | grep -q .; then
+        echo -e "\033[31m⚡ No tracked files found under directory:\033[0m $relative_path"
+        read -n 1 -r -p "Press any key to exit..."
+        exit 1
+    fi
+else
     if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
         echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
-        echo "Press any key to exit..."
-        read -n 1
-        exit
+        read -n 1 -r -p "Press any key to exit..."
+        exit 1
     fi
-    git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status -- "$relative_path"
 fi
+
+# Now run git log
+git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status -- "$relative_path"

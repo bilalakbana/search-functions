@@ -1,18 +1,28 @@
 #!/bin/bash
 
 file=$(readlink -f "$1")
-dir=$(dirname "$file")
 
-cd "$dir" || { echo -e "\033[31mCannot cd into file directory.\033[0m"; echo "Press any key to exit..."; stty raw -echo; dd bs=1 count=1 2>/dev/null; stty -raw echo; return; }
+if [[ -z "$file" ]]; then
+    echo -e "\033[31mNo file or folder provided.\033[0m"
+    exit 1
+fi
+
+# Detect if input is a directory
+if [[ -d "$file" ]]; then
+    is_dir=true
+    dir="$file"
+else
+    is_dir=false
+    dir=$(dirname "$file")
+fi
+
+cd "$dir" || { echo -e "\033[31mCannot cd into target directory.\033[0m"; read -n1 -r -p "Press any key to exit..."; return; }
 
 repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
 if [[ -z "$repo_root" ]]; then
     echo -e "\033[31mNot inside a Git repository.\033[0m"
-    echo "Press any key to exit..."
-    stty raw -echo
-    dd bs=1 count=1 2>/dev/null
-    stty -raw echo
-    exit
+    read -n1 -r -p "Press any key to exit..."
+    exit 1
 fi
 
 COLUMNS=$(tput cols)
@@ -26,30 +36,29 @@ done)
 
 if [[ -n "$submodule_path" ]]; then
     relative_path="${file#*$submodule_path/}"
-    cd "$repo_root/$submodule_path" || { echo -e "\033[31mCannot cd into submodule.\033[0m"; echo "Press any key to exit..."; stty raw -echo; dd bs=1 count=1 2>/dev/null; stty -raw echo; return; }
-
-    if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
-        echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
-        echo "Press any key to exit..."
-        stty raw -echo
-        dd bs=1 count=1 2>/dev/null
-        stty -raw echo
-        return
-    fi
+    cd "$repo_root/$submodule_path" || { echo -e "\033[31mCannot cd into submodule.\033[0m"; read -n1 -r -p "Press any key to exit..."; return; }
 else
     relative_path="${file#$repo_root/}"
-    cd "$repo_root" || { echo -e "\033[31mCannot cd into repo root.\033[0m"; echo "Press any key to exit..."; stty raw -echo; dd bs=1 count=1 2>/dev/null; stty -raw echo; return; }
+    cd "$repo_root" || { echo -e "\033[31mCannot cd into repo root.\033[0m"; read -n1 -r -p "Press any key to exit..."; return; }
+fi
 
+# Check tracking only if it's a file
+if [[ "$is_dir" == false ]]; then
     if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
         echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
-        echo "Press any key to exit..."
-        stty raw -echo
-        dd bs=1 count=1 2>/dev/null
-        stty -raw echo
-        exit
+        read -n1 -r -p "Press any key to exit..."
+        exit 1
+    fi
+else
+    # For directories: check if there are any tracked files inside
+    if ! git ls-files "$relative_path" | grep -q .; then
+        echo -e "\033[31m⚡ No tracked files found under directory:\033[0m $relative_path"
+        read -n1 -r -p "Press any key to exit..."
+        exit 1
     fi
 fi
 
+# Now show git log
 (
     git log --color=always --format=$'commit %Cblue%h%Creset%n%Cred→ Author:%Creset %an%n%Cgreen→ Date:%Creset %ad \033[33m(%ar)\033[0m%n%Cred→ Message:%Creset %s%n'"$HR" \
         --date=format:'%Y-%m-%d %H:%M:%S' -p --no-prefix --unified=3 "$relative_path"
