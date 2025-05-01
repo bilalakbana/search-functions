@@ -15,8 +15,6 @@ fi
 cd "$(dirname "$file")" || { echo -e "\033[31mCannot cd into file directory.\033[0m"; read -n 1 -r -p "Press any key to exit..."; exit 1; }
 repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo -e "\033[31mNot inside a Git repository.\033[0m"; read -n 1 -r -p "Press any key to exit..."; exit 1; }
 
-export GIT_PAGER="less -R -+F -X; exit"
-
 submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp path 2>/dev/null | while read -r _ path; do
     [[ "$file" == *"$path"* ]] && echo "$path" && break
 done)
@@ -45,4 +43,4 @@ else
 fi
 
 # Now run git log
-git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status -- "$relative_path"
+git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status -- "$relative_path" | less -R -i --mouse

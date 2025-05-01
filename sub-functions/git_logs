@@ -53,7 +53,7 @@ logs() {
                     return
                 fi
 
-                (git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status "${@:1:$#-1}" -- "$relative_path")
+                (git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status "${@:1:$#-1}" -- "$relative_path" | less -R -i --mouse)
                 return
             fi
         fi
@@ -67,10 +67,10 @@ logs() {
             return
         fi
 
-        (git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status "${@:1:$#-1}" -- "$relative_path")
+        (git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status "${@:1:$#-1}" -- "$relative_path" | less -R -i --mouse)
         return
     fi
 
     # Default case - regular git log (if not file input)
-    git log --color=always --pretty=format:"$FORMAT" $DATEOPT --name-status "$@"
+    git log --color=always --pretty=format:"$FORMAT" $DATEOPT --name-status "$@" | less -R -i --mouse
 }

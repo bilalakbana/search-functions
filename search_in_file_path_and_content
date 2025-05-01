@@ -1,4 +1,9 @@
 ugf() {
+    if [[ -n "$TMUX" ]]; then
+        original_name=$(tmux display-message -p '#W')  # Save current window name
+        tmux rename-window "ugf"
+    fi
+
     local GITIGNORE_OPT=""
     [[ -f .gitignore ]] && GITIGNORE_OPT="--exclude-from=.gitignore"
 
@@ -25,16 +30,25 @@ ugf() {
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
-        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1})" \
+        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1}; tmux select-pane -T editor)" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \
-		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"))" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \
+		--bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
 		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugf; tmux select-pane -T folder-list)" \
-		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"))" \
-		--bind "ctrl-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/file_list)"
+		--bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
+		--bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)"
+
+    if [[ -n "$TMUX" ]]; then
+        tmux rename-window "$original_name"  # Restore original name
+    fi
 }
 ugf-plus() {
+    if [[ -n "$TMUX" ]]; then
+        original_name=$(tmux display-message -p '#W')  # Save current window name
+        tmux rename-window "ugf"
+    fi
+
     local GITIGNORE_OPT=""
     [[ -f .gitignore ]] && GITIGNORE_OPT="--exclude-from=.gitignore"
 
@@ -61,16 +75,25 @@ ugf-plus() {
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
-        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1})" \
+        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1}; tmux select-pane -T editor)" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \
-		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"))" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \
+		--bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
 		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugf_plus; tmux select-pane -T folder-list)" \
-		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"))" \
-		--bind "ctrl-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/file_list)"
+		--bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
+		--bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)"
+
+    if [[ -n "$TMUX" ]]; then
+        tmux rename-window "$original_name"  # Restore original name
+    fi
 }
 rgf() {
+    if [[ -n "$TMUX" ]]; then
+        original_name=$(tmux display-message -p '#W')  # Save current window name
+        tmux rename-window "rgf"
+    fi
+
     local RG_CMD="rg --color=always --line-number --no-heading"
     [[ "$1" =~ ^--glob= ]] && {
         for pattern in $(echo "${1#--glob=}" | tr ',' ' '); do
@@ -90,17 +113,26 @@ rgf() {
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind "ctrl-r:reload($RG_CMD || rg --files || echo 'No results found')" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
-        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1})" \
+        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1}); tmux select-pane -T editor" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \
-		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"))" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \
+		--bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
 		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_rgf; tmux select-pane -T folder-list)" \
-		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"))" \
-		--bind "ctrl-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/file_list)" \
+		--bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
+		--bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)" \
         --bind "ctrl-l:toggle-preview"
+
+    if [[ -n "$TMUX" ]]; then
+        tmux rename-window "$original_name"  # Restore original name
+    fi
 }
 rgfS() {
+    if [[ -n "$TMUX" ]]; then
+        original_name=$(tmux display-message -p '#W')  # Save current window name
+        tmux rename-window "rgf"
+    fi
+
     local RG_CMD="rg --color=always --line-number --no-heading"
     [[ "$1" =~ ^--glob= ]] && {
         for pattern in $(echo "${1#--glob=}" | tr ',' ' '); do
@@ -120,13 +152,17 @@ rgfS() {
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind "ctrl-r:reload($RG_CMD | LC_ALL=C sort -r || echo 'No results found')" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
-        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1})" \
+        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1}); tmux select-pane -T editor" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \
-		--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"))" \
+		--bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \
+		--bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
 		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_rgfS; tmux select-pane -T folder-list)" \
-		--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"))" \
-		--bind "ctrl-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/file_list)" \
+		--bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
+		--bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)" \
         --bind "ctrl-l:toggle-preview"
+
+    if [[ -n "$TMUX" ]]; then
+        tmux rename-window "$original_name"  # Restore original name
+    fi
 }

@@ -19,7 +19,7 @@ fzf --ansi \
     --delimiter : \
     --preview '
         LINE={1}
-        ugrep -Un "" '"\"$FILE\""' | tr -d '"\r"' | awk -v line=$LINE '"'"'
+        ugrep -Un "" '"\"$FILE\""' | tr -d "\r" | awk -v line=$LINE '"'"'
             BEGIN {FS=":"}
             $1 == line {printf "\033[32m%4d\033[0m:\033[33m%s\033[0m\n", $1, substr($0,length($1)+2); next}
             {printf "\033[32m%4d\033[0m:%s\n", $1, substr($0,length($1)+2)}
@@ -33,11 +33,11 @@ fzf --ansi \
     --bind "ctrl-l:toggle-preview" \
     --bind "enter:execute-silent(nohup xdg-open '$FILE')" \
     --bind "ctrl-c:execute-silent(echo -n '$FILE' | wl-copy)" \
-    --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim \"$FILE\")" \
+    --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim \"$FILE\"; tmux select-pane -T editor)" \
 	--bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager '$FILE')" \
-	--bind "ctrl-t:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/search_in_single_file \"$FILE\"; tmux select-pane -T file-content)" \
-	--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$FILE\")" \
-	--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$FILE\")" \
+	--bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$FILE\"; tmux select-pane -T file-content)" \
+	--bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_logs \"$FILE\"; tmux select-pane -T git)" \
+	--bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/git_log_file \"$FILE\"; tmux select-pane -T git)" \
     --bind "change:reload(
         query={q}
         if [ -n \"\$query\" ]; then

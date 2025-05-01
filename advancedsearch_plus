@@ -1,9 +1,13 @@
 advancedsearch_plus() {
+    if [[ -n "$TMUX" ]]; then
+        original_name=$(tmux display-message -p '#W')  # Save current window name
+        tmux rename-window "xfind+"
+    fi
+
     local SEARCH_PATTERN="$1" && shift
     local GREP_ARGS=$(echo "${@}" | grep -o '\(-w\|--word-regexp\)') # only pass -w flag to ugrep in preview
     ugrep+ -Rzil --sort --hidden --exclude='*.rar' ${@} -e "$SEARCH_PATTERN" 2>/dev/null | \
     stdbuf -oL sed 's/\([^{]*\){[^}]*}/\1/' | \
-    stdbuf -oL awk '!seen[$0]++' | \
     stdbuf -oL sed -E $'s/^([^/]+)$/\x1b[32m\\1/' | \
     stdbuf -oL sed -E $'s/^(.+\\/)/\x1b[34m\\1\x1b[32m/' | \
     stdbuf -oL sed "s/\//\x1b[33m\/\x1b[34m/g" | \
@@ -21,15 +25,23 @@ advancedsearch_plus() {
     --bind 'enter:execute-silent(nohup xdg-open {})' \
     --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
     --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)"
+
+    if [[ -n "$TMUX" ]]; then
+        tmux rename-window "$original_name"  # Restore original name
+    fi
 }
 advancedsearch_respectgitignore_ignorehidden_plus() {
+    if [[ -n "$TMUX" ]]; then
+        original_name=$(tmux display-message -p '#W')  # Save current window name
+        tmux rename-window "xfind+"
+    fi
+
     local SEARCH_PATTERN="$1" && shift
     local GREP_ARGS=$(echo "${@}" | grep -o '\(-w\|--word-regexp\)') # only pass -w flag to ugrep in preview
     local GITIGNORE_OPT=""
     [[ -f .gitignore ]] && GITIGNORE_OPT="--exclude-from=.gitignore"
     ugrep+ -Rzil --sort $GITIGNORE_OPT --exclude='*.rar' ${@} -e "$SEARCH_PATTERN" 2>/dev/null | \
     stdbuf -oL sed 's/\([^{]*\){[^}]*}/\1/' | \
-    stdbuf -oL awk '!seen[$0]++' | \
     stdbuf -oL sed -E $'s/^([^/]+)$/\x1b[32m\\1/' | \
     stdbuf -oL sed -E $'s/^(.+\\/)/\x1b[34m\\1\x1b[32m/' | \
     stdbuf -oL sed "s/\//\x1b[33m\/\x1b[34m/g" | \
@@ -47,4 +59,8 @@ advancedsearch_respectgitignore_ignorehidden_plus() {
     --bind 'enter:execute-silent(nohup xdg-open {})' \
     --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
     --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)"
+
+    if [[ -n "$TMUX" ]]; then
+        tmux rename-window "$original_name"  # Restore original name
+    fi
 }

@@ -18,10 +18,13 @@ fzf --exact --ansi --style full --wrap --delimiter : \
     --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
     --color 'fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
     --bind "ctrl-r:reload($reload_cmd | $process_cmd)" \
-    --bind "enter:execute-silent(tmux respawn-pane -k bash -c \"tmux select-pane -T ugf-plus; ~/.SearchFunctions/sub-functions/launchers/launch_ugf_plus.sh {1}\")" \
-    --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})+abort" \
-	--bind "ctrl-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"))+abort" \
-	--bind "alt-u:execute-silent(tmux new-window -n search ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"))+abort" \
+    --bind "enter:execute-silent(tmux respawn-pane -k $SHELL -c \"tmux select-pane -T ugf-plus; ~/.SearchFunctions/sub-functions/launchers/launch_ugf_plus.sh {1}\")" \
+    --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
+	--bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
+	--bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/git_log_file \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
+	--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugrep; tmux select-pane -T folder-list)" \
+    --bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)" \
+    --bind "alt-n:execute-silent(tmux respawn-pane -k $SHELL -c \"cd {}; NO_AUTO_CD=1 exec $SHELL\")" \
     --bind 'ctrl-l:toggle-preview' \
     --bind 'home:last,end:first' \
     --bind 'alt-up:preview-page-up' \

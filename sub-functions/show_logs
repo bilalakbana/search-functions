@@ -28,8 +28,6 @@ fi
 COLUMNS=$(tput cols)
 HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
 
-export LESS="-RX -+F"
-
 submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp path 2>/dev/null | while read -r _ path; do
     [[ "$file" == *"$path"* ]] && echo "$path" && break
 done)
@@ -63,4 +61,4 @@ fi
     git log --color=always --format=$'commit %Cblue%h%Creset%n%Cred→ Author:%Creset %an%n%Cgreen→ Date:%Creset %ad \033[33m(%ar)\033[0m%n%Cred→ Message:%Creset %s%n'"$HR" \
         --date=format:'%Y-%m-%d %H:%M:%S' -p --no-prefix --unified=3 "$relative_path"
 ) | awk '/^commit / { print "\n" $0; next } /^diff --git / { print "\n" $0; next } { print }' \
-  | git-split-diffs --color --width="${COLUMNS}" --full-width -- | less
+  | git-split-diffs --color --width="${COLUMNS}" --full-width -- | less -R -i --mouse
