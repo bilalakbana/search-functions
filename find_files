@@ -1,7 +1,7 @@
 f() {
     if [[ -n "$TMUX" ]]; then
         original_name=$(tmux display-message -p '#W')  # Save current window name
-        tmux rename-window "files"
+        tmux rename-window files
     fi
 
     fd_cmd=(fd --type f --no-ignore "$@")
@@ -49,7 +49,7 @@ f() {
 fh() {
     if [[ -n "$TMUX" ]]; then
         original_name=$(tmux display-message -p '#W')  # Save current window name
-        tmux rename-window "files"
+        tmux rename-window files
     fi
 
     fd_cmd=(fd --type f --no-ignore --hidden "$@")
@@ -97,7 +97,7 @@ fh() {
 fg() {
     if [[ -n "$TMUX" ]]; then
         original_name=$(tmux display-message -p '#W')  # Save current window name
-        tmux rename-window "files"
+        tmux rename-window files
     fi
 
     fd_cmd=(fd --type f "$@")

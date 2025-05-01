@@ -1,7 +1,7 @@
 ugrep-fzf() {
     if [[ -n "$TMUX" ]]; then
         original_name=$(tmux display-message -p '#W')  # Save current window name
-        tmux rename-window "ugrep"
+        tmux rename-window ugrep
     fi
 
     local GITIGNORE_OPT=""
@@ -46,7 +46,7 @@ ugrep-fzf() {
 ugrep-fzf-plus() {
     if [[ -n "$TMUX" ]]; then
         original_name=$(tmux display-message -p '#W')  # Save current window name
-        tmux rename-window "ugrep"
+        tmux rename-window ugrep
     fi
 
     local GITIGNORE_OPT=""
@@ -91,7 +91,7 @@ ugrep-fzf-plus() {
 rga-fzf() {
     if [[ -n "$TMUX" ]]; then
         original_name=$(tmux display-message -p '#W')  # Save current window name
-        tmux rename-window "rga"
+        tmux rename-window rga
     fi
 
     local GLOB_PATTERN=()
@@ -137,7 +137,7 @@ rga-fzf() {
 rga-fzfS() {
     if [[ -n "$TMUX" ]]; then
         original_name=$(tmux display-message -p '#W')  # Save current window name
-        tmux rename-window "rga"
+        tmux rename-window rga
     fi
 
     local GLOB_PATTERN=()

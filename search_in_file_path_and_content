@@ -1,7 +1,7 @@
 ugf() {
     if [[ -n "$TMUX" ]]; then
         original_name=$(tmux display-message -p '#W')  # Save current window name
-        tmux rename-window "ugf"
+        tmux rename-window ugf
     fi
 
     local GITIGNORE_OPT=""
@@ -46,7 +46,7 @@ ugf() {
 ugf-plus() {
     if [[ -n "$TMUX" ]]; then
         original_name=$(tmux display-message -p '#W')  # Save current window name
-        tmux rename-window "ugf"
+        tmux rename-window ugf
     fi
 
     local GITIGNORE_OPT=""
@@ -91,7 +91,7 @@ ugf-plus() {
 rgf() {
     if [[ -n "$TMUX" ]]; then
         original_name=$(tmux display-message -p '#W')  # Save current window name
-        tmux rename-window "rgf"
+        tmux rename-window rgf
     fi
 
     local RG_CMD="rg --color=always --line-number --no-heading"
@@ -130,7 +130,7 @@ rgf() {
 rgfS() {
     if [[ -n "$TMUX" ]]; then
         original_name=$(tmux display-message -p '#W')  # Save current window name
-        tmux rename-window "rgf"
+        tmux rename-window rgf
     fi
 
     local RG_CMD="rg --color=always --line-number --no-heading"
