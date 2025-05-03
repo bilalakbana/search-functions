@@ -3,6 +3,7 @@ advancedsearch_plus() {
     local GREP_ARGS=$(echo "${@}" | grep -o '\(-w\|--word-regexp\)') # only pass -w flag to ugrep in preview
     ugrep+ -Rzil --sort --hidden --exclude='*.rar' ${@} -e "$SEARCH_PATTERN" 2>/dev/null | tr -d '\r' | \
     stdbuf -oL sed 's/\([^{]*\){[^}]*}/\1/' | \
+    stdbuf -oL awk '!seen[$0]++' | \
     stdbuf -oL sed -E $'s/^([^/]+)$/\x1b[32m\\1/' | \
     stdbuf -oL sed -E $'s/^(.+\\/)/\x1b[34m\\1\x1b[32m/' | \
     stdbuf -oL sed "s/\//\x1b[33m\/\x1b[34m/g" | \
@@ -28,6 +29,7 @@ advancedsearch_respectgitignore_ignorehidden_plus() {
     [[ -f .gitignore ]] && GITIGNORE_OPT="--exclude-from=.gitignore"
     ugrep+ -Rzil --sort $GITIGNORE_OPT --exclude='*.rar' ${@} -e "$SEARCH_PATTERN" 2>/dev/null | tr -d '\r' | \
     stdbuf -oL sed 's/\([^{]*\){[^}]*}/\1/' | \
+    stdbuf -oL awk '!seen[$0]++' | \
     stdbuf -oL sed -E $'s/^([^/]+)$/\x1b[32m\\1/' | \
     stdbuf -oL sed -E $'s/^(.+\\/)/\x1b[34m\\1\x1b[32m/' | \
     stdbuf -oL sed "s/\//\x1b[33m\/\x1b[34m/g" | \

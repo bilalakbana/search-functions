@@ -3,6 +3,7 @@ detailedsearch() {
     local GREP_ARGS=$(echo "${@}" | grep -o '\(-w\|--word-regexp\)') # only pass -w flag to ugrep in preview
     GREP_COLORS="ln=35:cx=33:mt=31" ugrep+ -Rzoian -B50 -A50 --sort --hidden --exclude='*.rar' --color=always ${@} -e "$SEARCH_PATTERN" 2>/dev/null | tr -d '\r' | \
     stdbuf -oL sed 's/\([^{]*\){[^}]*}/\1/' | \
+    stdbuf -oL awk '!seen[$0]++' | \
     stdbuf -oL sed $'s/^\\([^:]*\\):/\x1b[34m\\1:/g' | \
     stdbuf -oL awk -F: 'BEGIN {OFS=FS} { gsub(/\//, "\033[33m/\033[34m", $1); print }' | \
     stdbuf -oL sed $'s/\x1b\\[34m\\([^/]*\\):/\x1b[32m\\1:/g' | \
@@ -27,6 +28,7 @@ detailedsearch_respectgitignore_ignorehidden() {
     [[ -f .gitignore ]] && GITIGNORE_OPT="--exclude-from=.gitignore"
     GREP_COLORS="ln=35:cx=33:mt=31" ugrep+ -Rzoian -B50 -A50 --sort $GITIGNORE_OPT --exclude='*.rar' --color=always ${@} -e "$SEARCH_PATTERN" 2>/dev/null | tr -d '\r' | \
     stdbuf -oL sed 's/\([^{]*\){[^}]*}/\1/' | \
+    stdbuf -oL awk '!seen[$0]++' | \
     stdbuf -oL sed $'s/^\\([^:]*\\):/\x1b[34m\\1:/g' | \
     stdbuf -oL awk -F: 'BEGIN {OFS=FS} { gsub(/\//, "\033[33m/\033[34m", $1); print }' | \
     stdbuf -oL sed $'s/\x1b\\[34m\\([^/]*\\):/\x1b[32m\\1:/g' | \
