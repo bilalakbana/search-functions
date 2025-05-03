@@ -3,11 +3,6 @@
 #--exclude='*.pdf' --exclude='*.docx' --exclude='*.odt' --exclude='*.epub' \
 # --exclude='*.jpg' --exclude='*.jpeg' --exclude='*.png' --exclude='*.gif' --exclude='*.bmp' --exclude='*.tiff'
 advancedsearch() {
-    if [[ -n "$TMUX" ]]; then
-        original_name=$(tmux display-message -p '#W')  # Save current window name
-        tmux rename-window "xfind"
-    fi
-
     local SEARCH_PATTERN="$1" && shift
     local GREP_ARGS=$(echo "${@}" | grep -o '\(-w\|--word-regexp\)') # only pass -w flag to ugrep in preview
     ugrep -Rzil --sort --hidden --exclude='*.rar' ${@} -e "$SEARCH_PATTERN" 2>/dev/null | \
@@ -28,17 +23,8 @@ advancedsearch() {
     --bind 'enter:execute-silent(nohup xdg-open {})' \
     --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
     --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)"
-
-    if [[ -n "$TMUX" ]]; then
-        tmux rename-window "$original_name"  # Restore original name
-    fi
 }
 advancedsearch_respectgitignore_ignorehidden() {
-    if [[ -n "$TMUX" ]]; then
-        original_name=$(tmux display-message -p '#W')  # Save current window name
-        tmux rename-window "xfind"
-    fi
-
     local SEARCH_PATTERN="$1" && shift
     local GREP_ARGS=$(echo "${@}" | grep -o '\(-w\|--word-regexp\)') # only pass -w flag to ugrep in preview
     local GITIGNORE_OPT=""
@@ -61,8 +47,4 @@ advancedsearch_respectgitignore_ignorehidden() {
     --bind 'enter:execute-silent(nohup xdg-open {})' \
     --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
     --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)"
-
-    if [[ -n "$TMUX" ]]; then
-        tmux rename-window "$original_name"  # Restore original name
-    fi
 }

@@ -1,9 +1,4 @@
 detailedsearch() {
-    if [[ -n "$TMUX" ]]; then
-        original_name=$(tmux display-message -p '#W')  # Save current window name
-        tmux rename-window "xfind+"
-    fi
-
     local SEARCH_PATTERN="$1" && shift
     local GREP_ARGS=$(echo "${@}" | grep -o '\(-w\|--word-regexp\)') # only pass -w flag to ugrep in preview
     GREP_COLORS="ln=35:cx=33:mt=31" ugrep+ -Rzoian -B50 -A50 --sort --hidden --exclude='*.rar' --color=always ${@} -e "$SEARCH_PATTERN" 2>/dev/null | \
@@ -24,17 +19,8 @@ detailedsearch() {
     --bind 'enter:execute-silent(nohup xdg-open {1})' \
     --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
     --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)"
-
-    if [[ -n "$TMUX" ]]; then
-        tmux rename-window "$original_name"  # Restore original name
-    fi
 }
 detailedsearch_respectgitignore_ignorehidden() {
-    if [[ -n "$TMUX" ]]; then
-        original_name=$(tmux display-message -p '#W')  # Save current window name
-        tmux rename-window "xfind+"
-    fi
-
     local SEARCH_PATTERN="$1" && shift
     local GREP_ARGS=$(echo "${@}" | grep -o '\(-w\|--word-regexp\)') # only pass -w flag to ugrep in preview
     local GITIGNORE_OPT=""
@@ -57,8 +43,4 @@ detailedsearch_respectgitignore_ignorehidden() {
     --bind 'enter:execute-silent(nohup xdg-open {1})' \
     --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
     --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)"
-
-    if [[ -n "$TMUX" ]]; then
-        tmux rename-window "$original_name"  # Restore original name
-    fi
 }
