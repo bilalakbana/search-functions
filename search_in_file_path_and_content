@@ -7,7 +7,7 @@ ugf() {
     local GITIGNORE_OPT=""
     [[ -f .gitignore ]] && GITIGNORE_OPT="--exclude-from=.gitignore"
 
-    local UG_CMD="ug -RU --color=always --sort=rname --line-number --ignore-binary --no-heading $GITIGNORE_OPT"
+    local UG_CMD="ug -RU --color=always --sort=name --line-number --ignore-binary --no-heading $GITIGNORE_OPT"
 
     if [[ "$1" =~ ^--glob= ]]; then
         local patterns="${1#--glob=}"
@@ -52,7 +52,7 @@ ugf-plus() {
     local GITIGNORE_OPT=""
     [[ -f .gitignore ]] && GITIGNORE_OPT="--exclude-from=.gitignore"
 
-    local UG_CMD="ug+ -RU --color=always --sort=rname --line-number --ignore-binary --no-heading $GITIGNORE_OPT"
+    local UG_CMD="ug+ -RU --color=always --sort=name --line-number --ignore-binary --no-heading $GITIGNORE_OPT"
 
     if [[ "$1" =~ ^--glob= ]]; then
         local patterns="${1#--glob=}"
