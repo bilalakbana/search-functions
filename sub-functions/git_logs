@@ -29,48 +29,77 @@ logs() {
     FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
     DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
 
-    # Check if last argument is a file
-    if [[ -f "${@: -1}" ]]; then
-        file=$(readlink -f "${@: -1}")
+    local path_arg=""
+    local git_args=()
+    local original_dir="$PWD"
 
-        # ⚡ Move into file's directory first to ensure correct Git context
-        cd "$(dirname "$file")" || { echo -e "\033[31mCannot cd into file directory.\033[0m"; return; }
-        repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo -e "\033[31mNot inside a Git repository.\033[0m"; return; }
+    for arg in "$@"; do
+        if [[ -z "$path_arg" && -e "$arg" ]]; then
+            path_arg=$(readlink -f "$arg")
+        else
+            git_args+=("$arg")
+        fi
+    done
 
-        # Only do submodule check if .gitmodules exists
-        if [[ -f "$repo_root/.gitmodules" ]]; then
-            submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp path 2>/dev/null | while read -r _ path; do
-                [[ "$file" == *"$path"* ]] && echo "$path" && break
-            done)
+    if [[ -n "$path_arg" ]]; then
+        if [[ -d "$path_arg" ]]; then
+            is_dir=true
+            dir="$path_arg"
+        else
+            is_dir=false
+            dir=$(dirname "$path_arg")
+        fi
 
-            if [[ -n "$submodule_path" ]]; then
-                relative_path="${file#*$submodule_path/}"
-                cd "$repo_root/$submodule_path" || { echo -e "\033[31mCannot cd into submodule.\033[0m"; return; }
+        cd "$dir" || { echo -e "\033[31mCannot cd into target directory.\033[0m"; return; }
 
-                # Check if file is tracked
-                if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
-                    echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
-                    return
-                fi
+        repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+        if [[ -z "$repo_root" ]]; then
+            echo -e "\033[31mNot inside a Git repository.\033[0m"
+            cd "$original_dir"
+            return
+        fi
 
-                (git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status "${@:1:$#-1}" -- "$relative_path" | less -R -i --mouse)
+        submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp path 2>/dev/null | while read -r _ path; do
+            [[ "$path_arg" == *"/$path/"* || "$path_arg" == *"/$path" ]] && echo "$path" && break
+        done)
+
+        if [[ -n "$submodule_path" ]]; then
+            relative_path="${path_arg#*$submodule_path/}"
+            cd "$repo_root/$submodule_path" || {
+                echo -e "\033[31mCannot cd into submodule.\033[0m"
+                cd "$original_dir"
+                return
+            }
+        else
+            relative_path="${path_arg#$repo_root/}"
+            cd "$repo_root" || {
+                echo -e "\033[31mCannot cd into repo root.\033[0m"
+                cd "$original_dir"
+                return
+            }
+        fi
+
+        if [[ "$is_dir" == false ]]; then
+            if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
+                echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
+                cd "$original_dir"
+                return
+            fi
+        else
+            if ! git ls-files "$relative_path" | grep -q .; then
+                echo -e "\033[31m⚡ No tracked files found under directory:\033[0m $relative_path"
+                cd "$original_dir"
                 return
             fi
         fi
 
-        relative_path="${file#$repo_root/}"
-        cd "$repo_root" || { echo -e "\033[31mCannot cd into repo root.\033[0m"; return; }
-
-        # Check if file is tracked
-        if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
-            echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
-            return
-        fi
-
-        (git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status "${@:1:$#-1}" -- "$relative_path" | less -R -i --mouse)
+        git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status "${git_args[@]}" -- "$relative_path" | less -R -i --mouse
+        cd "$original_dir"
         return
     fi
 
-    # Default case - regular git log (if not file input)
-    git log --color=always --pretty=format:"$FORMAT" $DATEOPT --name-status "$@" | less -R -i --mouse
+    # Default case: no file/dir passed
+    git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status "$@" | less -R -i --mouse
 }
+
+
