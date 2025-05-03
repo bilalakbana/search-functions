@@ -56,7 +56,7 @@ else
     fi
 fi
 
-# Now show git log
+# Now show git diff
 (
     git log --color=always --format=$'commit %Cblue%h%Creset%n%Cred→ Author:%Creset %an%n%Cgreen→ Date:%Creset %ad \033[33m(%ar)\033[0m%n%Cred→ Message:%Creset %s%n'"$HR" \
         --date=format:'%Y-%m-%d %H:%M:%S' -p --no-prefix --unified=3 "$relative_path"
