@@ -152,7 +152,7 @@ rga-fzfS() {
 
     local RG_PREFIX="rga --files-with-matches ${GLOB_PATTERN[@]}"
     local COLOR_AND_SORT="stdbuf -oL sed 's/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/' | stdbuf -oL sed 's/\\//\x1b[33m\/\x1b[34m/g' | stdbuf -oL sed 's/^[^/]\\+$/\x1b[32m&/'"
-    FZF_DEFAULT_COMMAND="$RG_PREFIX '$1' | LC_ALL=C sort -r 2>/dev/null | $COLOR_AND_SORT || true" \
+    FZF_DEFAULT_COMMAND="$RG_PREFIX '$1' | LC_ALL=C sort 2>/dev/null | $COLOR_AND_SORT || true" \
         fzf --sort --ansi --style full \
         --preview 'printf "\033[31mFile Path:\033[0m %s\n" {};if [[ ! -z {q} ]]; then printf "\033[31mMatches:\033[0m ";rga -o {q} {} 2>/dev/null | wc -l;echo;rga --pretty --context 10 {q} {} 2>/dev/null;else printf "\033[31mMatches:\033[0m \n\n";rga --pretty --context 10 "" {} 2>/dev/null;fi' \
         --color 'fg:bright-cyan,fg+:bright-cyan,preview-fg:bright-magenta,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \

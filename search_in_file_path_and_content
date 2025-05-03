@@ -150,7 +150,7 @@ rgfS() {
         --border top \
         --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
-        --bind "ctrl-r:reload($RG_CMD | LC_ALL=C sort -r || echo 'No results found')" \
+        --bind "ctrl-r:reload($RG_CMD | LC_ALL=C sort || echo 'No results found')" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
         --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1}); tmux select-pane -T editor" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
