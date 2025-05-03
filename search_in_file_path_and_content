@@ -113,7 +113,7 @@ rgf() {
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind "ctrl-r:reload($RG_CMD || rg --files || echo 'No results found')" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
-        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1}); tmux select-pane -T editor" \
+        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1}; tmux select-pane -T editor)" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \
@@ -142,7 +142,7 @@ rgfS() {
     }
     RG_CMD+=" '${*:-}'"
 
-    eval "$RG_CMD" | LC_ALL=C sort -r | \
+    eval "$RG_CMD" | LC_ALL=C sort | \
     fzf --ansi --exact --no-sort --style full --wrap \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline:reverse,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --delimiter : \
@@ -152,7 +152,7 @@ rgfS() {
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind "ctrl-r:reload($RG_CMD | LC_ALL=C sort || echo 'No results found')" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
-        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1}); tmux select-pane -T editor" \
+        --bind "ctrl-o:execute-silent(tmux new-window -n 'nvim'  nvim {1}; tmux select-pane -T editor)" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
         --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \

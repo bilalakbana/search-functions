@@ -9,11 +9,11 @@ awk -F"/" '\''{
     dir=substr($0, 1, length($0)-length($NF))
     gsub("/", "\x1b[33m/\x1b[34m", dir)
     file=$NF
-    printf "0\t\x1b[34m%s\x1b[32m%s\x1b[0m\n", dir, file
+    printf "\x1b[34m%s\x1b[32m%s\x1b[0m\n", dir, file
     } else {
-    printf "2\t\x1b[32m%s\x1b[0m\n", $1
+    printf "\x1b[32m%s\x1b[0m\n", $1
     }
-}'\'' | LC_ALL=C sort -r -k1,1 -k2 | cut -f2-'
+}'\'' | LC_ALL=C sort'
 
 "${fd_cmd[@]}" | eval "$process_cmd" | \
 fzf --exact --no-sort --ansi --style full --wrap --delimiter : \
