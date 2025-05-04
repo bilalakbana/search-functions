@@ -4,16 +4,28 @@ ugf() {
         tmux rename-window ugf
     fi
 
-    local GITIGNORE_OPT=""
-    # If --no-ignore is *not* in the arguments and .gitignore exists, apply gitignore
-    if [[ ! " $* " =~ [[:space:]]--no-ignore[[:space:]] ]] && [[ -f .gitignore ]]; then
-        GITIGNORE_OPT="--exclude-from=.gitignore"
-    else
-        set -- "${@/--no-ignore}" # Remove --no-ignore from arguments
-    fi
+    local GLOB_PATTERN=()
+    local EXTRA_OPTS=("--exclude-from=.gitignore") # pre-add, remove if --no-ignore is detected
+    for arg in "$@"; do
+        if [[ $arg == --glob=* ]]; then
+            patterns=${arg#--glob=}
+            while [[ -n $patterns ]]; do
+                pat=${patterns%%,*}
+                GLOB_PATTERN+=("-g" "'$pat'")
+                [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
+            done
+        elif [[ $arg == --no-ignore ]]; then
+            # Remove pre-added --exclude-from=.gitignore if --no-ignore is found
+            EXTRA_OPTS=("${EXTRA_OPTS[@]/--exclude-from=.gitignore}")
+        else
+            EXTRA_OPTS+=("$arg")
+        fi
+    done
+    # Ensure .gitignore actually exists before finalizing
+    [[ ! -f .gitignore ]] && EXTRA_OPTS=("${EXTRA_OPTS[@]/--exclude-from=.gitignore}")
 
     local UG_CMD="GREP_COLORS='fn=35:ln=32:mt=97' \
-    ug -RU --color=always --sort=name --line-number --ignore-binary --no-heading $GITIGNORE_OPT ${@} ."
+    ug -RU --color=always --sort=name --line-number --ignore-binary --no-heading ${GLOB_PATTERN[@]} ${EXTRA_OPTS[@]} ."
 
     FZF_DEFAULT_COMMAND="$UG_CMD | tr -d '\r'" \
     fzf --ansi --delimiter : --no-sort --style full --wrap --exact \
@@ -47,16 +59,28 @@ ugf-plus() {
         tmux rename-window ugf
     fi
 
-    local GITIGNORE_OPT=""
-    # If --no-ignore is *not* in the arguments and .gitignore exists, apply gitignore
-    if [[ ! " $* " =~ [[:space:]]--no-ignore[[:space:]] ]] && [[ -f .gitignore ]]; then
-        GITIGNORE_OPT="--exclude-from=.gitignore"
-    else
-        set -- "${@/--no-ignore}" # Remove --no-ignore from arguments
-    fi
+    local GLOB_PATTERN=()
+    local EXTRA_OPTS=("--exclude-from=.gitignore") # pre-add, remove if --no-ignore is detected
+    for arg in "$@"; do
+        if [[ $arg == --glob=* ]]; then
+            patterns=${arg#--glob=}
+            while [[ -n $patterns ]]; do
+                pat=${patterns%%,*}
+                GLOB_PATTERN+=("-g" "'$pat'")
+                [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
+            done
+        elif [[ $arg == --no-ignore ]]; then
+            # Remove pre-added --exclude-from=.gitignore if --no-ignore is found
+            EXTRA_OPTS=("${EXTRA_OPTS[@]/--exclude-from=.gitignore}")
+        else
+            EXTRA_OPTS+=("$arg")
+        fi
+    done
+    # Ensure .gitignore actually exists before finalizing
+    [[ ! -f .gitignore ]] && EXTRA_OPTS=("${EXTRA_OPTS[@]/--exclude-from=.gitignore}")
 
     local UG_CMD="GREP_COLORS='fn=35:ln=32:mt=97' \
-    ug+ -RU --color=always --sort=name --line-number --ignore-binary --no-heading $GITIGNORE_OPT ${@} ."
+    ug+ -RU --color=always --sort=name --line-number --ignore-binary --no-heading ${GLOB_PATTERN[@]} ${EXTRA_OPTS[@]} ."
 
     FZF_DEFAULT_COMMAND="$UG_CMD | tr -d '\r'" \
     fzf --ansi --delimiter : --no-sort --style full --wrap --exact \
