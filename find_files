@@ -4,13 +4,6 @@ f() {
         tmux rename-window files
     fi
 
-    # If no .gitignore exists and user hasn't provided --no-ignore, add --no-ignore
-    # If user hasn't provided --no-ignore but .gitignore exists then files, written in .gitignore, will be ignored by default
-    # Goal is to ignore the files by default when there is .gitignore file in the current working directory if user hasn't provided --no-ignore
-    if [[ ! -f .gitignore ]] && [[ ! " $* " =~ [[:space:]]--no-ignore[[:space:]] ]]; then
-        set -- --no-ignore "$@"
-    fi
-
     fd_cmd=(fd --type f "$@")
     reload_cmd=$(printf "%q " "${fd_cmd[@]}")
 
