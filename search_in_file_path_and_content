@@ -17,7 +17,7 @@ ugf() {
 
     UG_CMD="$UG_CMD '${*:-}' ."
 
-    FZF_DEFAULT_COMMAND="$UG_CMD" \
+    FZF_DEFAULT_COMMAND="$UG_CMD | tr -d '\r'" \
     fzf --ansi --delimiter : --no-sort --style full --wrap --exact \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline:reverse,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --preview 'batcat --color=always {1} --highlight-line {2}' \
@@ -62,7 +62,7 @@ ugf-plus() {
 
     UG_CMD="$UG_CMD '${*:-}' ."
 
-    FZF_DEFAULT_COMMAND="$UG_CMD" \
+    FZF_DEFAULT_COMMAND="$UG_CMD | tr -d '\r'" \
     fzf --ansi --delimiter : --no-sort --style full --wrap --exact \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline:reverse,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --preview 'batcat --color=always {1} --highlight-line {2}' \
