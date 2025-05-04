@@ -5,17 +5,15 @@ ugf() {
     fi
 
     local GITIGNORE_OPT=""
-    [[ -f .gitignore ]] && GITIGNORE_OPT="--exclude-from=.gitignore"
-
-    local UG_CMD="ug -RU --color=always --sort=name --line-number --ignore-binary --no-heading $GITIGNORE_OPT"
-
-    if [[ "$1" =~ ^--glob= ]]; then
-        local patterns="${1#--glob=}"
-        UG_CMD="$UG_CMD --glob='$patterns'"
-        shift
+    # If --no-ignore is *not* in the arguments and .gitignore exists, apply gitignore
+    if [[ ! " $* " =~ [[:space:]]--no-ignore[[:space:]] ]] && [[ -f .gitignore ]]; then
+        GITIGNORE_OPT="--exclude-from=.gitignore"
+    else
+        set -- "${@/--no-ignore}" # Remove --no-ignore from arguments
     fi
 
-    UG_CMD="$UG_CMD '${*:-}' ."
+    local UG_CMD="GREP_COLORS='fn=35:ln=32:mt=97' \
+    ug -RU --color=always --sort=name --line-number --ignore-binary --no-heading $GITIGNORE_OPT ${@} ."
 
     FZF_DEFAULT_COMMAND="$UG_CMD | tr -d '\r'" \
     fzf --ansi --delimiter : --no-sort --style full --wrap --exact \
@@ -50,17 +48,15 @@ ugf-plus() {
     fi
 
     local GITIGNORE_OPT=""
-    [[ -f .gitignore ]] && GITIGNORE_OPT="--exclude-from=.gitignore"
-
-    local UG_CMD="ug+ -RU --color=always --sort=name --line-number --ignore-binary --no-heading $GITIGNORE_OPT"
-
-    if [[ "$1" =~ ^--glob= ]]; then
-        local patterns="${1#--glob=}"
-        UG_CMD="$UG_CMD --glob='$patterns'"
-        shift
+    # If --no-ignore is *not* in the arguments and .gitignore exists, apply gitignore
+    if [[ ! " $* " =~ [[:space:]]--no-ignore[[:space:]] ]] && [[ -f .gitignore ]]; then
+        GITIGNORE_OPT="--exclude-from=.gitignore"
+    else
+        set -- "${@/--no-ignore}" # Remove --no-ignore from arguments
     fi
 
-    UG_CMD="$UG_CMD '${*:-}' ."
+    local UG_CMD="GREP_COLORS='fn=35:ln=32:mt=97' \
+    ug+ -RU --color=always --sort=name --line-number --ignore-binary --no-heading $GITIGNORE_OPT ${@} ."
 
     FZF_DEFAULT_COMMAND="$UG_CMD | tr -d '\r'" \
     fzf --ansi --delimiter : --no-sort --style full --wrap --exact \
