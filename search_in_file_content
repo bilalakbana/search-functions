@@ -5,21 +5,21 @@ ugrep-fzf() {
     fi
 
     local GITIGNORE_OPT=""
-    [[ -f .gitignore ]] && GITIGNORE_OPT="--exclude-from=.gitignore"
-    local UG_PREFIX="ugrep -RU --sort=name --files-with-matches --smart-case --ignore-binary $GITIGNORE_OPT"
-    local COLOR_AND_SORT="stdbuf -oL sed 's/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/' | stdbuf -oL sed 's/\//\x1b[33m\/\x1b[34m/g' | stdbuf -oL sed 's/^[^/]\\+$/\x1b[32m&/'"
-
-    if [[ "$1" =~ ^--glob= ]]; then
-        local patterns="${1#--glob=}"
-        UG_PREFIX="$UG_PREFIX --glob='$patterns'"
-        shift
+    # If --no-ignore is *not* in the arguments and .gitignore exists, apply gitignore
+    if [[ ! " $* " =~ [[:space:]]--no-ignore[[:space:]] ]] && [[ -f .gitignore ]]; then
+        GITIGNORE_OPT="--exclude-from=.gitignore"
+    else
+        set -- "${@/--no-ignore}" # Remove --no-ignore from arguments
     fi
 
-    FZF_DEFAULT_COMMAND="$UG_PREFIX '$1' . | $COLOR_AND_SORT" \
+    local UG_PREFIX="ugrep -RU --sort=name --files-with-matches --smart-case --ignore-binary $GITIGNORE_OPT ${@}"
+    local COLOR_AND_SORT="stdbuf -oL sed 's/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/' | stdbuf -oL sed 's/\//\x1b[33m\/\x1b[34m/g' | stdbuf -oL sed 's/^[^/]\\+$/\x1b[32m&/'"
+
+    FZF_DEFAULT_COMMAND="$UG_PREFIX '' . | $COLOR_AND_SORT" \
     fzf --ansi --no-sort --style full --wrap --delimiter : \
         --preview 'printf "\033[31mFile Path :\033[0m " && echo {} | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g";if [[ ! -z {q} ]]; then printf "\033[31mMatches   :\033[31m ";ugrep -o --smart-case -U -- {q} {} 2>/dev/null | wc -l;echo;GREP_COLORS="ln=32:sl=35:cx=35:mt=1;31:fn=32" ugrep --smart-case -U --color=always -n -C 8 -- {q} {} | tr -d "\r";else printf "\033[31mMatches   :\033[31m \n\n";ugrep -U --color=always -n --colors=line=32,sl=35,ms=35,mc=35 "" {} | tr -d "\r";fi' \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
-        --phony -q "$1" \
+        --phony -q "" \
         --border top \
         --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --bind "change:reload:$UG_PREFIX {q} . | $COLOR_AND_SORT || true" \
@@ -50,7 +50,13 @@ ugrep-fzf-plus() {
     fi
 
     local GITIGNORE_OPT=""
-    [[ -f .gitignore ]] && GITIGNORE_OPT="--exclude-from=.gitignore"
+    # If --no-ignore is *not* in the arguments and .gitignore exists, apply gitignore
+    if [[ ! " $* " =~ [[:space:]]--no-ignore[[:space:]] ]] && [[ -f .gitignore ]]; then
+        GITIGNORE_OPT="--exclude-from=.gitignore"
+    else
+        set -- "${@/--no-ignore}" # Remove --no-ignore from arguments
+    fi
+
     local UG_PREFIX="ugrep+ -RU --sort=name --files-with-matches --smart-case --ignore-binary $GITIGNORE_OPT"
     local COLOR_AND_SORT="stdbuf -oL sed 's/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/' | stdbuf -oL sed 's/\//\x1b[33m\/\x1b[34m/g' | stdbuf -oL sed 's/^[^/]\\+$/\x1b[32m&/'"
 
@@ -60,11 +66,11 @@ ugrep-fzf-plus() {
         shift
     fi
 
-    FZF_DEFAULT_COMMAND="$UG_PREFIX '$1' . | $COLOR_AND_SORT" \
+    FZF_DEFAULT_COMMAND="$UG_PREFIX '' . | $COLOR_AND_SORT" \
     fzf --ansi --no-sort --style full --wrap --delimiter : \
         --preview 'printf "\033[31mFile Path :\033[0m " && echo {} | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g";if [[ ! -z {q} ]]; then printf "\033[31mMatches   :\033[31m ";ugrep+ -o --smart-case -U -- {q} {} 2>/dev/null | wc -l;echo;GREP_COLORS="ln=32:sl=35:cx=35:mt=1;31:fn=32" ugrep+ --smart-case -U --color=always -n -C 8 -- {q} {} | tr -d "\r";else printf "\033[31mMatches   :\033[31m \n\n";ugrep+ -U --color=always -n --colors=line=32,sl=35,ms=35,mc=35 "" {} | tr -d "\r";fi' \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
-        --phony -q "$1" \
+        --phony -q "" \
         --border top \
         --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --bind "change:reload:$UG_PREFIX {q} . | $COLOR_AND_SORT || true" \
