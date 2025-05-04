@@ -90,15 +90,24 @@ rgf() {
         tmux rename-window rgf
     fi
 
-    local RG_CMD="rg --color=always --line-number --no-heading"
-    [[ "$1" =~ ^--glob= ]] && {
-        for pattern in $(echo "${1#--glob=}" | tr ',' ' '); do
-            RG_CMD+=" -g '$pattern'"
-        done
-        shift
-    }
-    RG_CMD+=" '${*:-}'"
+    local GLOB_PATTERN=()
+    local EXTRA_OPTS=()
 
+    for arg in "$@"; do
+        if [[ $arg == --glob=* ]]; then
+            patterns=${arg#--glob=}           # e.g. "*.sh,*.txt,*.md"
+            # repeatedly peel off patterns up to the next comma
+            while [[ -n $patterns ]]; do
+                pat=${patterns%%,*}           # text before first comma
+                GLOB_PATTERN+=("-g" "'$pat'") # keep single quotes
+                [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
+            done
+        else
+            EXTRA_OPTS+=("$arg")
+        fi
+    done
+
+    local RG_CMD="rg '' --color=always --line-number --no-heading ${GLOB_PATTERN[@]} ${EXTRA_OPTS[@]}"
     eval "$RG_CMD" | \
     fzf --ansi --exact --style full --wrap \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
@@ -129,14 +138,24 @@ rgfS() {
         tmux rename-window rgf
     fi
 
-    local RG_CMD="rg --color=always --line-number --no-heading"
-    [[ "$1" =~ ^--glob= ]] && {
-        for pattern in $(echo "${1#--glob=}" | tr ',' ' '); do
-            RG_CMD+=" -g '$pattern'"
-        done
-        shift
-    }
-    RG_CMD+=" '${*:-}'"
+    local GLOB_PATTERN=()
+    local EXTRA_OPTS=()
+
+    for arg in "$@"; do
+        if [[ $arg == --glob=* ]]; then
+            patterns=${arg#--glob=}           # e.g. "*.sh,*.txt,*.md"
+            # repeatedly peel off patterns up to the next comma
+            while [[ -n $patterns ]]; do
+                pat=${patterns%%,*}           # text before first comma
+                GLOB_PATTERN+=("-g" "'$pat'") # keep single quotes
+                [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
+            done
+        else
+            EXTRA_OPTS+=("$arg")
+        fi
+    done
+
+    local RG_CMD="rg '' --color=always --line-number --no-heading ${GLOB_PATTERN[@]} ${EXTRA_OPTS[@]}"
 
     eval "$RG_CMD" | LC_ALL=C sort | \
     fzf --ansi --exact --no-sort --style full --wrap \

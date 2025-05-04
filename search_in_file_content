@@ -57,14 +57,8 @@ ugrep-fzf-plus() {
         set -- "${@/--no-ignore}" # Remove --no-ignore from arguments
     fi
 
-    local UG_PREFIX="ugrep+ -RU --sort=name --files-with-matches --smart-case --ignore-binary $GITIGNORE_OPT"
+    local UG_PREFIX="ugrep+ -RU --sort=name --files-with-matches --smart-case --ignore-binary $GITIGNORE_OPT ${@}"
     local COLOR_AND_SORT="stdbuf -oL sed 's/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/' | stdbuf -oL sed 's/\//\x1b[33m\/\x1b[34m/g' | stdbuf -oL sed 's/^[^/]\\+$/\x1b[32m&/'"
-
-    if [[ "$1" =~ ^--glob= ]]; then
-        local patterns="${1#--glob=}"
-        UG_PREFIX="$UG_PREFIX --glob='$patterns'"
-        shift
-    fi
 
     FZF_DEFAULT_COMMAND="$UG_PREFIX '' . | $COLOR_AND_SORT" \
     fzf --ansi --no-sort --style full --wrap --delimiter : \
@@ -101,22 +95,29 @@ rga-fzf() {
     fi
 
     local GLOB_PATTERN=()
-    if [[ "$1" == "--glob="* ]]; then
-        patterns="${1#--glob=}"
-        for pattern in $(echo "$patterns" | tr ',' ' '); do
-            GLOB_PATTERN+=("-g")
-            GLOB_PATTERN+=("'$pattern'")
-        done
-        shift 1
-    fi
+    local EXTRA_OPTS=()
 
-    local RG_PREFIX="rga --files-with-matches ${GLOB_PATTERN[@]}"
+    for arg in "$@"; do
+        if [[ $arg == --glob=* ]]; then
+            patterns=${arg#--glob=}           # e.g. "*.sh,*.txt,*.md"
+            # repeatedly peel off patterns up to the next comma
+            while [[ -n $patterns ]]; do
+                pat=${patterns%%,*}           # text before first comma
+                GLOB_PATTERN+=("-g" "'$pat'") # keep single quotes
+                [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
+            done
+        else
+            EXTRA_OPTS+=("$arg")
+        fi
+    done
+
+    local RG_PREFIX="rga --files-with-matches ${GLOB_PATTERN[@]} ${EXTRA_OPTS[@]}"
     local COLOR_AND_SORT="stdbuf -oL sed 's/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/' | stdbuf -oL sed 's/\\//\x1b[33m\/\x1b[34m/g' | stdbuf -oL sed 's/^[^/]\\+$/\x1b[32m&/'"
-    FZF_DEFAULT_COMMAND="$RG_PREFIX '$1' 2>/dev/null | $COLOR_AND_SORT || true" \
+    FZF_DEFAULT_COMMAND="$RG_PREFIX '' 2>/dev/null | $COLOR_AND_SORT || true" \
         fzf --sort --ansi --style full \
         --preview 'printf "\033[31mFile Path:\033[0m %s\n" {};if [[ ! -z {q} ]]; then printf "\033[31mMatches:\033[0m ";rga -o {q} {} 2>/dev/null | wc -l;echo;rga --pretty --context 10 {q} {} 2>/dev/null;else printf "\033[31mMatches:\033[0m \n\n";rga --pretty --context 10 "" {} 2>/dev/null;fi' \
         --color 'fg:bright-cyan,fg+:bright-cyan,preview-fg:bright-magenta,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
-        --phony -q "$1" \
+        --phony -q "" \
         --border top \
         --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --bind "change:reload:$RG_PREFIX {q} 2>/dev/null | $COLOR_AND_SORT || true" \
@@ -147,22 +148,29 @@ rga-fzfS() {
     fi
 
     local GLOB_PATTERN=()
-    if [[ "$1" == "--glob="* ]]; then
-        patterns="${1#--glob=}"
-        for pattern in $(echo "$patterns" | tr ',' ' '); do
-            GLOB_PATTERN+=("-g")
-            GLOB_PATTERN+=("'$pattern'")
-        done
-        shift 1
-    fi
+    local EXTRA_OPTS=()
 
-    local RG_PREFIX="rga --files-with-matches ${GLOB_PATTERN[@]}"
+    for arg in "$@"; do
+        if [[ $arg == --glob=* ]]; then
+            patterns=${arg#--glob=}           # e.g. "*.sh,*.txt,*.md"
+            # repeatedly peel off patterns up to the next comma
+            while [[ -n $patterns ]]; do
+                pat=${patterns%%,*}           # text before first comma
+                GLOB_PATTERN+=("-g" "'$pat'") # keep single quotes
+                [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
+            done
+        else
+            EXTRA_OPTS+=("$arg")
+        fi
+    done
+
+    local RG_PREFIX="rga --files-with-matches ${GLOB_PATTERN[@]} ${EXTRA_OPTS[@]}"
     local COLOR_AND_SORT="stdbuf -oL sed 's/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/' | stdbuf -oL sed 's/\\//\x1b[33m\/\x1b[34m/g' | stdbuf -oL sed 's/^[^/]\\+$/\x1b[32m&/'"
-    FZF_DEFAULT_COMMAND="$RG_PREFIX '$1' 2>/dev/null | $COLOR_AND_SORT | LC_ALL=C sort || true" \
+    FZF_DEFAULT_COMMAND="$RG_PREFIX '' 2>/dev/null | $COLOR_AND_SORT | LC_ALL=C sort || true" \
         fzf --sort --ansi --style full \
         --preview 'printf "\033[31mFile Path:\033[0m %s\n" {};if [[ ! -z {q} ]]; then printf "\033[31mMatches:\033[0m ";rga -o {q} {} 2>/dev/null | wc -l;echo;rga --pretty --context 10 {q} {} 2>/dev/null;else printf "\033[31mMatches:\033[0m \n\n";rga --pretty --context 10 "" {} 2>/dev/null;fi' \
         --color 'fg:bright-cyan,fg+:bright-cyan,preview-fg:bright-magenta,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
-        --phony -q "$1" \
+        --phony -q "" \
         --border top \
         --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --bind "change:reload:$RG_PREFIX {q} 2>/dev/null | $COLOR_AND_SORT | LC_ALL=C sort || true" \
