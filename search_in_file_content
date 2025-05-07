@@ -41,7 +41,7 @@ ugrep-fzf() {
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
         --bind 'enter:execute-silent(nohup xdg-open {})' \
-        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' nvim {} || tmux new-window -n 'nvim' nvim {} -c /{q} -c \"set hlsearch\"; tmux select-pane -T editor)" \
+        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n nvim nvim \"$(realpath \"{}\"\") || tmux new-window -n nvim nvim \"$(realpath \"{}\"\") -c /{q} -c \"set hlsearch\"; tmux select-pane -T editor)" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{}\"\") {q}; tmux select-pane -T file-content)" \
@@ -98,10 +98,10 @@ ugrep-fzf-plus() {
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
         --bind 'enter:execute-silent(nohup xdg-open {})' \
-        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' nvim {} || tmux new-window -n 'nvim' nvim {} -c /{q} -c \"set hlsearch\"; tmux select-pane -T editor)" \
+        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n nvim nvim \"$(realpath \"{}\"\") || tmux new-window -n nvim nvim \"$(realpath \"{}\"\") -c /{q} -c \"set hlsearch\"; tmux select-pane -T editor)" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
-		--bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{}\"\") {q}; tmux select-pane -T file-content)" \
+        --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{}\"\") {q}; tmux select-pane -T file-content)" \
 		--bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"$(realpath \"{}\"\"); tmux select-pane -T git)" \
 		--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugrep_plus; tmux select-pane -T folder-list)" \
 		--bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{}\"\"); tmux select-pane -T git)" \
@@ -151,7 +151,7 @@ rga-fzf() {
         --bind "alt-down:preview-page-down" \
         --bind "ctrl-l:toggle-preview" \
         --bind 'enter:execute-silent(nohup xdg-open {})' \
-        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' nvim {} || tmux new-window -n 'nvim' nvim {} -c /{q} -c \"set hlsearch\"; tmux select-pane -T editor)" \
+        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n nvim nvim \"$(realpath \"{}\"\") || tmux new-window -n nvim nvim \"$(realpath \"{}\"\") -c /{q} -c \"set hlsearch\"; tmux select-pane -T editor)" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{}\"\") {q}; tmux select-pane -T file-content)" \
@@ -204,7 +204,7 @@ rga-fzfS() {
         --bind "alt-down:preview-page-down" \
         --bind "ctrl-l:toggle-preview" \
         --bind 'enter:execute-silent(nohup xdg-open {})' \
-        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n 'nvim' nvim {} || tmux new-window -n 'nvim' nvim {} -c /{q} -c \"set hlsearch\"; tmux select-pane -T editor)" \
+        --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n nvim nvim \"$(realpath \"{}\"\") || tmux new-window -n nvim nvim \"$(realpath \"{}\"\") -c /{q} -c \"set hlsearch\"; tmux select-pane -T editor)" \
         --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
         --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
 		--bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{}\"\") {q}; tmux select-pane -T file-content)" \
