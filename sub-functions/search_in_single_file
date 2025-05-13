@@ -34,10 +34,10 @@ fzf --ansi \
     --bind "enter:execute-silent(nohup xdg-open '$FILE')" \
     --bind "ctrl-c:execute-silent(echo -n '$FILE' | wl-copy)" \
     --bind "ctrl-o:execute-silent(tmux new-window -n nvim  nvim \"$FILE\"; tmux select-pane -T editor)" \
-	--bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager '$FILE')" \
-	--bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$FILE\"; tmux select-pane -T file-content)" \
-	--bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"$FILE\"; tmux select-pane -T git)" \
-	--bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$FILE\"; tmux select-pane -T git)" \
+    --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager '$FILE')" \
+    --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$FILE\"; tmux select-pane -T file-content)" \
+    --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"$FILE\"; tmux select-pane -T git)" \
+    --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$FILE\"; tmux select-pane -T git)" \
     --bind "change:reload(
         query={q}
         if [ -n \"\$query\" ]; then

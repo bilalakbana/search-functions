@@ -20,9 +20,9 @@ fzf --exact --ansi --style full --wrap --delimiter : \
     --bind "ctrl-r:reload($reload_cmd | $process_cmd)" \
     --bind "enter:execute-silent(tmux respawn-pane -k $SHELL -c \"tmux select-pane -T ugf; ~/.SearchFunctions/sub-functions/launchers/launch_ugf.sh {1}\")" \
     --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
-	--bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
-	--bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
-	--bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugrep; tmux select-pane -T folder-list)" \
+    --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
+    --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
+    --bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugrep; tmux select-pane -T folder-list)" \
     --bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)" \
     --bind "alt-n:execute-silent(tmux rename-window "$(basename $SHELL)"; tmux respawn-pane -k $SHELL -c \"cd {}; NO_AUTO_CD=1 exec $SHELL\")" \
     --bind 'ctrl-l:toggle-preview' \
