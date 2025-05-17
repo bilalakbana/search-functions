@@ -21,6 +21,8 @@ gfzf() {
             --bind "ctrl-g:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); SUMMARY=\$(git show --format='%s' \$1 | head -1); [[ -n \$TMUX ]] && tmux display -d0 \"\$(git log --all --format='%H' -F --grep=\"\$SUMMARY\" | xargs -I{} -- git branch --contains {} | sed 's/^\\*\\?\\s\\+//' | LC_ALL=C sort | uniq | paste -sd, - | sed -e 's/,/, /g' -e 's/^/#[bg=blue,italics] Branches (Grep) #[none,fg=black,bg=default] /')\"; }; f)" \
             --bind "ctrl-y:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); printf '%s' \$1 | clipboard; [[ -n \$TMUX ]] && tmux display \"#[bg=blue,italics] Yanked #[none,fg=black,bg=default] \$1\"; }; f)" \
             --bind "ctrl-s:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); SUMMARY=\$(git show --format='%s' \$1 | head -1); printf '%s' \"\$SUMMARY\" | clipboard; [[ -n \$TMUX ]] && tmux display \"#[bg=blue,italics] Yanked #[none,fg=black,bg=default] \$SUMMARY\"; }; f)" \
+            --bind 'alt-up:preview-page-up' \
+            --bind 'alt-down:preview-page-down' \
             --preview-window up:40%:wrap
 }
 logs() {
