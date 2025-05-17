@@ -101,5 +101,3 @@ logs() {
     # Default case: no file/dir passed
     git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status "$@" | less -R -i --mouse
 }
-
-
