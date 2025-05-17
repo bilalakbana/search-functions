@@ -101,5 +101,10 @@ logs() {
     fi
 
     # Default case: no file/dir passed
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo -e "\033[31mNot inside a Git repository.\033[0m"
+        return
+    fi
+
     git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status "$@" | less -R -i --mouse
 }
