@@ -4,7 +4,30 @@ f() {
         tmux rename-window files
     fi
 
-    fd_cmd=(fd --type f "$@")
+    local FD_ARGS=()
+
+    for arg in "$@"; do
+        if [[ $arg == --glob=* ]]; then
+            patterns=${arg#--glob=}
+            while [[ -n $patterns ]]; do
+                pat=${patterns%%,*}
+                ext=${pat#*.}  # strip '*.' to get just the extension
+                FD_ARGS+=("-e" "$ext")
+                [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
+            done
+        elif [[ $arg == --exclude=* ]]; then
+            patterns=${arg#--exclude=}
+            while [[ -n $patterns ]]; do
+                pat=${patterns%%,*}
+                FD_ARGS+=("--exclude" "$pat")
+                [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
+            done
+        else
+            FD_ARGS+=("$arg")
+        fi
+    done
+
+    fd_cmd=(fd --type f "${FD_ARGS[@]}")
     reload_cmd=$(printf "%q " "${fd_cmd[@]}")
 
     process_cmd='

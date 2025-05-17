@@ -14,8 +14,14 @@ ugf() {
                 GLOB_PATTERN+=("-g" "'$pat'")
                 [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
             done
+        elif [[ $arg == --exclude=* ]]; then
+            patterns=${arg#--exclude=}
+            while [[ -n $patterns ]]; do
+                pat=${patterns%%,*}
+                GLOB_PATTERN+=("-g" "'!$pat'")
+                [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
+            done
         elif [[ $arg == --no-ignore ]]; then
-            # Remove pre-added --exclude-from=.gitignore if --no-ignore is found
             EXTRA_OPTS=("${EXTRA_OPTS[@]/--exclude-from=.gitignore}")
         else
             EXTRA_OPTS+=("$arg")
@@ -69,8 +75,14 @@ ugf-plus() {
                 GLOB_PATTERN+=("-g" "'$pat'")
                 [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
             done
+        elif [[ $arg == --exclude=* ]]; then
+            patterns=${arg#--exclude=}
+            while [[ -n $patterns ]]; do
+                pat=${patterns%%,*}
+                GLOB_PATTERN+=("-g" "'!$pat'")
+                [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
+            done
         elif [[ $arg == --no-ignore ]]; then
-            # Remove pre-added --exclude-from=.gitignore if --no-ignore is found
             EXTRA_OPTS=("${EXTRA_OPTS[@]/--exclude-from=.gitignore}")
         else
             EXTRA_OPTS+=("$arg")
@@ -119,11 +131,17 @@ rgf() {
 
     for arg in "$@"; do
         if [[ $arg == --glob=* ]]; then
-            patterns=${arg#--glob=}           # e.g. "*.sh,*.txt,*.md"
-            # repeatedly peel off patterns up to the next comma
+            patterns=${arg#--glob=}
             while [[ -n $patterns ]]; do
-                pat=${patterns%%,*}           # text before first comma
-                GLOB_PATTERN+=("-g" "'$pat'") # keep single quotes
+                pat=${patterns%%,*}
+                GLOB_PATTERN+=("-g" "'$pat'")
+                [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
+            done
+        elif [[ $arg == --exclude=* ]]; then
+            patterns=${arg#--exclude=}
+            while [[ -n $patterns ]]; do
+                pat=${patterns%%,*}
+                GLOB_PATTERN+=("-g" "'!$pat'")
                 [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
             done
         else
@@ -140,6 +158,7 @@ rgf() {
         --border top \
         --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
+        --bind 'home:last,end:first' \
         --bind "ctrl-r:reload($RG_CMD || rg --files || echo 'No results found')" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
         --bind "ctrl-o:execute-silent(tmux new-window -n nvim  nvim \"$(realpath \"{1}\"\"); tmux select-pane -T editor)" \
@@ -167,11 +186,17 @@ rgfS() {
 
     for arg in "$@"; do
         if [[ $arg == --glob=* ]]; then
-            patterns=${arg#--glob=}           # e.g. "*.sh,*.txt,*.md"
-            # repeatedly peel off patterns up to the next comma
+            patterns=${arg#--glob=}
             while [[ -n $patterns ]]; do
-                pat=${patterns%%,*}           # text before first comma
-                GLOB_PATTERN+=("-g" "'$pat'") # keep single quotes
+                pat=${patterns%%,*}
+                GLOB_PATTERN+=("-g" "'$pat'")
+                [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
+            done
+        elif [[ $arg == --exclude=* ]]; then
+            patterns=${arg#--exclude=}
+            while [[ -n $patterns ]]; do
+                pat=${patterns%%,*}
+                GLOB_PATTERN+=("-g" "'!$pat'")
                 [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
             done
         else
@@ -189,6 +214,7 @@ rgfS() {
         --border top \
         --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
+        --bind 'home:last,end:first' \
         --bind "ctrl-r:reload($RG_CMD | LC_ALL=C sort || echo 'No results found')" \
         --bind 'enter:execute-silent(nohup xdg-open {1})' \
         --bind "ctrl-o:execute-silent(tmux new-window -n nvim  nvim \"$(realpath \"{1}\"\"); tmux select-pane -T editor)" \

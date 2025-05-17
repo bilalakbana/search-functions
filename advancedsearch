@@ -5,15 +5,39 @@
 advancedsearch() {
     local SEARCH_PATTERN="$1" && shift
     local GITIGNORE_OPT=""
+    local ARGS=()
 
-    # If --no-ignore is *not* in the arguments and .gitignore exists, apply gitignore
-    if [[ ! " $* " =~ [[:space:]]--no-ignore[[:space:]] ]] && [[ -f .gitignore ]]; then
+    # Check and remove --no-ignore first
+    local NO_IGNORE=false
+    for arg in "$@"; do
+        if [[ "$arg" == "--no-ignore" ]]; then
+            NO_IGNORE=true
+        else
+            ARGS+=("$arg")
+        fi
+    done
+
+    # If --no-ignore is not provided and .gitignore exists, apply gitignore
+    if ! $NO_IGNORE && [[ -f .gitignore ]]; then
         GITIGNORE_OPT="--exclude-from=.gitignore"
-    else
-        set -- "${@/--no-ignore}" # Remove --no-ignore from arguments
     fi
 
-    ugrep -Rzil --sort $GITIGNORE_OPT --exclude='*.rar' ${@} -e "$SEARCH_PATTERN" 2>/dev/null | tr -d '\r' | \
+    # Process exclude patterns
+    local FINAL_ARGS=()
+    for arg in "${ARGS[@]}"; do
+        if [[ $arg == --exclude=* ]]; then
+            patterns=${arg#--exclude=}
+            while [[ -n $patterns ]]; do
+                pat=${patterns%%,*}
+                FINAL_ARGS+=("--exclude=$pat")
+                [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
+            done
+        else
+            FINAL_ARGS+=("$arg")
+        fi
+    done
+
+    ugrep -Rzil --sort $GITIGNORE_OPT --exclude='*.rar' "${FINAL_ARGS[@]}" -e "$SEARCH_PATTERN" 2>/dev/null | tr -d '\r' | \
     stdbuf -oL sed 's/\([^{]*\){[^}]*}/\1/' | \
     stdbuf -oL awk '!seen[$0]++' | \
     stdbuf -oL sed -E $'s/^([^/]+)$/\x1b[32m\\1/' | \
@@ -31,5 +55,11 @@ advancedsearch() {
     --bind "alt-down:preview-page-down" \
     --bind 'enter:execute-silent(nohup xdg-open {})' \
     --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
-    --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)"
+    --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
+    --bind "ctrl-o:execute-silent(tmux new-window -n nvim  nvim \"$(realpath \"{}\"\"); tmux select-pane -T editor)" \
+    --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{}\"\") {q}; tmux select-pane -T file-content)" \
+    --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"$(realpath \"{}\"\"); tmux select-pane -T git)" \
+    --bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugrep; tmux select-pane -T folder-list)" \
+    --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{}\"\"); tmux select-pane -T git)" \
+    --bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)"
 }
