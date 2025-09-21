@@ -59,6 +59,8 @@ advancedsearch() {
     --bind "ctrl-o:execute-silent(tmux new-window -n nvim  nvim \"$(realpath \"{}\"\"); tmux select-pane -T editor)" \
     --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{}\"\") {q}; tmux select-pane -T file-content)" \
     --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"$(realpath \"{}\"\"); tmux select-pane -T git)" \
+	--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"$(realpath \"{}\"\"); tmux select-pane -T git)" \
+	--bind "alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short \"$(realpath \"{}\"\"); tmux select-pane -T git)" \
     --bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugrep; tmux select-pane -T folder-list)" \
     --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{}\"\"); tmux select-pane -T git)" \
     --bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)"
