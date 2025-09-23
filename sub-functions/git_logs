@@ -31,7 +31,7 @@ gfzf() {
 logs() {
     COLUMNS=$(tput cols)
     HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
-    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
+    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
     DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
 
     local path_arg=""
@@ -114,7 +114,7 @@ logs() {
 logs-and-diffs() {
     COLUMNS=$(tput cols)
     HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
-    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
+    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
     DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
 
     local path_arg=""
@@ -208,7 +208,7 @@ logs-and-diffs() {
 logs-and-diffs-sbs() {
     COLUMNS=$(tput cols)
     HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
-    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
+    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
     DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
 
     local path_arg=""
@@ -302,7 +302,7 @@ logs-and-diffs-sbs() {
 logs-and-diffs-full() {
     COLUMNS=$(tput cols)
     HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
-    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
+    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
     DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
 
     local path_arg=""
@@ -396,7 +396,7 @@ logs-and-diffs-full() {
 logs-and-diffs-full-sbs() {
     COLUMNS=$(tput cols)
     HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
-    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
+    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
     DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
 
     local path_arg=""
