@@ -64,4 +64,4 @@ if git diff --quiet -- "$relative_path" && git diff --cached --quiet -- "$relati
 fi
 
 # --- display diff ---
-git -c core.pager="delta --side-by-side --paging=never --width="${COLUMNS}" --minus-style='syntax gray' --plus-style='syntax gray' | less -R -i --mouse -S -+F" diff --unified=99999999999 -- "$relative_path"
+git -c core.pager="delta --side-by-side --paging=never --width="${COLUMNS}" --minus-style='syntax gray' --plus-style='syntax gray' | less -R -i --mouse -+F" diff --unified=99999999999 -- "$relative_path"

@@ -191,7 +191,7 @@ logs-and-diffs() {
         {
             git log --format="%H" "${git_args[@]}" -- "$relative_path" \
             | while IFS= read -r sha; do _show_commit "$sha"; done
-        } | less -R -i --mouse -S   # -S for horiz scroll with sbs diffs
+        } | less -R -i --mouse
 
         cd "$original_dir"; return
     fi
@@ -203,7 +203,7 @@ logs-and-diffs() {
     {
         git log --format="%H" "${git_args[@]}" \
         | while IFS= read -r sha; do _show_commit "$sha"; done
-    } | less -R -i --mouse -S
+    } | less -R -i --mouse
 }
 logs-and-diffs-sbs() {
     COLUMNS=$(tput cols)
@@ -285,7 +285,7 @@ logs-and-diffs-sbs() {
         {
             git log --format="%H" "${git_args[@]}" -- "$relative_path" \
             | while IFS= read -r sha; do _show_commit "$sha"; done
-        } | less -R -i --mouse -S   # -S for horiz scroll with sbs diffs
+        } | less -R -i --mouse
 
         cd "$original_dir"; return
     fi
@@ -297,7 +297,7 @@ logs-and-diffs-sbs() {
     {
         git log --format="%H" "${git_args[@]}" \
         | while IFS= read -r sha; do _show_commit "$sha"; done
-    } | less -R -i --mouse -S
+    } | less -R -i --mouse
 }
 logs-and-diffs-full() {
     COLUMNS=$(tput cols)
@@ -379,7 +379,7 @@ logs-and-diffs-full() {
         {
             git log --format="%H" "${git_args[@]}" -- "$relative_path" \
             | while IFS= read -r sha; do _show_commit "$sha"; done
-        } | less -R -i --mouse -S   # -S for horiz scroll with sbs diffs
+        } | less -R -i --mouse
 
         cd "$original_dir"; return
     fi
@@ -391,7 +391,7 @@ logs-and-diffs-full() {
     {
         git log --format="%H" "${git_args[@]}" \
         | while IFS= read -r sha; do _show_commit "$sha"; done
-    } | less -R -i --mouse -S
+    } | less -R -i --mouse
 }
 logs-and-diffs-full-sbs() {
     COLUMNS=$(tput cols)
@@ -473,7 +473,7 @@ logs-and-diffs-full-sbs() {
         {
             git log --format="%H" "${git_args[@]}" -- "$relative_path" \
             | while IFS= read -r sha; do _show_commit "$sha"; done
-        } | less -R -i --mouse -S   # -S for horiz scroll with sbs diffs
+        } | less -R -i --mouse
 
         cd "$original_dir"; return
     fi
@@ -485,5 +485,5 @@ logs-and-diffs-full-sbs() {
     {
         git log --format="%H" "${git_args[@]}" \
         | while IFS= read -r sha; do _show_commit "$sha"; done
-    } | less -R -i --mouse -S
+    } | less -R -i --mouse
 }
