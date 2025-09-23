@@ -121,7 +121,6 @@ logs-and-diffs() {
     local git_args=()
     local original_dir="$PWD"
 
-    # split first path-like arg from git args (same as your logs)
     for arg in "$@"; do
         if [[ -z "$path_arg" && -e "$arg" ]]; then
             path_arg=$(readlink -f "$arg")
@@ -130,37 +129,31 @@ logs-and-diffs() {
         fi
     done
 
-    # helper: show one commit (header, files, diff)
     _show_commit() {
         local sha="$1"
-        # 1) header (your pretty block)
         git show -s --color=always $DATEOPT --pretty=format:"$FORMAT" "$sha"
         echo
 
-        # 2) files changed (name-status)
         printf "\033[31mFiles    :\033[0m\n"
         git show --color=always --format= --name-status "$sha"
         echo
 
-        # 3) preview content (diff)
-        printf "\033[31mDiffs  :\033[0m\n"
+        printf "\033[31mDiffs    :\033[0m\n"
         if command -v delta >/dev/null 2>&1; then
-            git show --color=always --format= -p "$sha" | delta --line-numbers
+            git show --color=always --format= -p "$sha" \
+            | delta --width="$COLUMNS" --line-numbers \
+                    --minus-style="syntax gray" --plus-style="syntax gray"
         else
             git show --color=always --format= -p "$sha"
         fi
-
         echo
     }
 
-    # if a path/dir/file was passed, handle it the same way as your logs()
     if [[ -n "$path_arg" ]]; then
         if [[ -d "$path_arg" ]]; then
-            is_dir=true
-            dir="$path_arg"
+            is_dir=true; dir="$path_arg"
         else
-            is_dir=false
-            dir=$(dirname "$path_arg")
+            is_dir=false; dir=$(dirname "$path_arg")
         fi
 
         cd "$dir" || { echo -e "\033[31mCannot cd into target directory.\033[0m"; return; }
@@ -168,8 +161,7 @@ logs-and-diffs() {
         repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
         if [[ -z "$repo_root" ]]; then
             echo -e "\033[31mNot inside a Git repository.\033[0m"
-            cd "$original_dir"
-            return
+            cd "$original_dir"; return
         fi
 
         submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp path 2>/dev/null | while read -r _ path; do
@@ -178,16 +170,10 @@ logs-and-diffs() {
 
         if [[ -n "$submodule_path" ]]; then
             relative_path="${path_arg#*$submodule_path/}"
-            cd "$repo_root/$submodule_path" || {
-                echo -e "\033[31mCannot cd into submodule.\033[0m"
-                cd "$original_dir"; return
-            }
+            cd "$repo_root/$submodule_path" || { echo -e "\033[31mCannot cd into submodule.\033[0m"; cd "$original_dir"; return; }
         else
             relative_path="${path_arg#$repo_root/}"
-            cd "$repo_root" || {
-                echo -e "\033[31mCannot cd into repo root.\033[0m"
-                cd "$original_dir"; return
-            }
+            cd "$repo_root" || { echo -e "\033[31mCannot cd into repo root.\033[0m"; cd "$original_dir"; return; }
         fi
 
         if [[ "$is_dir" == false ]]; then
@@ -202,26 +188,116 @@ logs-and-diffs() {
             fi
         fi
 
-        # collect SHAs then render each one
         {
             git log --format="%H" "${git_args[@]}" -- "$relative_path" \
             | while IFS= read -r sha; do _show_commit "$sha"; done
-        } | less -R -i --mouse
+        } | less -R -i --mouse -S   # -S for horiz scroll with sbs diffs
 
-        cd "$original_dir"
-        return
+        cd "$original_dir"; return
     fi
 
-    # default: whole repo
     if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-        echo -e "\033[31mNot inside a Git repository.\033[0m"
-        return
+        echo -e "\033[31mNot inside a Git repository.\033[0m"; return
     fi
 
     {
         git log --format="%H" "${git_args[@]}" \
         | while IFS= read -r sha; do _show_commit "$sha"; done
-    } | less -R -i --mouse
+    } | less -R -i --mouse -S
+}
+logs-and-diffs-sbs() {
+    COLUMNS=$(tput cols)
+    HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
+    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
+    DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
+
+    local path_arg=""
+    local git_args=()
+    local original_dir="$PWD"
+
+    for arg in "$@"; do
+        if [[ -z "$path_arg" && -e "$arg" ]]; then
+            path_arg=$(readlink -f "$arg")
+        else
+            git_args+=("$arg")
+        fi
+    done
+
+    _show_commit() {
+        local sha="$1"
+        git show -s --color=always $DATEOPT --pretty=format:"$FORMAT" "$sha"
+        echo
+
+        printf "\033[31mFiles    :\033[0m\n"
+        git show --color=always --format= --name-status "$sha"
+        echo
+
+        printf "\033[31mDiffs    :\033[0m\n"
+        if command -v delta >/dev/null 2>&1; then
+            git show --color=always --format= -p "$sha" \
+            | delta --side-by-side --width="$COLUMNS" --line-numbers \
+                    --minus-style="syntax gray" --plus-style="syntax gray"
+        else
+            git show --color=always --format= -p "$sha"
+        fi
+        echo
+    }
+
+    if [[ -n "$path_arg" ]]; then
+        if [[ -d "$path_arg" ]]; then
+            is_dir=true; dir="$path_arg"
+        else
+            is_dir=false; dir=$(dirname "$path_arg")
+        fi
+
+        cd "$dir" || { echo -e "\033[31mCannot cd into target directory.\033[0m"; return; }
+
+        repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+        if [[ -z "$repo_root" ]]; then
+            echo -e "\033[31mNot inside a Git repository.\033[0m"
+            cd "$original_dir"; return
+        fi
+
+        submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp path 2>/dev/null | while read -r _ path; do
+            [[ "$path_arg" == *"/$path/"* || "$path_arg" == *"/$path" ]] && echo "$path" && break
+        done)
+
+        if [[ -n "$submodule_path" ]]; then
+            relative_path="${path_arg#*$submodule_path/}"
+            cd "$repo_root/$submodule_path" || { echo -e "\033[31mCannot cd into submodule.\033[0m"; cd "$original_dir"; return; }
+        else
+            relative_path="${path_arg#$repo_root/}"
+            cd "$repo_root" || { echo -e "\033[31mCannot cd into repo root.\033[0m"; cd "$original_dir"; return; }
+        fi
+
+        if [[ "$is_dir" == false ]]; then
+            if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
+                echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
+                cd "$original_dir"; return
+            fi
+        else
+            if ! git ls-files "$relative_path" | grep -q .; then
+                echo -e "\033[31m⚡ No tracked files found under directory:\033[0m $relative_path"
+                cd "$original_dir"; return
+            fi
+        fi
+
+        {
+            git log --format="%H" "${git_args[@]}" -- "$relative_path" \
+            | while IFS= read -r sha; do _show_commit "$sha"; done
+        } | less -R -i --mouse -S   # -S for horiz scroll with sbs diffs
+
+        cd "$original_dir"; return
+    fi
+
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo -e "\033[31mNot inside a Git repository.\033[0m"; return
+    fi
+
+    {
+        git log --format="%H" "${git_args[@]}" \
+        | while IFS= read -r sha; do _show_commit "$sha"; done
+    } | less -R -i --mouse -S
 }
 logs-and-diffs-full() {
     COLUMNS=$(tput cols)
@@ -252,11 +328,105 @@ logs-and-diffs-full() {
 
         printf "\033[31mDiffs    :\033[0m\n"
         if command -v delta >/dev/null 2>&1; then
-            git show --color=always --format= -p --unified=999999 "$sha" \
+            git show --color=always --format= -p --unified=99999999999 "$sha" \
+            | delta --width="$COLUMNS" --line-numbers \
+                    --minus-style="syntax gray" --plus-style="syntax gray"
+        else
+            git show --color=always --format= -p --unified=99999999999 "$sha"
+        fi
+        echo
+    }
+
+    if [[ -n "$path_arg" ]]; then
+        if [[ -d "$path_arg" ]]; then
+            is_dir=true; dir="$path_arg"
+        else
+            is_dir=false; dir=$(dirname "$path_arg")
+        fi
+
+        cd "$dir" || { echo -e "\033[31mCannot cd into target directory.\033[0m"; return; }
+
+        repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
+        if [[ -z "$repo_root" ]]; then
+            echo -e "\033[31mNot inside a Git repository.\033[0m"
+            cd "$original_dir"; return
+        fi
+
+        submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp path 2>/dev/null | while read -r _ path; do
+            [[ "$path_arg" == *"/$path/"* || "$path_arg" == *"/$path" ]] && echo "$path" && break
+        done)
+
+        if [[ -n "$submodule_path" ]]; then
+            relative_path="${path_arg#*$submodule_path/}"
+            cd "$repo_root/$submodule_path" || { echo -e "\033[31mCannot cd into submodule.\033[0m"; cd "$original_dir"; return; }
+        else
+            relative_path="${path_arg#$repo_root/}"
+            cd "$repo_root" || { echo -e "\033[31mCannot cd into repo root.\033[0m"; cd "$original_dir"; return; }
+        fi
+
+        if [[ "$is_dir" == false ]]; then
+            if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
+                echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
+                cd "$original_dir"; return
+            fi
+        else
+            if ! git ls-files "$relative_path" | grep -q .; then
+                echo -e "\033[31m⚡ No tracked files found under directory:\033[0m $relative_path"
+                cd "$original_dir"; return
+            fi
+        fi
+
+        {
+            git log --format="%H" "${git_args[@]}" -- "$relative_path" \
+            | while IFS= read -r sha; do _show_commit "$sha"; done
+        } | less -R -i --mouse -S   # -S for horiz scroll with sbs diffs
+
+        cd "$original_dir"; return
+    fi
+
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo -e "\033[31mNot inside a Git repository.\033[0m"; return
+    fi
+
+    {
+        git log --format="%H" "${git_args[@]}" \
+        | while IFS= read -r sha; do _show_commit "$sha"; done
+    } | less -R -i --mouse -S
+}
+logs-and-diffs-full-sbs() {
+    COLUMNS=$(tput cols)
+    HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
+    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
+    DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
+
+    local path_arg=""
+    local git_args=()
+    local original_dir="$PWD"
+
+    for arg in "$@"; do
+        if [[ -z "$path_arg" && -e "$arg" ]]; then
+            path_arg=$(readlink -f "$arg")
+        else
+            git_args+=("$arg")
+        fi
+    done
+
+    _show_commit() {
+        local sha="$1"
+        git show -s --color=always $DATEOPT --pretty=format:"$FORMAT" "$sha"
+        echo
+
+        printf "\033[31mFiles    :\033[0m\n"
+        git show --color=always --format= --name-status "$sha"
+        echo
+
+        printf "\033[31mDiffs    :\033[0m\n"
+        if command -v delta >/dev/null 2>&1; then
+            git show --color=always --format= -p --unified=99999999999 "$sha" \
             | delta --side-by-side --width="$COLUMNS" --line-numbers \
                     --minus-style="syntax gray" --plus-style="syntax gray"
         else
-            git show --color=always --format= -p --unified=999999 "$sha"
+            git show --color=always --format= -p --unified=99999999999 "$sha"
         fi
         echo
     }
