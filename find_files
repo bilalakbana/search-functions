@@ -65,6 +65,9 @@ f() {
         --bind 'home:last,end:first' \
         --bind 'alt-up:preview-page-up' \
         --bind 'alt-down:preview-page-down' \
+        --bind "ctrl-alt-h:unix-line-discard" \
+        --bind "alt-bs:unix-word-rubout" \
+        --bind "ctrl-h:backward-kill-word" \
         --preview-window='up:50%:wrap'
 
     if [[ -n "$TMUX" ]]; then

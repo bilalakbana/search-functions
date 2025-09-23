@@ -15,5 +15,8 @@ fbr() {
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
         --bind 'home:last,end:first' \
+        --bind "ctrl-alt-h:unix-line-discard" \
+        --bind "alt-bs:unix-word-rubout" \
+        --bind "ctrl-h:backward-kill-word" \
         --bind 'enter:execute(echo {} | bat --language bash --color=always)'
 }

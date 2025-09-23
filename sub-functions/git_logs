@@ -14,7 +14,7 @@ gfzf() {
             --preview "f() { set -- \$(echo -- \$@ | rg -o '\b[a-f0-9]{7,}\b'); [ \$# -eq 0 ] || git show --color=always \$1 $filter | delta --line-numbers; }; f {}" \
             --border top \
             --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
-            --color 'fg:252,fg+:252,bg:234,bg+:235,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+            --color 'fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
             --bind "ctrl-j:preview-down,ctrl-k:preview-up,ctrl-f:preview-page-down,ctrl-b:preview-page-up" \
             --bind "ctrl-m:execute:(rg -o '\b[a-f0-9]{7,}\b' | head -1 | xargs -I % -- git show --color=always %) <<< {}" \
             --bind "ctrl-v:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); [[ -n \$TMUX ]] && tmux display -d0 \"\$(git branch --contains \$1 | sed 's/^\\*\\?\\s\\+//' | LC_ALL=C sort | paste -sd, - | sed -e 's/,/, /g' -e 's/^/#[bg=blue,italics] Branches #[none,fg=black,bg=default] /')\"; }; f)" \
@@ -23,7 +23,10 @@ gfzf() {
             --bind "ctrl-s:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); SUMMARY=\$(git show --format='%s' \$1 | head -1); printf '%s' \"\$SUMMARY\" | clipboard; [[ -n \$TMUX ]] && tmux display \"#[bg=blue,italics] Yanked #[none,fg=black,bg=default] \$SUMMARY\"; }; f)" \
             --bind 'alt-up:preview-page-up' \
             --bind 'alt-down:preview-page-down' \
-            --preview-window up:40%:wrap
+            --bind "ctrl-alt-h:unix-line-discard" \
+            --bind "alt-bs:unix-word-rubout" \
+            --bind "ctrl-h:backward-kill-word" \
+            --preview-window up:55%:wrap
 }
 logs() {
     COLUMNS=$(tput cols)

@@ -40,6 +40,9 @@ fzf --ansi \
 	--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"$FILE\"; tmux select-pane -T git)" \
 	--bind "alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short \"$FILE\"; tmux select-pane -T git)" \
     --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$FILE\"; tmux select-pane -T git)" \
+    --bind "ctrl-alt-h:unix-line-discard" \
+    --bind "alt-bs:unix-word-rubout" \
+    --bind "ctrl-h:backward-kill-word" \
     --bind "change:reload(
         query={q}
         if [ -n \"\$query\" ]; then

@@ -55,7 +55,10 @@ ugf() {
 		--bind "alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
         --bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugf; tmux select-pane -T folder-list)" \
         --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
-        --bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)"
+        --bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)" \
+        --bind "ctrl-alt-h:unix-line-discard" \
+        --bind "alt-bs:unix-word-rubout" \
+        --bind "ctrl-h:backward-kill-word"
 
     if [[ -n "$TMUX" ]]; then
         tmux rename-window "$original_name"  # Restore original name
@@ -118,7 +121,10 @@ ugf-plus() {
 		--bind "alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
         --bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugf_plus; tmux select-pane -T folder-list)" \
         --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
-        --bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)"
+        --bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)" \
+        --bind "ctrl-alt-h:unix-line-discard" \
+        --bind "alt-bs:unix-word-rubout" \
+        --bind "ctrl-h:backward-kill-word"
 
     if [[ -n "$TMUX" ]]; then
         tmux rename-window "$original_name"  # Restore original name
@@ -175,7 +181,10 @@ rgf() {
         --bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_rgf; tmux select-pane -T folder-list)" \
         --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
         --bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)" \
-        --bind "ctrl-l:toggle-preview"
+        --bind "ctrl-l:toggle-preview" \
+        --bind "ctrl-alt-h:unix-line-discard" \
+        --bind "alt-bs:unix-word-rubout" \
+        --bind "ctrl-h:backward-kill-word"
 
     if [[ -n "$TMUX" ]]; then
         tmux rename-window "$original_name"  # Restore original name
@@ -233,7 +242,10 @@ rgfS() {
         --bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_rgfS; tmux select-pane -T folder-list)" \
         --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
         --bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)" \
-        --bind "ctrl-l:toggle-preview"
+        --bind "ctrl-l:toggle-preview" \
+        --bind "ctrl-alt-h:unix-line-discard" \
+        --bind "alt-bs:unix-word-rubout" \
+        --bind "ctrl-h:backward-kill-word"
 
     if [[ -n "$TMUX" ]]; then
         tmux rename-window "$original_name"  # Restore original name
