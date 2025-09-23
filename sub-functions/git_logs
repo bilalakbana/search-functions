@@ -134,11 +134,11 @@ logs-and-diffs() {
         git show -s --color=always $DATEOPT --pretty=format:"$FORMAT" "$sha"
         echo
 
-        printf "\033[31mFiles    :\033[0m\n"
+        printf "\033[31mFiles:\033[0m\n"
         git show --color=always --format= --name-status "$sha"
         echo
 
-        printf "\033[31mDiffs    :\033[0m\n"
+        printf "\033[31mDiffs:\033[0m\n"
         if command -v delta >/dev/null 2>&1; then
             git show --color=always --format= -p "$sha" \
             | delta --width="$COLUMNS" --line-numbers \
@@ -228,11 +228,11 @@ logs-and-diffs-sbs() {
         git show -s --color=always $DATEOPT --pretty=format:"$FORMAT" "$sha"
         echo
 
-        printf "\033[31mFiles    :\033[0m\n"
+        printf "\033[31mFiles:\033[0m\n"
         git show --color=always --format= --name-status "$sha"
         echo
 
-        printf "\033[31mDiffs    :\033[0m\n"
+        printf "\033[31mDiffs:\033[0m\n"
         if command -v delta >/dev/null 2>&1; then
             git show --color=always --format= -p "$sha" \
             | delta --side-by-side --width="$COLUMNS" --line-numbers \
@@ -322,11 +322,11 @@ logs-and-diffs-full() {
         git show -s --color=always $DATEOPT --pretty=format:"$FORMAT" "$sha"
         echo
 
-        printf "\033[31mFiles    :\033[0m\n"
+        printf "\033[31mFiles:\033[0m\n"
         git show --color=always --format= --name-status "$sha"
         echo
 
-        printf "\033[31mDiffs    :\033[0m\n"
+        printf "\033[31mDiffs:\033[0m\n"
         if command -v delta >/dev/null 2>&1; then
             git show --color=always --format= -p --unified=99999999999 "$sha" \
             | delta --width="$COLUMNS" --line-numbers \
@@ -416,11 +416,11 @@ logs-and-diffs-full-sbs() {
         git show -s --color=always $DATEOPT --pretty=format:"$FORMAT" "$sha"
         echo
 
-        printf "\033[31mFiles    :\033[0m\n"
+        printf "\033[31mFiles:\033[0m\n"
         git show --color=always --format= --name-status "$sha"
         echo
 
-        printf "\033[31mDiffs    :\033[0m\n"
+        printf "\033[31mDiffs:\033[0m\n"
         if command -v delta >/dev/null 2>&1; then
             git show --color=always --format= -p --unified=99999999999 "$sha" \
             | delta --side-by-side --width="$COLUMNS" --line-numbers \
