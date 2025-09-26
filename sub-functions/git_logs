@@ -10,18 +10,44 @@ gfzf() {
     git log --all \
         --graph --color=always --abbrev=7 --glob="refs/heads/*" \
         --format=format:"%C(bold blue)%h%C(reset) %C(dim white)%an%C(reset)%C(bold yellow)%d%C(reset) %C(white)%s%C(reset) %C(bold green)(%ar)%C(reset)%x1f%H%x1f%S" "$@" | \
+        sed -E 's#refs/(heads/|remotes/[^/]+/|tags/)##g' | \
+        awk -F$'\x1f' '{
+            # Extract branch from %S field (field 3)
+            branch = $3
+            # Clean up branch name and check if its not a SHA
+            if (length(branch) > 0 && !match(branch, /^[0-9a-f]{7,40}$/)) {
+                # Add branch to the end of the display line (field 1)
+                gsub(/\033\[2;31m/, "", branch)  # Remove any existing color codes
+                gsub(/\033\[0m/, "", branch)
+                print $1 " \033[2;31m" branch "\033[0m" "\x1f" $2 "\x1f" $3
+            } else {
+                print $0
+            }
+        }' | \
         fzf --exact --ansi --no-sort --wrap --layout reverse --tiebreak index \
             --delimiter $'\x1f' --with-nth=1 \
             --preview '
                 sha={2}; src={3}
                 b=$(printf %s "$src" | sed -E "s#refs/(heads/|remotes/[^/]+/|tags/)##")
-                if [ -n "$b" ] && ! printf %s "$b" | grep -qE "^[0-9a-f]{7,40}$"; then
-                  printf "\033[1mBranch:\033[0m %s\n\n" "$b"
+                
+                # Show commit info (author, date, hash, message) with branch appended to second line
+                git show -s --color=always --date=format:"%Y-%m-%d %H:%M:%S" --pretty=format:"%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)" "$sha" 2>/dev/null \
+                | awk -v branch="$b" -v branch_color="\033[2;31m" -v reset_color="\033[0m" \
+                      "NR==1 && length(branch) && !match(branch, /^[0-9a-f]{7,40}$/) {print \$0 \" \" branch_color branch reset_color; next} {print}"
+                
+                # Show Files section if there are changes
+                if git diff-tree --no-commit-id --name-only -r --root "$sha" '"$filter"' 2>/dev/null | grep -q .; then
+                  echo
+                  printf "\033[31mFiles:\033[0m\n"
+                  git show --color=always --format= --name-status "$sha" '"$filter"' 2>/dev/null
+                  echo
                 fi
+                
+                printf "\033[31mDiffs:\033[0m"
                 if command -v delta >/dev/null 2>&1; then
-                  git show --color=always "$sha" '"$filter"' 2>/dev/null | delta --line-numbers
+                  git show --color=always --format= "$sha" '"$filter"' 2>/dev/null | delta --line-numbers
                 else
-                  git show --color=always "$sha" '"$filter"' 2>/dev/null
+                  git show --color=always --format= "$sha" '"$filter"' 2>/dev/null
                 fi
             ' \
             --border top \
