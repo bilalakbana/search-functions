@@ -65,7 +65,7 @@ gfzf() {
 logs() {
     COLUMNS=$(tput cols)
     HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
-    FORMAT="$HR%n%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset) %C(red dim)%S%C(reset)%n"
+    FORMAT="$HR%n%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset) %C(red dim)%S%C(reset)%n%C(white)%s%C(reset)%n"
     DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
 
     local path_arg=""
