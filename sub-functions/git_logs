@@ -35,19 +35,19 @@ gfzf() {
                 | awk -v branch="$b" -v branch_color="\033[2;31m" -v reset_color="\033[0m" \
                       "NR==1 && length(branch) && !match(branch, /^[0-9a-f]{7,40}$/) {print \$0 \" \" branch_color branch reset_color; next} {print}"
                 
-                # Show Files section if there are changes
+                # Show Files and Diffs sections only if there are changes
                 if git diff-tree --no-commit-id --name-only -r --root "$sha" '"$filter"' 2>/dev/null | grep -q .; then
                   echo
                   printf "\033[31mFiles:\033[0m\n"
                   git show --color=always --format= --name-status "$sha" '"$filter"' 2>/dev/null
                   echo
-                fi
-                
-                printf "\033[31mDiffs:\033[0m"
-                if command -v delta >/dev/null 2>&1; then
-                  git show --color=always --format= "$sha" '"$filter"' 2>/dev/null | delta --line-numbers
-                else
-                  git show --color=always --format= "$sha" '"$filter"' 2>/dev/null
+                  
+                  printf "\033[31mDiffs:\033[0m"
+                  if command -v delta >/dev/null 2>&1; then
+                    git show --color=always --format= "$sha" '"$filter"' 2>/dev/null | delta --line-numbers
+                  else
+                    git show --color=always --format= "$sha" '"$filter"' 2>/dev/null
+                  fi
                 fi
             ' \
             --border top \
