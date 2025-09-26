@@ -7,31 +7,39 @@ gfzf() {
     export LESS='-R'
     export BAT_PAGER='less -S -R -M -i'
 
-    git log \
+    git log --all \
         --graph --color=always --abbrev=7 --glob="refs/heads/*" \
-        --format=format:"%C(bold blue)%h%C(reset) %C(dim white)%an%C(reset)%C(bold yellow)%d%C(reset) %C(white)%s%C(reset) %C(bold green)(%ar)%C(reset)" "$@" | \
+        --format=format:"%C(bold blue)%h%C(reset) %C(dim white)%an%C(reset)%C(bold yellow)%d%C(reset) %C(white)%s%C(reset) %C(bold green)(%ar)%C(reset)%x1f%H%x1f%S" "$@" | \
         fzf --exact --ansi --no-sort --wrap --layout reverse --tiebreak index \
-            --preview "f() { set -- \$(echo -- \$@ | rg -o '\b[a-f0-9]{7,}\b'); [ \$# -eq 0 ] || git show --color=always \$1 $filter | delta --line-numbers; }; f {}" \
+            --delimiter $'\x1f' --with-nth=1 \
+            --preview '
+                sha={2}; src={3}
+                b=$(printf %s "$src" | sed -E "s#refs/(heads/|remotes/[^/]+/|tags/)##")
+                if [ -n "$b" ] && ! printf %s "$b" | grep -qE "^[0-9a-f]{7,40}$"; then
+                  printf "\033[1mBranch:\033[0m %s\n\n" "$b"
+                fi
+                if command -v delta >/dev/null 2>&1; then
+                  git show --color=always "$sha" '"$filter"' 2>/dev/null | delta --line-numbers
+                else
+                  git show --color=always "$sha" '"$filter"' 2>/dev/null
+                fi
+            ' \
             --border top \
             --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
             --color 'fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
-            --bind "ctrl-j:preview-down,ctrl-k:preview-up,ctrl-f:preview-page-down,ctrl-b:preview-page-up" \
-            --bind "ctrl-m:execute:(rg -o '\b[a-f0-9]{7,}\b' | head -1 | xargs -I % -- git show --color=always %) <<< {}" \
-            --bind "ctrl-v:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); [[ -n \$TMUX ]] && tmux display -d0 \"\$(git branch --contains \$1 | sed 's/^\\*\\?\\s\\+//' | LC_ALL=C sort | paste -sd, - | sed -e 's/,/, /g' -e 's/^/#[bg=blue,italics] Branches #[none,fg=black,bg=default] /')\"; }; f)" \
-            --bind "ctrl-g:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); SUMMARY=\$(git show --format='%s' \$1 | head -1); [[ -n \$TMUX ]] && tmux display -d0 \"\$(git log --all --format='%H' -F --grep=\"\$SUMMARY\" | xargs -I{} -- git branch --contains {} | sed 's/^\\*\\?\\s\\+//' | LC_ALL=C sort | uniq | paste -sd, - | sed -e 's/,/, /g' -e 's/^/#[bg=blue,italics] Branches (Grep) #[none,fg=black,bg=default] /')\"; }; f)" \
-            --bind "ctrl-y:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); printf '%s' \$1 | clipboard; [[ -n \$TMUX ]] && tmux display \"#[bg=blue,italics] Yanked #[none,fg=black,bg=default] \$1\"; }; f)" \
-            --bind "ctrl-s:execute-silent:(f() { set -- \$(rg -o '\b[a-f0-9]{7,}\b' <<< {} | head -1 | tr -d '\n'); SUMMARY=\$(git show --format='%s' \$1 | head -1); printf '%s' \"\$SUMMARY\" | clipboard; [[ -n \$TMUX ]] && tmux display \"#[bg=blue,italics] Yanked #[none,fg=black,bg=default] \$SUMMARY\"; }; f)" \
+            --bind 'ctrl-l:toggle-preview' \
             --bind 'alt-up:preview-page-up' \
             --bind 'alt-down:preview-page-down' \
-            --bind "ctrl-alt-h:unix-line-discard" \
-            --bind "alt-bs:unix-word-rubout" \
-            --bind "ctrl-h:backward-kill-word" \
+            --bind 'home:first,end:last' \
+            --bind 'ctrl-alt-h:unix-line-discard' \
+            --bind 'alt-bs:unix-word-rubout' \
+            --bind 'ctrl-h:backward-kill-word' \
             --preview-window up:55%:wrap
 }
 logs() {
     COLUMNS=$(tput cols)
     HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
-    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
+    FORMAT="$HR%n%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset) %C(red dim)%S%C(reset)%n"
     DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
 
     local path_arg=""
@@ -98,7 +106,7 @@ logs() {
             fi
         fi
 
-        git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status "${git_args[@]}" -- "$relative_path" | less -R -i --mouse
+        git log --all --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status "${git_args[@]}" -- "$relative_path" | sed -E 's#refs/(heads/|remotes/[^/]+/|tags/)##' | less -R -i --mouse
         cd "$original_dir"
         return
     fi
@@ -109,12 +117,18 @@ logs() {
         return
     fi
 
-    git log --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status "$@" | less -R -i --mouse
+    git log --all --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status "$@" | sed -E 's#refs/(heads/|remotes/[^/]+/|tags/)##' | less -R -i --mouse
 }
 logs-and-diffs() {
     COLUMNS=$(tput cols)
     HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
-    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
+
+    # Colors
+    BRANCH_COLOR="\033[2;31m"   # red
+    RESET_COLOR="\033[0m"
+
+    # Header WITHOUT %S; we append branch manually (like logs())
+    FORMAT_BASE="$HR%n%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)"
     DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
 
     local path_arg=""
@@ -129,40 +143,53 @@ logs-and-diffs() {
         fi
     done
 
+    _clean_ref() {
+        sed -E 's#refs/(heads/|remotes/[^/]+/|tags/)##'
+    }
+
     _show_commit() {
         local sha="$1"
-        git show -s --color=always $DATEOPT --pretty=format:"$FORMAT" "$sha"
-        echo
+        local src="$2"    # %S captured from the producer pass
+        [[ -z "$sha" ]] && return   # safety guard
 
-        printf "\033[31mFiles:\033[0m\n"
-        git show --color=always --format= --name-status "$sha"
-        echo
-
-        printf "\033[31mDiffs:\033[0m\n"
-        if command -v delta >/dev/null 2>&1; then
-            git show --color=always --format= -p "$sha" \
-            | delta --width="$COLUMNS" --line-numbers \
-                    --minus-style="syntax gray" --plus-style="syntax gray"
-        else
-            git show --color=always --format= -p "$sha"
+        local branch=""
+        if [[ -n "$src" ]]; then
+            branch=$(printf '%s' "$src" | _clean_ref)
+            [[ "$branch" =~ ^[0-9a-f]{7,40}$ ]] && branch=""
         fi
+
+        # Header (append branch to second line)
+        git show -s --color=always "$DATEOPT" --pretty=format:"$FORMAT_BASE" "$sha" \
+        | awk -v b="$branch" -v c="$BRANCH_COLOR" -v r="$RESET_COLOR" \
+              'NR==2 && length(b){print $0 " " c b r; next} {print}'
+
+        # Show Files/Diffs only if there are changes (handles root commit too)
+        if git diff-tree --no-commit-id --name-only -r --root "$sha" | grep -q .; then
+            echo
+            printf "\033[31mFiles:\033[0m\n"
+            git show --color=always --format= --name-status "$sha"
+            echo
+
+            printf "\033[31mDiffs:\033[0m"
+            if command -v delta >/dev/null 2>&1; then
+                git show --color=always --format= -p "$sha" \
+                | delta --width="$COLUMNS" --line-numbers \
+                        --minus-style="syntax gray" --plus-style="syntax gray"
+            else
+                git show --color=always --format= -p "$sha"
+            fi
+        fi
+
+        # exactly one blank line between commits
         echo
     }
 
     if [[ -n "$path_arg" ]]; then
-        if [[ -d "$path_arg" ]]; then
-            is_dir=true; dir="$path_arg"
-        else
-            is_dir=false; dir=$(dirname "$path_arg")
-        fi
-
+        if [[ -d "$path_arg" ]]; then is_dir=true; dir="$path_arg"; else is_dir=false; dir=$(dirname "$path_arg"); fi
         cd "$dir" || { echo -e "\033[31mCannot cd into target directory.\033[0m"; return; }
 
         repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
-        if [[ -z "$repo_root" ]]; then
-            echo -e "\033[31mNot inside a Git repository.\033[0m"
-            cd "$original_dir"; return
-        fi
+        if [[ -z "$repo_root" ]]; then echo -e "\033[31mNot inside a Git repository.\033[0m"; cd "$original_dir"; return; fi
 
         submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp path 2>/dev/null | while read -r _ path; do
             [[ "$path_arg" == *"/$path/"* || "$path_arg" == *"/$path" ]] && echo "$path" && break
@@ -176,22 +203,9 @@ logs-and-diffs() {
             cd "$repo_root" || { echo -e "\033[31mCannot cd into repo root.\033[0m"; cd "$original_dir"; return; }
         fi
 
-        if [[ "$is_dir" == false ]]; then
-            if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
-                echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
-                cd "$original_dir"; return
-            fi
-        else
-            if ! git ls-files "$relative_path" | grep -q .; then
-                echo -e "\033[31m⚡ No tracked files found under directory:\033[0m $relative_path"
-                cd "$original_dir"; return
-            fi
-        fi
-
-        {
-            git log --format="%H" "${git_args[@]}" -- "$relative_path" \
-            | while IFS= read -r sha; do _show_commit "$sha"; done
-        } | less -R -i --mouse
+        git log --all --pretty=format:'%H%x1f%S' "${git_args[@]}" -- "$relative_path" \
+        | while IFS=$'\x1f' read -r sha src || [[ -n "$sha" ]]; do _show_commit "$sha" "$src"; done \
+        | less -R -i --mouse
 
         cd "$original_dir"; return
     fi
@@ -200,15 +214,20 @@ logs-and-diffs() {
         echo -e "\033[31mNot inside a Git repository.\033[0m"; return
     fi
 
-    {
-        git log --format="%H" "${git_args[@]}" \
-        | while IFS= read -r sha; do _show_commit "$sha"; done
-    } | less -R -i --mouse
+    git log --all --pretty=format:'%H%x1f%S' "${git_args[@]}" \
+    | while IFS=$'\x1f' read -r sha src || [[ -n "$sha" ]]; do _show_commit "$sha" "$src"; done \
+    | less -R -i --mouse
 }
 logs-and-diffs-sbs() {
     COLUMNS=$(tput cols)
     HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
-    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
+
+    # Colors
+    BRANCH_COLOR="\033[2;31m"   # red
+    RESET_COLOR="\033[0m"
+
+    # Header WITHOUT %S; we append branch manually (like logs())
+    FORMAT_BASE="$HR%n%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)"
     DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
 
     local path_arg=""
@@ -223,40 +242,53 @@ logs-and-diffs-sbs() {
         fi
     done
 
+    _clean_ref() {
+        sed -E 's#refs/(heads/|remotes/[^/]+/|tags/)##'
+    }
+
     _show_commit() {
         local sha="$1"
-        git show -s --color=always $DATEOPT --pretty=format:"$FORMAT" "$sha"
-        echo
+        local src="$2"    # %S captured from the producer pass
+        [[ -z "$sha" ]] && return   # safety guard
 
-        printf "\033[31mFiles:\033[0m\n"
-        git show --color=always --format= --name-status "$sha"
-        echo
-
-        printf "\033[31mDiffs:\033[0m\n"
-        if command -v delta >/dev/null 2>&1; then
-            git show --color=always --format= -p "$sha" \
-            | delta --side-by-side --width="$COLUMNS" --line-numbers \
-                    --minus-style="syntax gray" --plus-style="syntax gray"
-        else
-            git show --color=always --format= -p "$sha"
+        local branch=""
+        if [[ -n "$src" ]]; then
+            branch=$(printf '%s' "$src" | _clean_ref)
+            [[ "$branch" =~ ^[0-9a-f]{7,40}$ ]] && branch=""
         fi
+
+        # Header (append branch to second line)
+        git show -s --color=always "$DATEOPT" --pretty=format:"$FORMAT_BASE" "$sha" \
+        | awk -v b="$branch" -v c="$BRANCH_COLOR" -v r="$RESET_COLOR" \
+              'NR==2 && length(b){print $0 " " c b r; next} {print}'
+
+        # Show Files/Diffs only if there are changes (handles root commit too)
+        if git diff-tree --no-commit-id --name-only -r --root "$sha" | grep -q .; then
+            echo
+            printf "\033[31mFiles:\033[0m\n"
+            git show --color=always --format= --name-status "$sha"
+            echo
+
+            printf "\033[31mDiffs:\033[0m"
+            if command -v delta >/dev/null 2>&1; then
+                git show --color=always --format= -p "$sha" \
+                | delta --side-by-side --width="$COLUMNS" --line-numbers \
+                        --minus-style="syntax gray" --plus-style="syntax gray"
+            else
+                git show --color=always --format= -p "$sha"
+            fi
+        fi
+
+        # exactly one blank line between commits
         echo
     }
 
     if [[ -n "$path_arg" ]]; then
-        if [[ -d "$path_arg" ]]; then
-            is_dir=true; dir="$path_arg"
-        else
-            is_dir=false; dir=$(dirname "$path_arg")
-        fi
-
+        if [[ -d "$path_arg" ]]; then is_dir=true; dir="$path_arg"; else is_dir=false; dir=$(dirname "$path_arg"); fi
         cd "$dir" || { echo -e "\033[31mCannot cd into target directory.\033[0m"; return; }
 
         repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
-        if [[ -z "$repo_root" ]]; then
-            echo -e "\033[31mNot inside a Git repository.\033[0m"
-            cd "$original_dir"; return
-        fi
+        if [[ -z "$repo_root" ]]; then echo -e "\033[31mNot inside a Git repository.\033[0m"; cd "$original_dir"; return; fi
 
         submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp path 2>/dev/null | while read -r _ path; do
             [[ "$path_arg" == *"/$path/"* || "$path_arg" == *"/$path" ]] && echo "$path" && break
@@ -270,22 +302,9 @@ logs-and-diffs-sbs() {
             cd "$repo_root" || { echo -e "\033[31mCannot cd into repo root.\033[0m"; cd "$original_dir"; return; }
         fi
 
-        if [[ "$is_dir" == false ]]; then
-            if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
-                echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
-                cd "$original_dir"; return
-            fi
-        else
-            if ! git ls-files "$relative_path" | grep -q .; then
-                echo -e "\033[31m⚡ No tracked files found under directory:\033[0m $relative_path"
-                cd "$original_dir"; return
-            fi
-        fi
-
-        {
-            git log --format="%H" "${git_args[@]}" -- "$relative_path" \
-            | while IFS= read -r sha; do _show_commit "$sha"; done
-        } | less -R -i --mouse
+        git log --all --pretty=format:'%H%x1f%S' "${git_args[@]}" -- "$relative_path" \
+        | while IFS=$'\x1f' read -r sha src || [[ -n "$sha" ]]; do _show_commit "$sha" "$src"; done \
+        | less -R -i --mouse
 
         cd "$original_dir"; return
     fi
@@ -294,15 +313,20 @@ logs-and-diffs-sbs() {
         echo -e "\033[31mNot inside a Git repository.\033[0m"; return
     fi
 
-    {
-        git log --format="%H" "${git_args[@]}" \
-        | while IFS= read -r sha; do _show_commit "$sha"; done
-    } | less -R -i --mouse
+    git log --all --pretty=format:'%H%x1f%S' "${git_args[@]}" \
+    | while IFS=$'\x1f' read -r sha src || [[ -n "$sha" ]]; do _show_commit "$sha" "$src"; done \
+    | less -R -i --mouse
 }
 logs-and-diffs-full() {
     COLUMNS=$(tput cols)
     HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
-    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
+
+    # Colors
+    BRANCH_COLOR="\033[2;31m"   # red
+    RESET_COLOR="\033[0m"
+
+    # Header WITHOUT %S; we append branch manually (like logs())
+    FORMAT_BASE="$HR%n%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)"
     DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
 
     local path_arg=""
@@ -317,40 +341,53 @@ logs-and-diffs-full() {
         fi
     done
 
+    _clean_ref() {
+        sed -E 's#refs/(heads/|remotes/[^/]+/|tags/)##'
+    }
+
     _show_commit() {
         local sha="$1"
-        git show -s --color=always $DATEOPT --pretty=format:"$FORMAT" "$sha"
-        echo
+        local src="$2"    # %S captured from the producer pass
+        [[ -z "$sha" ]] && return   # safety guard
 
-        printf "\033[31mFiles:\033[0m\n"
-        git show --color=always --format= --name-status "$sha"
-        echo
-
-        printf "\033[31mDiffs:\033[0m\n"
-        if command -v delta >/dev/null 2>&1; then
-            git show --color=always --format= -p --unified=99999999999 "$sha" \
-            | delta --width="$COLUMNS" --line-numbers \
-                    --minus-style="syntax gray" --plus-style="syntax gray"
-        else
-            git show --color=always --format= -p --unified=99999999999 "$sha"
+        local branch=""
+        if [[ -n "$src" ]]; then
+            branch=$(printf '%s' "$src" | _clean_ref)
+            [[ "$branch" =~ ^[0-9a-f]{7,40}$ ]] && branch=""
         fi
+
+        # Header (append branch to second line)
+        git show -s --color=always "$DATEOPT" --pretty=format:"$FORMAT_BASE" "$sha" \
+        | awk -v b="$branch" -v c="$BRANCH_COLOR" -v r="$RESET_COLOR" \
+              'NR==2 && length(b){print $0 " " c b r; next} {print}'
+
+        # Show Files/Diffs only if there are changes (handles root commit too)
+        if git diff-tree --no-commit-id --name-only -r --root "$sha" | grep -q .; then
+            echo
+            printf "\033[31mFiles:\033[0m\n"
+            git show --color=always --format= --name-status "$sha"
+            echo
+
+            printf "\033[31mDiffs:\033[0m"
+            if command -v delta >/dev/null 2>&1; then
+                git show --color=always --format= -p --unified=99999999999 "$sha" \
+                | delta --width="$COLUMNS" --line-numbers \
+                        --minus-style="syntax gray" --plus-style="syntax gray"
+            else
+                git show --color=always --format= -p --unified=99999999999 "$sha"
+            fi
+        fi
+
+        # exactly one blank line between commits
         echo
     }
 
     if [[ -n "$path_arg" ]]; then
-        if [[ -d "$path_arg" ]]; then
-            is_dir=true; dir="$path_arg"
-        else
-            is_dir=false; dir=$(dirname "$path_arg")
-        fi
-
+        if [[ -d "$path_arg" ]]; then is_dir=true; dir="$path_arg"; else is_dir=false; dir=$(dirname "$path_arg"); fi
         cd "$dir" || { echo -e "\033[31mCannot cd into target directory.\033[0m"; return; }
 
         repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
-        if [[ -z "$repo_root" ]]; then
-            echo -e "\033[31mNot inside a Git repository.\033[0m"
-            cd "$original_dir"; return
-        fi
+        if [[ -z "$repo_root" ]]; then echo -e "\033[31mNot inside a Git repository.\033[0m"; cd "$original_dir"; return; fi
 
         submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp path 2>/dev/null | while read -r _ path; do
             [[ "$path_arg" == *"/$path/"* || "$path_arg" == *"/$path" ]] && echo "$path" && break
@@ -364,22 +401,9 @@ logs-and-diffs-full() {
             cd "$repo_root" || { echo -e "\033[31mCannot cd into repo root.\033[0m"; cd "$original_dir"; return; }
         fi
 
-        if [[ "$is_dir" == false ]]; then
-            if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
-                echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
-                cd "$original_dir"; return
-            fi
-        else
-            if ! git ls-files "$relative_path" | grep -q .; then
-                echo -e "\033[31m⚡ No tracked files found under directory:\033[0m $relative_path"
-                cd "$original_dir"; return
-            fi
-        fi
-
-        {
-            git log --format="%H" "${git_args[@]}" -- "$relative_path" \
-            | while IFS= read -r sha; do _show_commit "$sha"; done
-        } | less -R -i --mouse
+        git log --all --pretty=format:'%H%x1f%S' "${git_args[@]}" -- "$relative_path" \
+        | while IFS=$'\x1f' read -r sha src || [[ -n "$sha" ]]; do _show_commit "$sha" "$src"; done \
+        | less -R -i --mouse
 
         cd "$original_dir"; return
     fi
@@ -388,15 +412,20 @@ logs-and-diffs-full() {
         echo -e "\033[31mNot inside a Git repository.\033[0m"; return
     fi
 
-    {
-        git log --format="%H" "${git_args[@]}" \
-        | while IFS= read -r sha; do _show_commit "$sha"; done
-    } | less -R -i --mouse
+    git log --all --pretty=format:'%H%x1f%S' "${git_args[@]}" \
+    | while IFS=$'\x1f' read -r sha src || [[ -n "$sha" ]]; do _show_commit "$sha" "$src"; done \
+    | less -R -i --mouse
 }
 logs-and-diffs-full-sbs() {
     COLUMNS=$(tput cols)
     HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
-    FORMAT="$HR%n%C(red)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)%n%C(magenta)%b%C(reset)"
+
+    # Colors
+    BRANCH_COLOR="\033[2;31m"   # red
+    RESET_COLOR="\033[0m"
+
+    # Header WITHOUT %S; we append branch manually (like logs())
+    FORMAT_BASE="$HR%n%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)"
     DATEOPT="--date=format:%Y-%m-%d %H:%M:%S"
 
     local path_arg=""
@@ -411,40 +440,53 @@ logs-and-diffs-full-sbs() {
         fi
     done
 
+    _clean_ref() {
+        sed -E 's#refs/(heads/|remotes/[^/]+/|tags/)##'
+    }
+
     _show_commit() {
         local sha="$1"
-        git show -s --color=always $DATEOPT --pretty=format:"$FORMAT" "$sha"
-        echo
+        local src="$2"    # %S captured from the producer pass
+        [[ -z "$sha" ]] && return   # safety guard
 
-        printf "\033[31mFiles:\033[0m\n"
-        git show --color=always --format= --name-status "$sha"
-        echo
-
-        printf "\033[31mDiffs:\033[0m\n"
-        if command -v delta >/dev/null 2>&1; then
-            git show --color=always --format= -p --unified=99999999999 "$sha" \
-            | delta --side-by-side --width="$COLUMNS" --line-numbers \
-                    --minus-style="syntax gray" --plus-style="syntax gray"
-        else
-            git show --color=always --format= -p --unified=99999999999 "$sha"
+        local branch=""
+        if [[ -n "$src" ]]; then
+            branch=$(printf '%s' "$src" | _clean_ref)
+            [[ "$branch" =~ ^[0-9a-f]{7,40}$ ]] && branch=""
         fi
+
+        # Header (append branch to second line)
+        git show -s --color=always "$DATEOPT" --pretty=format:"$FORMAT_BASE" "$sha" \
+        | awk -v b="$branch" -v c="$BRANCH_COLOR" -v r="$RESET_COLOR" \
+              'NR==2 && length(b){print $0 " " c b r; next} {print}'
+
+        # Show Files/Diffs only if there are changes (handles root commit too)
+        if git diff-tree --no-commit-id --name-only -r --root "$sha" | grep -q .; then
+            echo
+            printf "\033[31mFiles:\033[0m\n"
+            git show --color=always --format= --name-status "$sha"
+            echo
+
+            printf "\033[31mDiffs:\033[0m"
+            if command -v delta >/dev/null 2>&1; then
+                git show --color=always --format= -p --unified=99999999999 "$sha" \
+                | delta --side-by-side --width="$COLUMNS" --line-numbers \
+                        --minus-style="syntax gray" --plus-style="syntax gray"
+            else
+                git show --color=always --format= -p --unified=99999999999 "$sha"
+            fi
+        fi
+
+        # exactly one blank line between commits
         echo
     }
 
     if [[ -n "$path_arg" ]]; then
-        if [[ -d "$path_arg" ]]; then
-            is_dir=true; dir="$path_arg"
-        else
-            is_dir=false; dir=$(dirname "$path_arg")
-        fi
-
+        if [[ -d "$path_arg" ]]; then is_dir=true; dir="$path_arg"; else is_dir=false; dir=$(dirname "$path_arg"); fi
         cd "$dir" || { echo -e "\033[31mCannot cd into target directory.\033[0m"; return; }
 
         repo_root=$(git rev-parse --show-toplevel 2>/dev/null)
-        if [[ -z "$repo_root" ]]; then
-            echo -e "\033[31mNot inside a Git repository.\033[0m"
-            cd "$original_dir"; return
-        fi
+        if [[ -z "$repo_root" ]]; then echo -e "\033[31mNot inside a Git repository.\033[0m"; cd "$original_dir"; return; fi
 
         submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp path 2>/dev/null | while read -r _ path; do
             [[ "$path_arg" == *"/$path/"* || "$path_arg" == *"/$path" ]] && echo "$path" && break
@@ -458,22 +500,9 @@ logs-and-diffs-full-sbs() {
             cd "$repo_root" || { echo -e "\033[31mCannot cd into repo root.\033[0m"; cd "$original_dir"; return; }
         fi
 
-        if [[ "$is_dir" == false ]]; then
-            if ! git ls-files --error-unmatch "$relative_path" >/dev/null 2>&1; then
-                echo -e "\033[31m⚡ File is not tracked in Git:\033[0m $relative_path"
-                cd "$original_dir"; return
-            fi
-        else
-            if ! git ls-files "$relative_path" | grep -q .; then
-                echo -e "\033[31m⚡ No tracked files found under directory:\033[0m $relative_path"
-                cd "$original_dir"; return
-            fi
-        fi
-
-        {
-            git log --format="%H" "${git_args[@]}" -- "$relative_path" \
-            | while IFS= read -r sha; do _show_commit "$sha"; done
-        } | less -R -i --mouse
+        git log --all --pretty=format:'%H%x1f%S' "${git_args[@]}" -- "$relative_path" \
+        | while IFS=$'\x1f' read -r sha src || [[ -n "$sha" ]]; do _show_commit "$sha" "$src"; done \
+        | less -R -i --mouse
 
         cd "$original_dir"; return
     fi
@@ -482,8 +511,7 @@ logs-and-diffs-full-sbs() {
         echo -e "\033[31mNot inside a Git repository.\033[0m"; return
     fi
 
-    {
-        git log --format="%H" "${git_args[@]}" \
-        | while IFS= read -r sha; do _show_commit "$sha"; done
-    } | less -R -i --mouse
+    git log --all --pretty=format:'%H%x1f%S' "${git_args[@]}" \
+    | while IFS=$'\x1f' read -r sha src || [[ -n "$sha" ]]; do _show_commit "$sha" "$src"; done \
+    | less -R -i --mouse
 }
