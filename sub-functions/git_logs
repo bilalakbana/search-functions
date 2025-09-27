@@ -74,6 +74,237 @@ gfzf() {
             --bind 'ctrl-h:backward-kill-word' \
             --preview-window up:55%:wrap
 }
+gfzf-sbs() {
+    local filter=""
+    if [ -n "$*" ] && [ -e "$*" ]; then
+        filter="-- $*"
+    fi
+
+    export LESS='-R'
+    export BAT_PAGER='less -S -R -M -i'
+
+    # First pass: count total commits for numbering (used in preview)
+    total_commits=$(git log --all --oneline "$@" | wc -l)
+    
+    git log --all \
+        --graph --color=always --abbrev=7 --glob="refs/heads/*" \
+        --format=format:"%C(bold blue)%h%C(reset) %C(dim white)%an%C(reset)%C(bold yellow)%d%C(reset) %C(white)%s%C(reset) %C(bold green)(%ar)%C(reset)%x1f%H%x1f%S" "$@" | \
+        sed -E 's#refs/(heads/|remotes/[^/]+/|tags/)##g' | \
+        awk -F$'\x1f' -v total="$total_commits" 'BEGIN{commit_count=0} {
+            # Only count lines that have commit data (contain delimiter fields)
+            if (NF >= 2) {
+                commit_count++
+                # Extract branch from %S field (field 3)
+                branch = $3
+                commit_num = total - commit_count + 1
+                # Clean up branch name and check if its not a SHA
+                if (length(branch) > 0 && !match(branch, /^[0-9a-f]{7,40}$/)) {
+                    # Add commit number at the beginning, branch at the end, and include commit_num in hidden field
+                    gsub(/\033\[2;31m/, "", branch)  # Remove any existing color codes
+                    gsub(/\033\[0m/, "", branch)
+                    print "\033[38;2;171;171;255m" commit_num "\033[0m " $1 " \033[2;31m" branch "\033[0m" "\x1f" $2 "\x1f" $3 "\x1f" commit_num
+                } else {
+                    # Add commit number at the beginning and include commit_num in hidden field
+                    print "\033[38;2;171;171;255m" commit_num "\033[0m " $0 "\x1f" commit_num
+                }
+            } else {
+                # Print empty/formatting lines as-is (tree structure)
+                print $0
+            }
+        }' | \
+        fzf --exact --ansi --no-sort --wrap --layout reverse --tiebreak index \
+            --delimiter $'\x1f' --with-nth=1 \
+            --preview '
+                COLUMNS=$(tput cols)
+                sha={2}; src={3}; commit_num={4}
+                b=$(printf %s "$src" | sed -E "s#refs/(heads/|remotes/[^/]+/|tags/)##")
+                
+                # Show commit info (author, date, hash, message) with branch and commit number appended to first line
+                git show -s --color=always --date=format:"%Y-%m-%d %H:%M:%S" --pretty=format:"%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)" "$sha" 2>/dev/null \
+                | awk -v branch="$b" -v branch_color="\033[2;31m" -v reset_color="\033[0m" -v commit_num="$commit_num" \
+                      "NR==1 && length(branch) && !match(branch, /^[0-9a-f]{7,40}$/) && length(commit_num) {print \$0 \" \" branch_color branch reset_color \" \033[38;2;171;171;255m-> Commit #\" commit_num \"\033[0m\"; next} NR==1 && length(commit_num) {print \$0 \" \033[38;2;171;171;255m-> Commit #\" commit_num \"\033[0m\"; next} NR==1 && length(branch) && !match(branch, /^[0-9a-f]{7,40}$/) {print \$0 \" \" branch_color branch reset_color; next} {print}"
+                
+                # Show Files and Diffs sections only if there are changes
+                if git diff-tree --no-commit-id --name-only -r --root "$sha" '"$filter"' 2>/dev/null | grep -q .; then
+                  echo
+                  printf "\033[31mFiles:\033[0m\n"
+                  git show --color=always --format= --name-status "$sha" '"$filter"' 2>/dev/null
+                  echo
+                  
+                  printf "\033[31mDiffs:\033[0m"
+                  if command -v delta >/dev/null 2>&1; then
+                    git show --color=always --format= "$sha" '"$filter"' 2>/dev/null | delta --side-by-side --width="$COLUMNS" --line-numbers --minus-style="syntax gray" --plus-style="syntax gray"
+                  else
+                    git show --color=always --format= "$sha" '"$filter"' 2>/dev/null
+                  fi
+                fi
+            ' \
+            --border top \
+            --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
+            --color 'fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+            --bind 'ctrl-l:toggle-preview' \
+            --bind 'alt-up:preview-page-up' \
+            --bind 'alt-down:preview-page-down' \
+            --bind 'home:first,end:last' \
+            --bind 'ctrl-alt-h:unix-line-discard' \
+            --bind 'alt-bs:unix-word-rubout' \
+            --bind 'ctrl-h:backward-kill-word' \
+            --preview-window up:55%:wrap
+}
+gfzf-full() {
+    local filter=""
+    if [ -n "$*" ] && [ -e "$*" ]; then
+        filter="-- $*"
+    fi
+
+    export LESS='-R'
+    export BAT_PAGER='less -S -R -M -i'
+
+    # First pass: count total commits for numbering (used in preview)
+    total_commits=$(git log --all --oneline "$@" | wc -l)
+    
+    git log --all \
+        --graph --color=always --abbrev=7 --glob="refs/heads/*" \
+        --format=format:"%C(bold blue)%h%C(reset) %C(dim white)%an%C(reset)%C(bold yellow)%d%C(reset) %C(white)%s%C(reset) %C(bold green)(%ar)%C(reset)%x1f%H%x1f%S" "$@" | \
+        sed -E 's#refs/(heads/|remotes/[^/]+/|tags/)##g' | \
+        awk -F$'\x1f' -v total="$total_commits" 'BEGIN{commit_count=0} {
+            # Only count lines that have commit data (contain delimiter fields)
+            if (NF >= 2) {
+                commit_count++
+                # Extract branch from %S field (field 3)
+                branch = $3
+                commit_num = total - commit_count + 1
+                # Clean up branch name and check if its not a SHA
+                if (length(branch) > 0 && !match(branch, /^[0-9a-f]{7,40}$/)) {
+                    # Add commit number at the beginning, branch at the end, and include commit_num in hidden field
+                    gsub(/\033\[2;31m/, "", branch)  # Remove any existing color codes
+                    gsub(/\033\[0m/, "", branch)
+                    print "\033[38;2;171;171;255m" commit_num "\033[0m " $1 " \033[2;31m" branch "\033[0m" "\x1f" $2 "\x1f" $3 "\x1f" commit_num
+                } else {
+                    # Add commit number at the beginning and include commit_num in hidden field
+                    print "\033[38;2;171;171;255m" commit_num "\033[0m " $0 "\x1f" commit_num
+                }
+            } else {
+                # Print empty/formatting lines as-is (tree structure)
+                print $0
+            }
+        }' | \
+        fzf --exact --ansi --no-sort --wrap --layout reverse --tiebreak index \
+            --delimiter $'\x1f' --with-nth=1 \
+            --preview '
+                COLUMNS=$(tput cols)
+                sha={2}; src={3}; commit_num={4}
+                b=$(printf %s "$src" | sed -E "s#refs/(heads/|remotes/[^/]+/|tags/)##")
+                
+                # Show commit info (author, date, hash, message) with branch and commit number appended to first line
+                git show -s --color=always --date=format:"%Y-%m-%d %H:%M:%S" --pretty=format:"%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)" "$sha" 2>/dev/null \
+                | awk -v branch="$b" -v branch_color="\033[2;31m" -v reset_color="\033[0m" -v commit_num="$commit_num" \
+                      "NR==1 && length(branch) && !match(branch, /^[0-9a-f]{7,40}$/) && length(commit_num) {print \$0 \" \" branch_color branch reset_color \" \033[38;2;171;171;255m-> Commit #\" commit_num \"\033[0m\"; next} NR==1 && length(commit_num) {print \$0 \" \033[38;2;171;171;255m-> Commit #\" commit_num \"\033[0m\"; next} NR==1 && length(branch) && !match(branch, /^[0-9a-f]{7,40}$/) {print \$0 \" \" branch_color branch reset_color; next} {print}"
+                
+                # Show Files and Diffs sections only if there are changes
+                if git diff-tree --no-commit-id --name-only -r --root "$sha" '"$filter"' 2>/dev/null | grep -q .; then
+                  echo
+                  printf "\033[31mFiles:\033[0m\n"
+                  git show --color=always --format= --name-status "$sha" '"$filter"' 2>/dev/null
+                  echo
+                  
+                  printf "\033[31mDiffs:\033[0m"
+                  if command -v delta >/dev/null 2>&1; then
+                    git show --color=always --format= --unified=99999999999 "$sha" '"$filter"' 2>/dev/null | delta --width="$COLUMNS" --line-numbers --minus-style="syntax gray" --plus-style="syntax gray"
+                  else
+                    git show --color=always --format= --unified=99999999999 "$sha" '"$filter"' 2>/dev/null
+                  fi
+                fi
+            ' \
+            --border top \
+            --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
+            --color 'fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+            --bind 'ctrl-l:toggle-preview' \
+            --bind 'alt-up:preview-page-up' \
+            --bind 'alt-down:preview-page-down' \
+            --bind 'home:first,end:last' \
+            --bind 'ctrl-alt-h:unix-line-discard' \
+            --bind 'alt-bs:unix-word-rubout' \
+            --bind 'ctrl-h:backward-kill-word' \
+            --preview-window up:55%:wrap
+}
+gfzf-full-sbs() {
+    local filter=""
+    if [ -n "$*" ] && [ -e "$*" ]; then
+        filter="-- $*"
+    fi
+
+    export LESS='-R'
+    export BAT_PAGER='less -S -R -M -i'
+
+    # First pass: count total commits for numbering (used in preview)
+    total_commits=$(git log --all --oneline "$@" | wc -l)
+    
+    git log --all \
+        --graph --color=always --abbrev=7 --glob="refs/heads/*" \
+        --format=format:"%C(bold blue)%h%C(reset) %C(dim white)%an%C(reset)%C(bold yellow)%d%C(reset) %C(white)%s%C(reset) %C(bold green)(%ar)%C(reset)%x1f%H%x1f%S" "$@" | \
+        sed -E 's#refs/(heads/|remotes/[^/]+/|tags/)##g' | \
+        awk -F$'\x1f' -v total="$total_commits" 'BEGIN{commit_count=0} {
+            # Only count lines that have commit data (contain delimiter fields)
+            if (NF >= 2) {
+                commit_count++
+                # Extract branch from %S field (field 3)
+                branch = $3
+                commit_num = total - commit_count + 1
+                # Clean up branch name and check if its not a SHA
+                if (length(branch) > 0 && !match(branch, /^[0-9a-f]{7,40}$/)) {
+                    # Add commit number at the beginning, branch at the end, and include commit_num in hidden field
+                    gsub(/\033\[2;31m/, "", branch)  # Remove any existing color codes
+                    gsub(/\033\[0m/, "", branch)
+                    print "\033[38;2;171;171;255m" commit_num "\033[0m " $1 " \033[2;31m" branch "\033[0m" "\x1f" $2 "\x1f" $3 "\x1f" commit_num
+                } else {
+                    # Add commit number at the beginning and include commit_num in hidden field
+                    print "\033[38;2;171;171;255m" commit_num "\033[0m " $0 "\x1f" commit_num
+                }
+            } else {
+                # Print empty/formatting lines as-is (tree structure)
+                print $0
+            }
+        }' | \
+        fzf --exact --ansi --no-sort --wrap --layout reverse --tiebreak index \
+            --delimiter $'\x1f' --with-nth=1 \
+            --preview '
+                COLUMNS=$(tput cols)
+                sha={2}; src={3}; commit_num={4}
+                b=$(printf %s "$src" | sed -E "s#refs/(heads/|remotes/[^/]+/|tags/)##")
+                
+                # Show commit info (author, date, hash, message) with branch and commit number appended to first line
+                git show -s --color=always --date=format:"%Y-%m-%d %H:%M:%S" --pretty=format:"%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)" "$sha" 2>/dev/null \
+                | awk -v branch="$b" -v branch_color="\033[2;31m" -v reset_color="\033[0m" -v commit_num="$commit_num" \
+                      "NR==1 && length(branch) && !match(branch, /^[0-9a-f]{7,40}$/) && length(commit_num) {print \$0 \" \" branch_color branch reset_color \" \033[38;2;171;171;255m-> Commit #\" commit_num \"\033[0m\"; next} NR==1 && length(commit_num) {print \$0 \" \033[38;2;171;171;255m-> Commit #\" commit_num \"\033[0m\"; next} NR==1 && length(branch) && !match(branch, /^[0-9a-f]{7,40}$/) {print \$0 \" \" branch_color branch reset_color; next} {print}"
+                
+                # Show Files and Diffs sections only if there are changes
+                if git diff-tree --no-commit-id --name-only -r --root "$sha" '"$filter"' 2>/dev/null | grep -q .; then
+                  echo
+                  printf "\033[31mFiles:\033[0m\n"
+                  git show --color=always --format= --name-status "$sha" '"$filter"' 2>/dev/null
+                  echo
+                  
+                  printf "\033[31mDiffs:\033[0m"
+                  if command -v delta >/dev/null 2>&1; then
+                    git show --color=always --format= --unified=99999999999 "$sha" '"$filter"' 2>/dev/null | delta --side-by-side --width="$COLUMNS" --line-numbers --minus-style="syntax gray" --plus-style="syntax gray"
+                  else
+                    git show --color=always --format= --unified=99999999999 "$sha" '"$filter"' 2>/dev/null
+                  fi
+                fi
+            ' \
+            --border top \
+            --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
+            --color 'fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+            --bind 'ctrl-l:toggle-preview' \
+            --bind 'alt-up:preview-page-up' \
+            --bind 'alt-down:preview-page-down' \
+            --bind 'home:first,end:last' \
+            --bind 'ctrl-alt-h:unix-line-discard' \
+            --bind 'alt-bs:unix-word-rubout' \
+            --bind 'ctrl-h:backward-kill-word' \
+            --preview-window up:55%:wrap
+}
 logs() {
     COLUMNS=$(tput cols)
     HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
