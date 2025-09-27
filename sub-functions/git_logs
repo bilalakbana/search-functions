@@ -283,6 +283,7 @@ logs-and-diffs-sbs() {
     _show_commit() {
         local sha="$1"
         local src="$2"    # %S captured from the producer pass
+        local commit_num="$3"  # commit number
         [[ -z "$sha" ]] && return   # safety guard
 
         local branch=""
@@ -291,10 +292,10 @@ logs-and-diffs-sbs() {
             [[ "$branch" =~ ^[0-9a-f]{7,40}$ ]] && branch=""
         fi
 
-        # Header (append branch to second line)
+        # Header (append branch to second line and commit number to second line)
         git show -s --color=always "$DATEOPT" --pretty=format:"$FORMAT_BASE" "$sha" \
-        | awk -v b="$branch" -v c="$BRANCH_COLOR" -v r="$RESET_COLOR" \
-              'NR==2 && length(b){print $0 " " c b r; next} {print}'
+        | awk -v b="$branch" -v c="$BRANCH_COLOR" -v r="$RESET_COLOR" -v num="$commit_num" \
+              'NR==2 && length(num) && length(b){print "\033[38;2;171;171;255m<< Commit #" num " >>\033[0m " $0 " " c b r; next} NR==2 && length(num){print "\033[38;2;171;171;255m<< Commit #" num " >>\033[0m " $0; next} NR==2 && length(b){print $0 " " c b r; next} {print}'
 
         # Show Files/Diffs only if there are changes (handles root commit too)
         if git diff-tree --no-commit-id --name-only -r --root "$sha" | grep -q .; then
@@ -347,8 +348,11 @@ logs-and-diffs-sbs() {
         echo -e "\033[31mNot inside a Git repository.\033[0m"; return
     fi
 
+    # First pass: count total commits, second pass: number them and show
+    total_commits=$(git log --all --oneline "${git_args[@]}" | wc -l)
     git log --all --pretty=format:'%H%x1f%S' "${git_args[@]}" \
-    | while IFS=$'\x1f' read -r sha src || [[ -n "$sha" ]]; do _show_commit "$sha" "$src"; done \
+    | awk -v total="$total_commits" 'BEGIN{count=0} {count++; print $0 "\x1f" (total-count+1)}' \
+    | while IFS=$'\x1f' read -r sha src commit_num || [[ -n "$sha" ]]; do _show_commit "$sha" "$src" "$commit_num"; done \
     | less -R -i --mouse
 }
 logs-and-diffs-full() {
@@ -382,6 +386,7 @@ logs-and-diffs-full() {
     _show_commit() {
         local sha="$1"
         local src="$2"    # %S captured from the producer pass
+        local commit_num="$3"  # commit number
         [[ -z "$sha" ]] && return   # safety guard
 
         local branch=""
@@ -390,10 +395,10 @@ logs-and-diffs-full() {
             [[ "$branch" =~ ^[0-9a-f]{7,40}$ ]] && branch=""
         fi
 
-        # Header (append branch to second line)
+        # Header (append branch to second line and commit number to second line)
         git show -s --color=always "$DATEOPT" --pretty=format:"$FORMAT_BASE" "$sha" \
-        | awk -v b="$branch" -v c="$BRANCH_COLOR" -v r="$RESET_COLOR" \
-              'NR==2 && length(b){print $0 " " c b r; next} {print}'
+        | awk -v b="$branch" -v c="$BRANCH_COLOR" -v r="$RESET_COLOR" -v num="$commit_num" \
+              'NR==2 && length(num) && length(b){print "\033[38;2;171;171;255m<< Commit #" num " >>\033[0m " $0 " " c b r; next} NR==2 && length(num){print "\033[38;2;171;171;255m<< Commit #" num " >>\033[0m " $0; next} NR==2 && length(b){print $0 " " c b r; next} {print}'
 
         # Show Files/Diffs only if there are changes (handles root commit too)
         if git diff-tree --no-commit-id --name-only -r --root "$sha" | grep -q .; then
@@ -446,8 +451,11 @@ logs-and-diffs-full() {
         echo -e "\033[31mNot inside a Git repository.\033[0m"; return
     fi
 
+    # First pass: count total commits, second pass: number them and show
+    total_commits=$(git log --all --oneline "${git_args[@]}" | wc -l)
     git log --all --pretty=format:'%H%x1f%S' "${git_args[@]}" \
-    | while IFS=$'\x1f' read -r sha src || [[ -n "$sha" ]]; do _show_commit "$sha" "$src"; done \
+    | awk -v total="$total_commits" 'BEGIN{count=0} {count++; print $0 "\x1f" (total-count+1)}' \
+    | while IFS=$'\x1f' read -r sha src commit_num || [[ -n "$sha" ]]; do _show_commit "$sha" "$src" "$commit_num"; done \
     | less -R -i --mouse
 }
 logs-and-diffs-full-sbs() {
@@ -481,6 +489,7 @@ logs-and-diffs-full-sbs() {
     _show_commit() {
         local sha="$1"
         local src="$2"    # %S captured from the producer pass
+        local commit_num="$3"  # commit number
         [[ -z "$sha" ]] && return   # safety guard
 
         local branch=""
@@ -489,10 +498,10 @@ logs-and-diffs-full-sbs() {
             [[ "$branch" =~ ^[0-9a-f]{7,40}$ ]] && branch=""
         fi
 
-        # Header (append branch to second line)
+        # Header (append branch to second line and commit number to second line)
         git show -s --color=always "$DATEOPT" --pretty=format:"$FORMAT_BASE" "$sha" \
-        | awk -v b="$branch" -v c="$BRANCH_COLOR" -v r="$RESET_COLOR" \
-              'NR==2 && length(b){print $0 " " c b r; next} {print}'
+        | awk -v b="$branch" -v c="$BRANCH_COLOR" -v r="$RESET_COLOR" -v num="$commit_num" \
+              'NR==2 && length(num) && length(b){print "\033[38;2;171;171;255m<< Commit #" num " >>\033[0m " $0 " " c b r; next} NR==2 && length(num){print "\033[38;2;171;171;255m<< Commit #" num " >>\033[0m " $0; next} NR==2 && length(b){print $0 " " c b r; next} {print}'
 
         # Show Files/Diffs only if there are changes (handles root commit too)
         if git diff-tree --no-commit-id --name-only -r --root "$sha" | grep -q .; then
@@ -545,7 +554,10 @@ logs-and-diffs-full-sbs() {
         echo -e "\033[31mNot inside a Git repository.\033[0m"; return
     fi
 
+    # First pass: count total commits, second pass: number them and show
+    total_commits=$(git log --all --oneline "${git_args[@]}" | wc -l)
     git log --all --pretty=format:'%H%x1f%S' "${git_args[@]}" \
-    | while IFS=$'\x1f' read -r sha src || [[ -n "$sha" ]]; do _show_commit "$sha" "$src"; done \
+    | awk -v total="$total_commits" 'BEGIN{count=0} {count++; print $0 "\x1f" (total-count+1)}' \
+    | while IFS=$'\x1f' read -r sha src commit_num || [[ -n "$sha" ]]; do _show_commit "$sha" "$src" "$commit_num"; done \
     | less -R -i --mouse
 }
