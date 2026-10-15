@@ -1,25 +1,27 @@
 #!/bin/bash
 
-FILE=$(realpath "$1")
+FILE=$(realpath -- "$1")
 QUERY="$2"
 
 [[ -z "$FILE" ]] && { echo "Please provide a file name"; exit 1; }
 
+# fzf runs the preview, bind and reload commands through $SHELL -c; FILE and QUERY reach them via the
+# environment, so their contents are never spliced into a command string.
+export FILE QUERY
 export GREP_COLORS="ms=01;31:mc=01;31:sl=:cx=35:fn=35:ln=32:bn=32:se=36"
 
-FZF_DEFAULT_COMMAND="ugrep -Un --color=always --smart-case \"$QUERY\" \"$FILE\" | tr -d '\r'" \
-fzf --ansi \
+FZF_DEFAULT_COMMAND='ugrep -Un --color=always --smart-case -e "$QUERY" -- "$FILE" | tr -d "\r"' \
+fzf -i --ansi \
     --no-sort \
     --exact \
     --style full \
     --wrap \
     --border rounded \
     --query "$QUERY" \
-    --border-label " $(echo "$FILE" | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
+    --border-label " $(printf '%s\n' "$FILE" | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
     --delimiter : \
     --preview '
-        LINE={1}
-        ugrep -Un "" '"\"$FILE\""' | tr -d "\r" | awk -v line=$LINE '"'"'
+        ugrep -Un -e "" -- "$FILE" | tr -d "\r" | awk -v line={1} '"'"'
             BEGIN {FS=":"}
             $1 == line {printf "\033[32m%4d\033[0m:\033[33m%s\033[0m\n", $1, substr($0,length($1)+2); next}
             {printf "\033[32m%4d\033[0m:%s\n", $1, substr($0,length($1)+2)}
@@ -31,33 +33,23 @@ fzf --ansi \
     --bind "alt-down:preview-page-down" \
     --bind 'home:first,end:last' \
     --bind "ctrl-l:toggle-preview" \
-    --bind "enter:execute-silent(nohup xdg-open '$FILE')" \
-    --bind "ctrl-c:execute-silent(echo -n '$FILE' | wl-copy)" \
-    --bind "ctrl-o:execute-silent(tmux new-window -n nvim  nvim \"$FILE\"; tmux select-pane -T editor)" \
-    --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager '$FILE')" \
-    --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$FILE\"; tmux select-pane -T file-content)" \
-    --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"$FILE\"; tmux select-pane -T git)" \
-	--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"$FILE\"; tmux select-pane -T git)" \
-	--bind "alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short \"$FILE\"; tmux select-pane -T git)" \
-    --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$FILE\"; tmux select-pane -T git)" \
+    --bind 'enter:execute-silent(nohup xdg-open "$FILE")' \
+    --bind 'ctrl-c:execute-silent(printf %s "$FILE" | wl-copy)' \
+    --bind 'ctrl-o:execute-silent(tmux new-window -n nvim  nvim "$FILE"; tmux select-pane -T editor)' \
+    --bind 'ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager "$FILE")' \
+    --bind 'ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file "$FILE"; tmux select-pane -T file-content)' \
+    --bind 'ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs "$FILE"; tmux select-pane -T git)' \
+	--bind 'ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff "$FILE"; tmux select-pane -T git)' \
+	--bind 'alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short "$FILE"; tmux select-pane -T git)' \
+    --bind 'alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs "$FILE"; tmux select-pane -T git)' \
     --bind "ctrl-alt-h:unix-line-discard" \
     --bind "alt-bs:unix-word-rubout" \
     --bind "ctrl-h:backward-kill-word" \
-    --bind "change:reload(
-        query={q}
-        if [ -n \"\$query\" ]; then
-            pattern=\"\$(echo \"\$query\" | tr ' ' '|')\"
-            ugrep -Un --color=always --smart-case \"\$pattern\" \"$FILE\" | tr -d '\r' || true
-        else
-            ugrep -Un --color=always --smart-case '' \"$FILE\" | tr -d '\r' || true
-        fi
-    )" \
-    --bind "ctrl-r:reload(
-        query={q}
-        if [ -n \"\$query\" ]; then
-            pattern=\"\$(echo \"\$query\" | tr ' ' '|')\"
-            ugrep -Un --color=always --smart-case \"\$pattern\" \"$FILE\" | tr -d '\r' || true
-        else
-            ugrep -Un --color=always --smart-case '' \"$FILE\" | tr -d '\r' || true
-        fi
-    )"
+    --bind 'change:reload(
+        pattern=$(printf %s {q} | tr " " "|")
+        ugrep -Un --color=always --smart-case -e "$pattern" -- "$FILE" | tr -d "\r"
+    )' \
+    --bind 'ctrl-r:reload(
+        pattern=$(printf %s {q} | tr " " "|")
+        ugrep -Un --color=always --smart-case -e "$pattern" -- "$FILE" | tr -d "\r"
+    )'

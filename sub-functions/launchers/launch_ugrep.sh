@@ -8,7 +8,7 @@ fi
 
 source ~/.SearchFunctions/search_in_file_content
 
-TARGET_REAL=$(realpath "$TARGET")
+TARGET_REAL=$(realpath -- "$TARGET")
 
-cd "$TARGET_REAL" || exit 1
+cd -- "$TARGET_REAL" || exit 1
 ugrep-fzf

@@ -1,35 +1,45 @@
 gfzf() {
-    local filter=""
-    if [ -n "$*" ] && [ -e "$*" ]; then
-        filter="-- $*"
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo -e "\033[31mNot inside a Git repository.\033[0m"
+        return 1
+    fi
+    # Optional path filter; the preview reads it from the environment (it is never spliced into the command)
+    local -x GFZF_PATH=""
+    if [[ -n "$*" && -e "$*" ]]; then
+        GFZF_PATH="$*"
     fi
 
-    export LESS='-R'
-    export BAT_PAGER='less -S -R -M -i'
+    local -x LESS='-R'
+    local -x BAT_PAGER='less -S -R -M -i'
+    local total_commits
 
     # First pass: count total commits for numbering (used in preview)
     total_commits=$(git log --all --oneline "$@" | wc -l)
     
     git log --all \
-        --graph --color=always --abbrev=7 --glob="refs/heads/*" \
+        --graph --color=always --abbrev=7 \
         --format=format:"%C(bold blue)%h%C(reset) %C(dim white)%an%C(reset)%C(bold yellow)%d%C(reset) %C(white)%s%C(reset) %C(bold green)(%ar)%C(reset)%x1f%H%x1f%S" "$@" | \
         sed -E 's#refs/(heads/|remotes/[^/]+/|tags/)##g' | \
         awk -F$'\x1f' -v total="$total_commits" 'BEGIN{commit_count=0} {
-            # Only count lines that have commit data (contain delimiter fields)
-            if (NF >= 2) {
+            # Commit lines end with the two hidden fields %H and %S; everything before them is the
+            # display text. Reading them from the END keeps the fields right even if a subject or an
+            # author name contains the 0x1f delimiter (those pieces are joined back with spaces).
+            if (NF >= 3) {
                 commit_count++
-                # Extract branch from %S field (field 3)
-                branch = $3
+                sha = $(NF-1)
+                branch = $NF
+                display = $1
+                for (k = 2; k <= NF-2; k++) display = display " " $k
                 commit_num = total - commit_count + 1
                 # Clean up branch name and check if its not a SHA
                 if (length(branch) > 0 && !match(branch, /^[0-9a-f]{7,40}$/)) {
                     # Add commit number at the beginning, branch at the end, and include commit_num in hidden field
                     gsub(/\033\[2;31m/, "", branch)  # Remove any existing color codes
                     gsub(/\033\[0m/, "", branch)
-                    print "\033[38;2;171;171;255m" commit_num "\033[0m " $1 " \033[2;31m" branch "\033[0m" "\x1f" $2 "\x1f" $3 "\x1f" commit_num
+                    print "\033[38;2;171;171;255m" commit_num "\033[0m " display " \033[2;31m" branch "\033[0m" "\x1f" sha "\x1f" branch "\x1f" commit_num
                 } else {
                     # Add commit number at the beginning and include commit_num in hidden field
-                    print "\033[38;2;171;171;255m" commit_num "\033[0m " $0 "\x1f" commit_num
+                    print "\033[38;2;171;171;255m" commit_num "\033[0m " display "\x1f" sha "\x1f" branch "\x1f" commit_num
                 }
             } else {
                 # Print empty/formatting lines as-is (tree structure)
@@ -40,25 +50,27 @@ gfzf() {
             --delimiter $'\x1f' --with-nth=1 \
             --preview '
                 sha={2}; src={3}; commit_num={4}
+                pathspec=(); [[ -n "$GFZF_PATH" ]] && pathspec=(-- "$GFZF_PATH")
+                case $sha in ""|*[!0-9a-f]*) exit 0;; esac   # only a hex object name may reach git
                 b=$(printf %s "$src" | sed -E "s#refs/(heads/|remotes/[^/]+/|tags/)##")
                 
                 # Show commit info (author, date, hash, message) with branch and commit number appended to first line
-                git show -s --color=always --date=format:"%Y-%m-%d %H:%M:%S" --pretty=format:"%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)" "$sha" 2>/dev/null \
+                git show -s --color=always --date=format:"%Y-%m-%d %H:%M:%S" --pretty=format:"%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)" --end-of-options "$sha" 2>/dev/null \
                 | awk -v branch="$b" -v branch_color="\033[2;31m" -v reset_color="\033[0m" -v commit_num="$commit_num" \
                       "NR==1 && length(branch) && !match(branch, /^[0-9a-f]{7,40}$/) && length(commit_num) {print \$0 \" \" branch_color branch reset_color \" \033[38;2;171;171;255m-> Commit #\" commit_num \"\033[0m\"; next} NR==1 && length(commit_num) {print \$0 \" \033[38;2;171;171;255m-> Commit #\" commit_num \"\033[0m\"; next} NR==1 && length(branch) && !match(branch, /^[0-9a-f]{7,40}$/) {print \$0 \" \" branch_color branch reset_color; next} {print}"
                 
                 # Show Files and Diffs sections only if there are changes
-                if git diff-tree --no-commit-id --name-only -r --root "$sha" '"$filter"' 2>/dev/null | grep -q .; then
+                if git diff-tree --no-commit-id --name-only -r --root --end-of-options "$sha" "${pathspec[@]}" 2>/dev/null | grep -q .; then
                   echo
                   printf "\033[31mFiles:\033[0m\n"
-                  git show --color=always --format= --name-status "$sha" '"$filter"' 2>/dev/null
+                  git show --color=always --format= --name-status --end-of-options "$sha" "${pathspec[@]}" 2>/dev/null
                   echo
                   
                   printf "\033[31mDiffs:\033[0m"
                   if command -v delta >/dev/null 2>&1; then
-                    git show --color=always --format= "$sha" '"$filter"' 2>/dev/null | delta --line-numbers
+                    git show --color=always --format= --end-of-options "$sha" "${pathspec[@]}" 2>/dev/null | delta --line-numbers
                   else
-                    git show --color=always --format= "$sha" '"$filter"' 2>/dev/null
+                    git show --color=always --format= --end-of-options "$sha" "${pathspec[@]}" 2>/dev/null
                   fi
                 fi
             ' \
@@ -75,37 +87,47 @@ gfzf() {
             --preview-window up:55%:wrap
 }
 gfzf-sbs() {
-    local filter=""
-    if [ -n "$*" ] && [ -e "$*" ]; then
-        filter="-- $*"
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo -e "\033[31mNot inside a Git repository.\033[0m"
+        return 1
+    fi
+    # Optional path filter; the preview reads it from the environment (it is never spliced into the command)
+    local -x GFZF_PATH=""
+    if [[ -n "$*" && -e "$*" ]]; then
+        GFZF_PATH="$*"
     fi
 
-    export LESS='-R'
-    export BAT_PAGER='less -S -R -M -i'
+    local -x LESS='-R'
+    local -x BAT_PAGER='less -S -R -M -i'
+    local total_commits
 
     # First pass: count total commits for numbering (used in preview)
     total_commits=$(git log --all --oneline "$@" | wc -l)
     
     git log --all \
-        --graph --color=always --abbrev=7 --glob="refs/heads/*" \
+        --graph --color=always --abbrev=7 \
         --format=format:"%C(bold blue)%h%C(reset) %C(dim white)%an%C(reset)%C(bold yellow)%d%C(reset) %C(white)%s%C(reset) %C(bold green)(%ar)%C(reset)%x1f%H%x1f%S" "$@" | \
         sed -E 's#refs/(heads/|remotes/[^/]+/|tags/)##g' | \
         awk -F$'\x1f' -v total="$total_commits" 'BEGIN{commit_count=0} {
-            # Only count lines that have commit data (contain delimiter fields)
-            if (NF >= 2) {
+            # Commit lines end with the two hidden fields %H and %S; everything before them is the
+            # display text. Reading them from the END keeps the fields right even if a subject or an
+            # author name contains the 0x1f delimiter (those pieces are joined back with spaces).
+            if (NF >= 3) {
                 commit_count++
-                # Extract branch from %S field (field 3)
-                branch = $3
+                sha = $(NF-1)
+                branch = $NF
+                display = $1
+                for (k = 2; k <= NF-2; k++) display = display " " $k
                 commit_num = total - commit_count + 1
                 # Clean up branch name and check if its not a SHA
                 if (length(branch) > 0 && !match(branch, /^[0-9a-f]{7,40}$/)) {
                     # Add commit number at the beginning, branch at the end, and include commit_num in hidden field
                     gsub(/\033\[2;31m/, "", branch)  # Remove any existing color codes
                     gsub(/\033\[0m/, "", branch)
-                    print "\033[38;2;171;171;255m" commit_num "\033[0m " $1 " \033[2;31m" branch "\033[0m" "\x1f" $2 "\x1f" $3 "\x1f" commit_num
+                    print "\033[38;2;171;171;255m" commit_num "\033[0m " display " \033[2;31m" branch "\033[0m" "\x1f" sha "\x1f" branch "\x1f" commit_num
                 } else {
                     # Add commit number at the beginning and include commit_num in hidden field
-                    print "\033[38;2;171;171;255m" commit_num "\033[0m " $0 "\x1f" commit_num
+                    print "\033[38;2;171;171;255m" commit_num "\033[0m " display "\x1f" sha "\x1f" branch "\x1f" commit_num
                 }
             } else {
                 # Print empty/formatting lines as-is (tree structure)
@@ -117,25 +139,27 @@ gfzf-sbs() {
             --preview '
                 COLUMNS=$(tput cols)
                 sha={2}; src={3}; commit_num={4}
+                pathspec=(); [[ -n "$GFZF_PATH" ]] && pathspec=(-- "$GFZF_PATH")
+                case $sha in ""|*[!0-9a-f]*) exit 0;; esac   # only a hex object name may reach git
                 b=$(printf %s "$src" | sed -E "s#refs/(heads/|remotes/[^/]+/|tags/)##")
                 
                 # Show commit info (author, date, hash, message) with branch and commit number appended to first line
-                git show -s --color=always --date=format:"%Y-%m-%d %H:%M:%S" --pretty=format:"%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)" "$sha" 2>/dev/null \
+                git show -s --color=always --date=format:"%Y-%m-%d %H:%M:%S" --pretty=format:"%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)" --end-of-options "$sha" 2>/dev/null \
                 | awk -v branch="$b" -v branch_color="\033[2;31m" -v reset_color="\033[0m" -v commit_num="$commit_num" \
                       "NR==1 && length(branch) && !match(branch, /^[0-9a-f]{7,40}$/) && length(commit_num) {print \$0 \" \" branch_color branch reset_color \" \033[38;2;171;171;255m-> Commit #\" commit_num \"\033[0m\"; next} NR==1 && length(commit_num) {print \$0 \" \033[38;2;171;171;255m-> Commit #\" commit_num \"\033[0m\"; next} NR==1 && length(branch) && !match(branch, /^[0-9a-f]{7,40}$/) {print \$0 \" \" branch_color branch reset_color; next} {print}"
                 
                 # Show Files and Diffs sections only if there are changes
-                if git diff-tree --no-commit-id --name-only -r --root "$sha" '"$filter"' 2>/dev/null | grep -q .; then
+                if git diff-tree --no-commit-id --name-only -r --root --end-of-options "$sha" "${pathspec[@]}" 2>/dev/null | grep -q .; then
                   echo
                   printf "\033[31mFiles:\033[0m\n"
-                  git show --color=always --format= --name-status "$sha" '"$filter"' 2>/dev/null
+                  git show --color=always --format= --name-status --end-of-options "$sha" "${pathspec[@]}" 2>/dev/null
                   echo
                   
                   printf "\033[31mDiffs:\033[0m"
                   if command -v delta >/dev/null 2>&1; then
-                    git show --color=always --format= "$sha" '"$filter"' 2>/dev/null | delta --side-by-side --width="$COLUMNS" --line-numbers --minus-style="syntax gray" --plus-style="syntax gray"
+                    git show --color=always --format= --end-of-options "$sha" "${pathspec[@]}" 2>/dev/null | delta --side-by-side --width="$COLUMNS" --line-numbers --minus-style="syntax gray" --plus-style="syntax gray"
                   else
-                    git show --color=always --format= "$sha" '"$filter"' 2>/dev/null
+                    git show --color=always --format= --end-of-options "$sha" "${pathspec[@]}" 2>/dev/null
                   fi
                 fi
             ' \
@@ -152,37 +176,47 @@ gfzf-sbs() {
             --preview-window up:55%:wrap
 }
 gfzf-full() {
-    local filter=""
-    if [ -n "$*" ] && [ -e "$*" ]; then
-        filter="-- $*"
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo -e "\033[31mNot inside a Git repository.\033[0m"
+        return 1
+    fi
+    # Optional path filter; the preview reads it from the environment (it is never spliced into the command)
+    local -x GFZF_PATH=""
+    if [[ -n "$*" && -e "$*" ]]; then
+        GFZF_PATH="$*"
     fi
 
-    export LESS='-R'
-    export BAT_PAGER='less -S -R -M -i'
+    local -x LESS='-R'
+    local -x BAT_PAGER='less -S -R -M -i'
+    local total_commits
 
     # First pass: count total commits for numbering (used in preview)
     total_commits=$(git log --all --oneline "$@" | wc -l)
     
     git log --all \
-        --graph --color=always --abbrev=7 --glob="refs/heads/*" \
+        --graph --color=always --abbrev=7 \
         --format=format:"%C(bold blue)%h%C(reset) %C(dim white)%an%C(reset)%C(bold yellow)%d%C(reset) %C(white)%s%C(reset) %C(bold green)(%ar)%C(reset)%x1f%H%x1f%S" "$@" | \
         sed -E 's#refs/(heads/|remotes/[^/]+/|tags/)##g' | \
         awk -F$'\x1f' -v total="$total_commits" 'BEGIN{commit_count=0} {
-            # Only count lines that have commit data (contain delimiter fields)
-            if (NF >= 2) {
+            # Commit lines end with the two hidden fields %H and %S; everything before them is the
+            # display text. Reading them from the END keeps the fields right even if a subject or an
+            # author name contains the 0x1f delimiter (those pieces are joined back with spaces).
+            if (NF >= 3) {
                 commit_count++
-                # Extract branch from %S field (field 3)
-                branch = $3
+                sha = $(NF-1)
+                branch = $NF
+                display = $1
+                for (k = 2; k <= NF-2; k++) display = display " " $k
                 commit_num = total - commit_count + 1
                 # Clean up branch name and check if its not a SHA
                 if (length(branch) > 0 && !match(branch, /^[0-9a-f]{7,40}$/)) {
                     # Add commit number at the beginning, branch at the end, and include commit_num in hidden field
                     gsub(/\033\[2;31m/, "", branch)  # Remove any existing color codes
                     gsub(/\033\[0m/, "", branch)
-                    print "\033[38;2;171;171;255m" commit_num "\033[0m " $1 " \033[2;31m" branch "\033[0m" "\x1f" $2 "\x1f" $3 "\x1f" commit_num
+                    print "\033[38;2;171;171;255m" commit_num "\033[0m " display " \033[2;31m" branch "\033[0m" "\x1f" sha "\x1f" branch "\x1f" commit_num
                 } else {
                     # Add commit number at the beginning and include commit_num in hidden field
-                    print "\033[38;2;171;171;255m" commit_num "\033[0m " $0 "\x1f" commit_num
+                    print "\033[38;2;171;171;255m" commit_num "\033[0m " display "\x1f" sha "\x1f" branch "\x1f" commit_num
                 }
             } else {
                 # Print empty/formatting lines as-is (tree structure)
@@ -194,25 +228,27 @@ gfzf-full() {
             --preview '
                 COLUMNS=$(tput cols)
                 sha={2}; src={3}; commit_num={4}
+                pathspec=(); [[ -n "$GFZF_PATH" ]] && pathspec=(-- "$GFZF_PATH")
+                case $sha in ""|*[!0-9a-f]*) exit 0;; esac   # only a hex object name may reach git
                 b=$(printf %s "$src" | sed -E "s#refs/(heads/|remotes/[^/]+/|tags/)##")
                 
                 # Show commit info (author, date, hash, message) with branch and commit number appended to first line
-                git show -s --color=always --date=format:"%Y-%m-%d %H:%M:%S" --pretty=format:"%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)" "$sha" 2>/dev/null \
+                git show -s --color=always --date=format:"%Y-%m-%d %H:%M:%S" --pretty=format:"%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)" --end-of-options "$sha" 2>/dev/null \
                 | awk -v branch="$b" -v branch_color="\033[2;31m" -v reset_color="\033[0m" -v commit_num="$commit_num" \
                       "NR==1 && length(branch) && !match(branch, /^[0-9a-f]{7,40}$/) && length(commit_num) {print \$0 \" \" branch_color branch reset_color \" \033[38;2;171;171;255m-> Commit #\" commit_num \"\033[0m\"; next} NR==1 && length(commit_num) {print \$0 \" \033[38;2;171;171;255m-> Commit #\" commit_num \"\033[0m\"; next} NR==1 && length(branch) && !match(branch, /^[0-9a-f]{7,40}$/) {print \$0 \" \" branch_color branch reset_color; next} {print}"
                 
                 # Show Files and Diffs sections only if there are changes
-                if git diff-tree --no-commit-id --name-only -r --root "$sha" '"$filter"' 2>/dev/null | grep -q .; then
+                if git diff-tree --no-commit-id --name-only -r --root --end-of-options "$sha" "${pathspec[@]}" 2>/dev/null | grep -q .; then
                   echo
                   printf "\033[31mFiles:\033[0m\n"
-                  git show --color=always --format= --name-status "$sha" '"$filter"' 2>/dev/null
+                  git show --color=always --format= --name-status --end-of-options "$sha" "${pathspec[@]}" 2>/dev/null
                   echo
                   
                   printf "\033[31mDiffs:\033[0m"
                   if command -v delta >/dev/null 2>&1; then
-                    git show --color=always --format= --unified=99999999999 "$sha" '"$filter"' 2>/dev/null | delta --width="$COLUMNS" --line-numbers --minus-style="syntax gray" --plus-style="syntax gray"
+                    git show --color=always --format= --unified=99999999999 --end-of-options "$sha" "${pathspec[@]}" 2>/dev/null | delta --width="$COLUMNS" --line-numbers --minus-style="syntax gray" --plus-style="syntax gray"
                   else
-                    git show --color=always --format= --unified=99999999999 "$sha" '"$filter"' 2>/dev/null
+                    git show --color=always --format= --unified=99999999999 --end-of-options "$sha" "${pathspec[@]}" 2>/dev/null
                   fi
                 fi
             ' \
@@ -229,37 +265,47 @@ gfzf-full() {
             --preview-window up:55%:wrap
 }
 gfzf-full-sbs() {
-    local filter=""
-    if [ -n "$*" ] && [ -e "$*" ]; then
-        filter="-- $*"
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo -e "\033[31mNot inside a Git repository.\033[0m"
+        return 1
+    fi
+    # Optional path filter; the preview reads it from the environment (it is never spliced into the command)
+    local -x GFZF_PATH=""
+    if [[ -n "$*" && -e "$*" ]]; then
+        GFZF_PATH="$*"
     fi
 
-    export LESS='-R'
-    export BAT_PAGER='less -S -R -M -i'
+    local -x LESS='-R'
+    local -x BAT_PAGER='less -S -R -M -i'
+    local total_commits
 
     # First pass: count total commits for numbering (used in preview)
     total_commits=$(git log --all --oneline "$@" | wc -l)
     
     git log --all \
-        --graph --color=always --abbrev=7 --glob="refs/heads/*" \
+        --graph --color=always --abbrev=7 \
         --format=format:"%C(bold blue)%h%C(reset) %C(dim white)%an%C(reset)%C(bold yellow)%d%C(reset) %C(white)%s%C(reset) %C(bold green)(%ar)%C(reset)%x1f%H%x1f%S" "$@" | \
         sed -E 's#refs/(heads/|remotes/[^/]+/|tags/)##g' | \
         awk -F$'\x1f' -v total="$total_commits" 'BEGIN{commit_count=0} {
-            # Only count lines that have commit data (contain delimiter fields)
-            if (NF >= 2) {
+            # Commit lines end with the two hidden fields %H and %S; everything before them is the
+            # display text. Reading them from the END keeps the fields right even if a subject or an
+            # author name contains the 0x1f delimiter (those pieces are joined back with spaces).
+            if (NF >= 3) {
                 commit_count++
-                # Extract branch from %S field (field 3)
-                branch = $3
+                sha = $(NF-1)
+                branch = $NF
+                display = $1
+                for (k = 2; k <= NF-2; k++) display = display " " $k
                 commit_num = total - commit_count + 1
                 # Clean up branch name and check if its not a SHA
                 if (length(branch) > 0 && !match(branch, /^[0-9a-f]{7,40}$/)) {
                     # Add commit number at the beginning, branch at the end, and include commit_num in hidden field
                     gsub(/\033\[2;31m/, "", branch)  # Remove any existing color codes
                     gsub(/\033\[0m/, "", branch)
-                    print "\033[38;2;171;171;255m" commit_num "\033[0m " $1 " \033[2;31m" branch "\033[0m" "\x1f" $2 "\x1f" $3 "\x1f" commit_num
+                    print "\033[38;2;171;171;255m" commit_num "\033[0m " display " \033[2;31m" branch "\033[0m" "\x1f" sha "\x1f" branch "\x1f" commit_num
                 } else {
                     # Add commit number at the beginning and include commit_num in hidden field
-                    print "\033[38;2;171;171;255m" commit_num "\033[0m " $0 "\x1f" commit_num
+                    print "\033[38;2;171;171;255m" commit_num "\033[0m " display "\x1f" sha "\x1f" branch "\x1f" commit_num
                 }
             } else {
                 # Print empty/formatting lines as-is (tree structure)
@@ -271,25 +317,27 @@ gfzf-full-sbs() {
             --preview '
                 COLUMNS=$(tput cols)
                 sha={2}; src={3}; commit_num={4}
+                pathspec=(); [[ -n "$GFZF_PATH" ]] && pathspec=(-- "$GFZF_PATH")
+                case $sha in ""|*[!0-9a-f]*) exit 0;; esac   # only a hex object name may reach git
                 b=$(printf %s "$src" | sed -E "s#refs/(heads/|remotes/[^/]+/|tags/)##")
                 
                 # Show commit info (author, date, hash, message) with branch and commit number appended to first line
-                git show -s --color=always --date=format:"%Y-%m-%d %H:%M:%S" --pretty=format:"%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)" "$sha" 2>/dev/null \
+                git show -s --color=always --date=format:"%Y-%m-%d %H:%M:%S" --pretty=format:"%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)" --end-of-options "$sha" 2>/dev/null \
                 | awk -v branch="$b" -v branch_color="\033[2;31m" -v reset_color="\033[0m" -v commit_num="$commit_num" \
                       "NR==1 && length(branch) && !match(branch, /^[0-9a-f]{7,40}$/) && length(commit_num) {print \$0 \" \" branch_color branch reset_color \" \033[38;2;171;171;255m-> Commit #\" commit_num \"\033[0m\"; next} NR==1 && length(commit_num) {print \$0 \" \033[38;2;171;171;255m-> Commit #\" commit_num \"\033[0m\"; next} NR==1 && length(branch) && !match(branch, /^[0-9a-f]{7,40}$/) {print \$0 \" \" branch_color branch reset_color; next} {print}"
                 
                 # Show Files and Diffs sections only if there are changes
-                if git diff-tree --no-commit-id --name-only -r --root "$sha" '"$filter"' 2>/dev/null | grep -q .; then
+                if git diff-tree --no-commit-id --name-only -r --root --end-of-options "$sha" "${pathspec[@]}" 2>/dev/null | grep -q .; then
                   echo
                   printf "\033[31mFiles:\033[0m\n"
-                  git show --color=always --format= --name-status "$sha" '"$filter"' 2>/dev/null
+                  git show --color=always --format= --name-status --end-of-options "$sha" "${pathspec[@]}" 2>/dev/null
                   echo
                   
                   printf "\033[31mDiffs:\033[0m"
                   if command -v delta >/dev/null 2>&1; then
-                    git show --color=always --format= --unified=99999999999 "$sha" '"$filter"' 2>/dev/null | delta --side-by-side --width="$COLUMNS" --line-numbers --minus-style="syntax gray" --plus-style="syntax gray"
+                    git show --color=always --format= --unified=99999999999 --end-of-options "$sha" "${pathspec[@]}" 2>/dev/null | delta --side-by-side --width="$COLUMNS" --line-numbers --minus-style="syntax gray" --plus-style="syntax gray"
                   else
-                    git show --color=always --format= --unified=99999999999 "$sha" '"$filter"' 2>/dev/null
+                    git show --color=always --format= --unified=99999999999 --end-of-options "$sha" "${pathspec[@]}" 2>/dev/null
                   fi
                 fi
             ' \
@@ -305,7 +353,7 @@ gfzf-full-sbs() {
             --bind 'ctrl-h:backward-kill-word' \
             --preview-window up:55%:wrap
 }
-logs() {
+logs() { (   # subshell: cd, variables and the helper functions do not leak into the interactive shell
     COLUMNS=$(tput cols)
     HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
     FORMAT="$HR%n%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset) %C(red dim)%S%C(reset)%n%C(white)%s%C(reset)%n"
@@ -391,8 +439,8 @@ logs() {
     # First pass: count total commits, second pass: number them in reverse
     total_commits=$(git log --all --oneline "$@" | wc -l)
     git log --all --color=always --pretty=format:"$FORMAT" "$DATEOPT" --name-status "$@" | sed -E 's#refs/(heads/|remotes/[^/]+/|tags/)##' | awk -v total="$total_commits" 'BEGIN{count=0; after_hr=0} /^-+$/{count++; after_hr=1; print; next} after_hr==1 && NF>0 && !/^[AMD]\t/{print $0 " \033[38;2;171;171;255m-> Commit #" (total-count+1) "\033[0m"; after_hr=0; next} {print}' | less -R -i --mouse
-}
-logs-and-diffs() {
+) }
+logs-and-diffs() { (   # subshell: cd, variables and the helper functions do not leak into the interactive shell
     COLUMNS=$(tput cols)
     HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
 
@@ -424,7 +472,7 @@ logs-and-diffs() {
         local sha="$1"
         local src="$2"    # %S captured from the producer pass
         local commit_num="$3"  # commit number
-        [[ -z "$sha" ]] && return   # safety guard
+        [[ "$sha" =~ ^[0-9a-f]+$ ]] || return   # only a hex object name may reach git
 
         local branch=""
         if [[ -n "$src" ]]; then
@@ -433,23 +481,23 @@ logs-and-diffs() {
         fi
 
         # Header (append branch to second line and commit number to second line)
-        git show -s --color=always "$DATEOPT" --pretty=format:"$FORMAT_BASE" "$sha" \
+        git show -s --color=always "$DATEOPT" --pretty=format:"$FORMAT_BASE" --end-of-options "$sha" \
         | awk -v b="$branch" -v c="$BRANCH_COLOR" -v r="$RESET_COLOR" -v num="$commit_num" \
               'NR==2 && length(num) && length(b){print $0 " " c b r " \033[38;2;171;171;255m-> Commit #" num "\033[0m"; next} NR==2 && length(num){print $0 " \033[38;2;171;171;255m-> Commit #" num "\033[0m"; next} NR==2 && length(b){print $0 " " c b r; next} {print}'
 
         # Show Files/Diffs only if there are changes (handles root commit too)
-        if git diff-tree --no-commit-id --name-only -r --root "$sha" | grep -q .; then
+        if git diff-tree --no-commit-id --name-only -r --root --end-of-options "$sha" | grep -q .; then
             echo
             printf "\033[31mFiles:\033[0m\n"
-            git show --color=always --format= --name-status "$sha"
+            git show --color=always --format= --name-status --end-of-options "$sha"
             echo
 
             printf "\033[31mDiffs:\033[0m"
             if command -v delta >/dev/null 2>&1; then
-                git show --color=always --format= -p "$sha" \
+                git show --color=always --format= -p --end-of-options "$sha" \
                 | delta --line-numbers
             else
-                git show --color=always --format= -p "$sha"
+                git show --color=always --format= -p --end-of-options "$sha"
             fi
         fi
 
@@ -498,8 +546,8 @@ logs-and-diffs() {
     | awk -F$'\x1f' -v total="$total_commits" 'BEGIN{count=0} {count++; print $1 "\x1f" $2 "\x1f" (total-count+1)}' \
     | while IFS=$'\x1f' read -r sha src commit_num || [[ -n "$sha" ]]; do _show_commit "$sha" "$src" "$commit_num"; done \
     | less -R -i --mouse
-}
-logs-and-diffs-sbs() {
+) }
+logs-and-diffs-sbs() { (   # subshell: cd, variables and the helper functions do not leak into the interactive shell
     COLUMNS=$(tput cols)
     HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
 
@@ -531,7 +579,7 @@ logs-and-diffs-sbs() {
         local sha="$1"
         local src="$2"    # %S captured from the producer pass
         local commit_num="$3"  # commit number
-        [[ -z "$sha" ]] && return   # safety guard
+        [[ "$sha" =~ ^[0-9a-f]+$ ]] || return   # only a hex object name may reach git
 
         local branch=""
         if [[ -n "$src" ]]; then
@@ -540,24 +588,24 @@ logs-and-diffs-sbs() {
         fi
 
         # Header (append branch to second line and commit number to second line)
-        git show -s --color=always "$DATEOPT" --pretty=format:"$FORMAT_BASE" "$sha" \
+        git show -s --color=always "$DATEOPT" --pretty=format:"$FORMAT_BASE" --end-of-options "$sha" \
         | awk -v b="$branch" -v c="$BRANCH_COLOR" -v r="$RESET_COLOR" -v num="$commit_num" \
               'NR==2 && length(num) && length(b){print $0 " " c b r " \033[38;2;171;171;255m-> Commit #" num "\033[0m"; next} NR==2 && length(num){print $0 " \033[38;2;171;171;255m-> Commit #" num "\033[0m"; next} NR==2 && length(b){print $0 " " c b r; next} {print}'
 
         # Show Files/Diffs only if there are changes (handles root commit too)
-        if git diff-tree --no-commit-id --name-only -r --root "$sha" | grep -q .; then
+        if git diff-tree --no-commit-id --name-only -r --root --end-of-options "$sha" | grep -q .; then
             echo
             printf "\033[31mFiles:\033[0m\n"
-            git show --color=always --format= --name-status "$sha"
+            git show --color=always --format= --name-status --end-of-options "$sha"
             echo
 
             printf "\033[31mDiffs:\033[0m"
             if command -v delta >/dev/null 2>&1; then
-                git show --color=always --format= -p "$sha" \
+                git show --color=always --format= -p --end-of-options "$sha" \
                 | delta --side-by-side --width="$COLUMNS" --line-numbers \
                         --minus-style="syntax gray" --plus-style="syntax gray"
             else
-                git show --color=always --format= -p "$sha"
+                git show --color=always --format= -p --end-of-options "$sha"
             fi
         fi
 
@@ -604,8 +652,8 @@ logs-and-diffs-sbs() {
     | awk -F$'\x1f' -v total="$total_commits" 'BEGIN{count=0} {count++; print $1 "\x1f" $2 "\x1f" (total-count+1)}' \
     | while IFS=$'\x1f' read -r sha src commit_num || [[ -n "$sha" ]]; do _show_commit "$sha" "$src" "$commit_num"; done \
     | less -R -i --mouse
-}
-logs-and-diffs-full() {
+) }
+logs-and-diffs-full() { (   # subshell: cd, variables and the helper functions do not leak into the interactive shell
     COLUMNS=$(tput cols)
     HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
 
@@ -637,7 +685,7 @@ logs-and-diffs-full() {
         local sha="$1"
         local src="$2"    # %S captured from the producer pass
         local commit_num="$3"  # commit number
-        [[ -z "$sha" ]] && return   # safety guard
+        [[ "$sha" =~ ^[0-9a-f]+$ ]] || return   # only a hex object name may reach git
 
         local branch=""
         if [[ -n "$src" ]]; then
@@ -646,24 +694,24 @@ logs-and-diffs-full() {
         fi
 
         # Header (append branch to second line and commit number to second line)
-        git show -s --color=always "$DATEOPT" --pretty=format:"$FORMAT_BASE" "$sha" \
+        git show -s --color=always "$DATEOPT" --pretty=format:"$FORMAT_BASE" --end-of-options "$sha" \
         | awk -v b="$branch" -v c="$BRANCH_COLOR" -v r="$RESET_COLOR" -v num="$commit_num" \
               'NR==2 && length(num) && length(b){print $0 " " c b r " \033[38;2;171;171;255m-> Commit #" num "\033[0m"; next} NR==2 && length(num){print $0 " \033[38;2;171;171;255m-> Commit #" num "\033[0m"; next} NR==2 && length(b){print $0 " " c b r; next} {print}'
 
         # Show Files/Diffs only if there are changes (handles root commit too)
-        if git diff-tree --no-commit-id --name-only -r --root "$sha" | grep -q .; then
+        if git diff-tree --no-commit-id --name-only -r --root --end-of-options "$sha" | grep -q .; then
             echo
             printf "\033[31mFiles:\033[0m\n"
-            git show --color=always --format= --name-status "$sha"
+            git show --color=always --format= --name-status --end-of-options "$sha"
             echo
 
             printf "\033[31mDiffs:\033[0m"
             if command -v delta >/dev/null 2>&1; then
-                git show --color=always --format= -p --unified=99999999999 "$sha" \
+                git show --color=always --format= -p --unified=99999999999 --end-of-options "$sha" \
                 | delta --width="$COLUMNS" --line-numbers \
                         --minus-style="syntax gray" --plus-style="syntax gray"
             else
-                git show --color=always --format= -p --unified=99999999999 "$sha"
+                git show --color=always --format= -p --unified=99999999999 --end-of-options "$sha"
             fi
         fi
 
@@ -710,8 +758,8 @@ logs-and-diffs-full() {
     | awk -F$'\x1f' -v total="$total_commits" 'BEGIN{count=0} {count++; print $1 "\x1f" $2 "\x1f" (total-count+1)}' \
     | while IFS=$'\x1f' read -r sha src commit_num || [[ -n "$sha" ]]; do _show_commit "$sha" "$src" "$commit_num"; done \
     | less -R -i --mouse
-}
-logs-and-diffs-full-sbs() {
+) }
+logs-and-diffs-full-sbs() { (   # subshell: cd, variables and the helper functions do not leak into the interactive shell
     COLUMNS=$(tput cols)
     HR=$(printf '%*s' "$COLUMNS" '' | tr ' ' '-')
 
@@ -743,7 +791,7 @@ logs-and-diffs-full-sbs() {
         local sha="$1"
         local src="$2"    # %S captured from the producer pass
         local commit_num="$3"  # commit number
-        [[ -z "$sha" ]] && return   # safety guard
+        [[ "$sha" =~ ^[0-9a-f]+$ ]] || return   # only a hex object name may reach git
 
         local branch=""
         if [[ -n "$src" ]]; then
@@ -752,24 +800,24 @@ logs-and-diffs-full-sbs() {
         fi
 
         # Header (append branch to second line and commit number to second line)
-        git show -s --color=always "$DATEOPT" --pretty=format:"$FORMAT_BASE" "$sha" \
+        git show -s --color=always "$DATEOPT" --pretty=format:"$FORMAT_BASE" --end-of-options "$sha" \
         | awk -v b="$branch" -v c="$BRANCH_COLOR" -v r="$RESET_COLOR" -v num="$commit_num" \
               'NR==2 && length(num) && length(b){print $0 " " c b r " \033[38;2;171;171;255m-> Commit #" num "\033[0m"; next} NR==2 && length(num){print $0 " \033[38;2;171;171;255m-> Commit #" num "\033[0m"; next} NR==2 && length(b){print $0 " " c b r; next} {print}'
 
         # Show Files/Diffs only if there are changes (handles root commit too)
-        if git diff-tree --no-commit-id --name-only -r --root "$sha" | grep -q .; then
+        if git diff-tree --no-commit-id --name-only -r --root --end-of-options "$sha" | grep -q .; then
             echo
             printf "\033[31mFiles:\033[0m\n"
-            git show --color=always --format= --name-status "$sha"
+            git show --color=always --format= --name-status --end-of-options "$sha"
             echo
 
             printf "\033[31mDiffs:\033[0m"
             if command -v delta >/dev/null 2>&1; then
-                git show --color=always --format= -p --unified=99999999999 "$sha" \
+                git show --color=always --format= -p --unified=99999999999 --end-of-options "$sha" \
                 | delta --side-by-side --width="$COLUMNS" --line-numbers \
                         --minus-style="syntax gray" --plus-style="syntax gray"
             else
-                git show --color=always --format= -p --unified=99999999999 "$sha"
+                git show --color=always --format= -p --unified=99999999999 --end-of-options "$sha"
             fi
         fi
 
@@ -816,4 +864,4 @@ logs-and-diffs-full-sbs() {
     | awk -F$'\x1f' -v total="$total_commits" 'BEGIN{count=0} {count++; print $1 "\x1f" $2 "\x1f" (total-count+1)}' \
     | while IFS=$'\x1f' read -r sha src commit_num || [[ -n "$sha" ]]; do _show_commit "$sha" "$src" "$commit_num"; done \
     | less -R -i --mouse
-}
+) }

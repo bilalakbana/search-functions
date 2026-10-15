@@ -11,22 +11,24 @@ awk '\''{
     printf "%d\t\x1b[34m%s\x1b[0m\n", level, dir
 }'\'' | LC_ALL=C sort -n | cut -f2-'
 
+# The selected directory is handed to the inner shell as $0 (never re-parsed by a shell):
+# tmux executes a multi-word shell-command directly, without a shell.
 "${fd_cmd[@]}" | eval "$process_cmd" | \
-fzf --exact --ansi --style full --wrap \
-    --preview 'ls --color=always {}' \
+fzf -i --exact --ansi --style full --wrap \
+    --preview 'ls --color=always -- {}' \
     --border top \
     --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
     --color 'fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
     --bind "ctrl-r:reload($reload_cmd | $process_cmd)" \
-    --bind "enter:execute-silent(tmux respawn-pane -k $SHELL -c \"tmux select-pane -T rga-fzfS; ~/.SearchFunctions/sub-functions/launchers/launch_ripgrepS.sh {}\")" \
-    --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
-    --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"$(realpath \"{}\"\"); tmux select-pane -T git)" \
-	--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"$(realpath \"{}\"\"); tmux select-pane -T git)" \
-	--bind "alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short \"$(realpath \"{}\"\"); tmux select-pane -T git)" \
-    --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{}\"\"); tmux select-pane -T git)" \
-    --bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugrep; tmux select-pane -T folder-list)" \
+    --bind "enter:execute-silent(tmux respawn-pane -k $SHELL -c \"tmux select-pane -T rga-fzfS; ~/.SearchFunctions/sub-functions/launchers/launch_ripgrepS.sh \\\"\\\$0\\\"\" {})" \
+    --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager \"\$PWD\"/{})" \
+    --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"\$PWD\"/{}; tmux select-pane -T git)" \
+	--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"\$PWD\"/{}; tmux select-pane -T git)" \
+	--bind "alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short \"\$PWD\"/{}; tmux select-pane -T git)" \
+    --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"\$PWD\"/{}; tmux select-pane -T git)" \
+    --bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ripgrepS; tmux select-pane -T folder-list)" \
     --bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)" \
-    --bind "alt-n:execute-silent(tmux rename-window "$(basename $SHELL)"; tmux respawn-pane -k $SHELL -c \"cd {}; NO_AUTO_CD=1 exec $SHELL\")" \
+    --bind "alt-n:execute-silent(tmux rename-window "$(basename $SHELL)"; tmux respawn-pane -k $SHELL -c \"cd -- \\\"\\\$0\\\"; exec $SHELL\" {})" \
     --bind 'ctrl-l:toggle-preview' \
     --bind 'home:last,end:first' \
     --bind 'alt-up:preview-page-up' \

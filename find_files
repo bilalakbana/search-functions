@@ -1,18 +1,23 @@
 f() {
+    local original_name
     if [[ -n "$TMUX" ]]; then
         original_name=$(tmux display-message -p '#W')  # Save current window name
         tmux rename-window files
     fi
 
+    local arg pat patterns re
     local FD_ARGS=()
+    local RE_PARTS=()
 
     for arg in "$@"; do
         if [[ $arg == --glob=* ]]; then
             patterns=${arg#--glob=}
             while [[ -n $patterns ]]; do
                 pat=${patterns%%,*}
-                ext=${pat#*.}  # strip '*.' to get just the extension
-                FD_ARGS+=("-e" "$ext")
+                # fd takes a single pattern and -e only understands extensions, so every glob is
+                # translated into a regex alternative matched against the file name (e.g. *.cpp -> .*\.cpp)
+                re=$(printf '%s' "$pat" | sed 's/\\/\\\\/g; s/[]$.^+(){}|[]/\\&/g; s/\*/.*/g; s/?/./g')
+                RE_PARTS+=("$re")
                 [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
             done
         elif [[ $arg == --exclude=* ]]; then
@@ -26,7 +31,11 @@ f() {
             FD_ARGS+=("$arg")
         fi
     done
+    if (( ${#RE_PARTS[@]} )); then
+        FD_ARGS+=("^(${(j:|:)RE_PARTS})$")
+    fi
 
+    local fd_cmd reload_cmd process_cmd
     fd_cmd=(fd --type f "${FD_ARGS[@]}")
     reload_cmd=$(printf "%q " "${fd_cmd[@]}")
 
@@ -43,32 +52,31 @@ f() {
     }'\'' | LC_ALL=C sort'
 
     "${fd_cmd[@]}" | eval "$process_cmd" | \
-    fzf --exact --no-sort --ansi --style full --wrap --delimiter : \
-        --preview 'bat --color=always {}' --preview-window 'hidden' \
+    fzf -i --exact --no-sort --ansi --style full --wrap \
+        --preview 'bat --color=always -- {}' \
         --border top \
         --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --color 'fg:252,fg+:252,bg:234,bg+:235,hl:magenta,hl+:magenta,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
-        --bind "change:reload($reload_cmd | $process_cmd)" \
         --bind "ctrl-r:reload($reload_cmd | $process_cmd)" \
         --bind 'ctrl-l:toggle-preview' \
-        --bind 'enter:execute-silent(nohup xdg-open {})' \
-        --bind "ctrl-o:execute-silent(tmux new-window -n nvim  nvim \"$(realpath \"{}\"\"); tmux select-pane -T editor)" \
-        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {})" \
-        --bind "ctrl-c:execute-silent(echo -n {} | wl-copy)" \
-        --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{}\"\"); tmux select-pane -T file-content)" \
-        --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"$(realpath \"{}\"\"); tmux select-pane -T git)" \
-   		--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"$(realpath \"{}\"\"); tmux select-pane -T git)" \
-		--bind "alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short \"$(realpath \"{}\"\"); tmux select-pane -T git)" \
+        --bind 'enter:execute-silent(nohup xdg-open ./{})' \
+        --bind "ctrl-o:execute-silent(tmux new-window -n nvim  nvim \"\$PWD\"/{}; tmux select-pane -T editor)" \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager \"\$PWD\"/{})" \
+        --bind "ctrl-c:execute-silent(printf %s {} | wl-copy)" \
+        --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"\$PWD\"/{}; tmux select-pane -T file-content)" \
+        --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"\$PWD\"/{}; tmux select-pane -T git)" \
+   		--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"\$PWD\"/{}; tmux select-pane -T git)" \
+		--bind "alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short \"\$PWD\"/{}; tmux select-pane -T git)" \
         --bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugrep; tmux select-pane -T folder-list)" \
         --bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)" \
-        --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{}\"\"); tmux select-pane -T git)" \
+        --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"\$PWD\"/{}; tmux select-pane -T git)" \
         --bind 'home:last,end:first' \
         --bind 'alt-up:preview-page-up' \
         --bind 'alt-down:preview-page-down' \
         --bind "ctrl-alt-h:unix-line-discard" \
         --bind "alt-bs:unix-word-rubout" \
         --bind "ctrl-h:backward-kill-word" \
-        --preview-window='up:50%:wrap'
+        --preview-window='up:50%:wrap:hidden'
 
     if [[ -n "$TMUX" ]]; then
         tmux rename-window "$original_name"  # Restore original name

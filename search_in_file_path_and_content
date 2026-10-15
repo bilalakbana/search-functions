@@ -1,42 +1,46 @@
 ugf() {
+    local original_name
     if [[ -n "$TMUX" ]]; then
         original_name=$(tmux display-message -p '#W')  # Save current window name
         tmux rename-window ugf
     fi
 
+    local arg pat patterns
     local GLOB_PATTERN=()
-    local EXTRA_OPTS=("--exclude-from=.gitignore") # pre-add, remove if --no-ignore is detected
+    local EXTRA_OPTS=()
+    local IGNORE_OPT=(--ignore-files) # honour .gitignore files (ugrep native, nested ones included); dropped by --no-ignore
     for arg in "$@"; do
         if [[ $arg == --glob=* ]]; then
             patterns=${arg#--glob=}
             while [[ -n $patterns ]]; do
                 pat=${patterns%%,*}
-                GLOB_PATTERN+=("-g" "'$pat'")
+                GLOB_PATTERN+=("-g" "$pat")
                 [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
             done
         elif [[ $arg == --exclude=* ]]; then
             patterns=${arg#--exclude=}
             while [[ -n $patterns ]]; do
                 pat=${patterns%%,*}
-                GLOB_PATTERN+=("-g" "'!$pat'")
+                GLOB_PATTERN+=("-g" "!$pat")
                 [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
             done
         elif [[ $arg == --no-ignore ]]; then
-            EXTRA_OPTS=("${EXTRA_OPTS[@]/--exclude-from=.gitignore}")
+            IGNORE_OPT=()
         else
             EXTRA_OPTS+=("$arg")
         fi
     done
-    # Ensure .gitignore actually exists before finalizing
-    [[ ! -f .gitignore ]] && EXTRA_OPTS=("${EXTRA_OPTS[@]/--exclude-from=.gitignore}")
 
-    local UG_CMD="GREP_COLORS='fn=35:ln=32:mt=97' \
-    ug -RU --color=always --sort=name --line-number --ignore-binary --no-heading ${GLOB_PATTERN[@]} ${EXTRA_OPTS[@]} ."
+    # Every argument is shell-quoted (%q): fzf runs the command through $SHELL -c.
+    # The pattern is '.' (any non-empty line) and the path is '.'; lines come out as file:line:text,
+    # so a file name containing ':' cannot be told apart from the line number.
+    local UG_CMD
+    UG_CMD="GREP_COLORS='fn=35:ln=32:mt=97' $(printf '%q ' ug -rU --color=always --sort=name --line-number --ignore-binary --no-heading "${IGNORE_OPT[@]}" "${GLOB_PATTERN[@]}" "${EXTRA_OPTS[@]}")-e . . | tr -d '\r'"
 
-    FZF_DEFAULT_COMMAND="$UG_CMD | tr -d '\r'" \
-    fzf --ansi --delimiter : --no-sort --style full --wrap --exact \
+    FZF_DEFAULT_COMMAND="$UG_CMD" \
+    fzf -i --ansi --delimiter : --no-sort --style full --wrap --exact \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
-        --preview 'bat --color=always {1} --highlight-line {2}' \
+        --preview 'bat --color=always --highlight-line {2} -- {1}' \
         --border top \
         --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
@@ -45,16 +49,16 @@ ugf() {
         --bind 'home:last,end:first' \
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
-        --bind 'enter:execute-silent(nohup xdg-open {1})' \
-        --bind "ctrl-o:execute-silent(tmux new-window -n nvim  nvim \"$(realpath \"{1}\"\"); tmux select-pane -T editor)" \
-        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
-        --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-        --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \
-        --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
-		--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
-		--bind "alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
+        --bind 'enter:execute-silent(nohup xdg-open ./{1})' \
+        --bind "ctrl-o:execute-silent(tmux new-window -n nvim  nvim \"\$PWD\"/{1}; tmux select-pane -T editor)" \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager \"\$PWD\"/{1})" \
+        --bind "ctrl-c:execute-silent(printf %s {1} | wl-copy)" \
+        --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"\$PWD\"/{1}; tmux select-pane -T file-content)" \
+        --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"\$PWD\"/{1}; tmux select-pane -T git)" \
+		--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"\$PWD\"/{1}; tmux select-pane -T git)" \
+		--bind "alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short \"\$PWD\"/{1}; tmux select-pane -T git)" \
         --bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugf; tmux select-pane -T folder-list)" \
-        --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
+        --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"\$PWD\"/{1}; tmux select-pane -T git)" \
         --bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)" \
         --bind "ctrl-alt-h:unix-line-discard" \
         --bind "alt-bs:unix-word-rubout" \
@@ -65,44 +69,48 @@ ugf() {
     fi
 }
 ugf-plus() {
+    local original_name
     if [[ -n "$TMUX" ]]; then
         original_name=$(tmux display-message -p '#W')  # Save current window name
         tmux rename-window ugf
     fi
 
+    local arg pat patterns
     local GLOB_PATTERN=()
-    local EXTRA_OPTS=("--exclude-from=.gitignore") # pre-add, remove if --no-ignore is detected
+    local EXTRA_OPTS=()
+    local IGNORE_OPT=(--ignore-files) # honour .gitignore files (ugrep native, nested ones included); dropped by --no-ignore
     for arg in "$@"; do
         if [[ $arg == --glob=* ]]; then
             patterns=${arg#--glob=}
             while [[ -n $patterns ]]; do
                 pat=${patterns%%,*}
-                GLOB_PATTERN+=("-g" "'$pat'")
+                GLOB_PATTERN+=("-g" "$pat")
                 [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
             done
         elif [[ $arg == --exclude=* ]]; then
             patterns=${arg#--exclude=}
             while [[ -n $patterns ]]; do
                 pat=${patterns%%,*}
-                GLOB_PATTERN+=("-g" "'!$pat'")
+                GLOB_PATTERN+=("-g" "!$pat")
                 [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
             done
         elif [[ $arg == --no-ignore ]]; then
-            EXTRA_OPTS=("${EXTRA_OPTS[@]/--exclude-from=.gitignore}")
+            IGNORE_OPT=()
         else
             EXTRA_OPTS+=("$arg")
         fi
     done
-    # Ensure .gitignore actually exists before finalizing
-    [[ ! -f .gitignore ]] && EXTRA_OPTS=("${EXTRA_OPTS[@]/--exclude-from=.gitignore}")
 
-    local UG_CMD="GREP_COLORS='fn=35:ln=32:mt=97' \
-    ug+ -RU --color=always --sort=name --line-number --ignore-binary --no-heading ${GLOB_PATTERN[@]} ${EXTRA_OPTS[@]} ."
+    # Every argument is shell-quoted (%q): fzf runs the command through $SHELL -c.
+    # The pattern is '.' (any non-empty line) and the path is '.'; lines come out as file:line:text,
+    # so a file name containing ':' cannot be told apart from the line number.
+    local UG_CMD
+    UG_CMD="GREP_COLORS='fn=35:ln=32:mt=97' $(printf '%q ' ug+ -rU --color=always --sort=name --line-number --ignore-binary --no-heading "${IGNORE_OPT[@]}" "${GLOB_PATTERN[@]}" "${EXTRA_OPTS[@]}")-e . . | tr -d '\r'"
 
-    FZF_DEFAULT_COMMAND="$UG_CMD | tr -d '\r'" \
-    fzf --ansi --delimiter : --no-sort --style full --wrap --exact \
+    FZF_DEFAULT_COMMAND="$UG_CMD" \
+    fzf -i --ansi --delimiter : --no-sort --style full --wrap --exact \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
-        --preview 'bat --color=always {1} --highlight-line {2}' \
+        --preview 'bat --color=always --highlight-line {2} -- {1}' \
         --border top \
         --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
@@ -111,16 +119,16 @@ ugf-plus() {
         --bind 'home:last,end:first' \
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
-        --bind 'enter:execute-silent(nohup xdg-open {1})' \
-        --bind "ctrl-o:execute-silent(tmux new-window -n nvim  nvim \"$(realpath \"{1}\"\"); tmux select-pane -T editor)" \
-        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
-        --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-        --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \
-        --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
-		--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
-		--bind "alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
+        --bind 'enter:execute-silent(nohup xdg-open ./{1})' \
+        --bind "ctrl-o:execute-silent(tmux new-window -n nvim  nvim \"\$PWD\"/{1}; tmux select-pane -T editor)" \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager \"\$PWD\"/{1})" \
+        --bind "ctrl-c:execute-silent(printf %s {1} | wl-copy)" \
+        --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"\$PWD\"/{1}; tmux select-pane -T file-content)" \
+        --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"\$PWD\"/{1}; tmux select-pane -T git)" \
+		--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"\$PWD\"/{1}; tmux select-pane -T git)" \
+		--bind "alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short \"\$PWD\"/{1}; tmux select-pane -T git)" \
         --bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_ugf_plus; tmux select-pane -T folder-list)" \
-        --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
+        --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"\$PWD\"/{1}; tmux select-pane -T git)" \
         --bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)" \
         --bind "ctrl-alt-h:unix-line-discard" \
         --bind "alt-bs:unix-word-rubout" \
@@ -131,11 +139,13 @@ ugf-plus() {
     fi
 }
 rgf() {
+    local original_name
     if [[ -n "$TMUX" ]]; then
         original_name=$(tmux display-message -p '#W')  # Save current window name
         tmux rename-window rgf
     fi
 
+    local arg pat patterns
     local GLOB_PATTERN=()
     local EXTRA_OPTS=()
 
@@ -144,14 +154,14 @@ rgf() {
             patterns=${arg#--glob=}
             while [[ -n $patterns ]]; do
                 pat=${patterns%%,*}
-                GLOB_PATTERN+=("-g" "'$pat'")
+                GLOB_PATTERN+=("-g" "$pat")
                 [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
             done
         elif [[ $arg == --exclude=* ]]; then
             patterns=${arg#--exclude=}
             while [[ -n $patterns ]]; do
                 pat=${patterns%%,*}
-                GLOB_PATTERN+=("-g" "'!$pat'")
+                GLOB_PATTERN+=("-g" "!$pat")
                 [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
             done
         else
@@ -159,27 +169,30 @@ rgf() {
         fi
     done
 
-    local RG_CMD="rg '' --color=always --line-number --no-heading ${GLOB_PATTERN[@]} ${EXTRA_OPTS[@]}"
+    # Every argument is shell-quoted (%q): the string is eval'd here and run by fzf through $SHELL -c.
+    # Lines come out as file:line:text, so a file name containing ':' cannot be told apart from the line number.
+    local RG_CMD
+    RG_CMD=$(printf '%q ' rg -e '' --color=always --line-number --no-heading "${GLOB_PATTERN[@]}" "${EXTRA_OPTS[@]}")
     eval "$RG_CMD" | \
-    fzf --ansi --exact --style full --wrap \
+    fzf -i --ansi --exact --style full --wrap \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --delimiter : \
-        --preview 'bat --color=always {1} --highlight-line {2}' \
+        --preview 'bat --color=always --highlight-line {2} -- {1}' \
         --border top \
         --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind 'home:last,end:first' \
         --bind "ctrl-r:reload($RG_CMD || rg --files || echo 'No results found')" \
-        --bind 'enter:execute-silent(nohup xdg-open {1})' \
-        --bind "ctrl-o:execute-silent(tmux new-window -n nvim  nvim \"$(realpath \"{1}\"\"); tmux select-pane -T editor)" \
-        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
-        --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-        --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \
-        --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
-		--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
-		--bind "alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
+        --bind 'enter:execute-silent(nohup xdg-open ./{1})' \
+        --bind "ctrl-o:execute-silent(tmux new-window -n nvim  nvim \"\$PWD\"/{1}; tmux select-pane -T editor)" \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager \"\$PWD\"/{1})" \
+        --bind "ctrl-c:execute-silent(printf %s {1} | wl-copy)" \
+        --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"\$PWD\"/{1}; tmux select-pane -T file-content)" \
+        --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"\$PWD\"/{1}; tmux select-pane -T git)" \
+		--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"\$PWD\"/{1}; tmux select-pane -T git)" \
+		--bind "alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short \"\$PWD\"/{1}; tmux select-pane -T git)" \
         --bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_rgf; tmux select-pane -T folder-list)" \
-        --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
+        --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"\$PWD\"/{1}; tmux select-pane -T git)" \
         --bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)" \
         --bind "ctrl-l:toggle-preview" \
         --bind "ctrl-alt-h:unix-line-discard" \
@@ -191,11 +204,13 @@ rgf() {
     fi
 }
 rgfS() {
+    local original_name
     if [[ -n "$TMUX" ]]; then
         original_name=$(tmux display-message -p '#W')  # Save current window name
         tmux rename-window rgf
     fi
 
+    local arg pat patterns
     local GLOB_PATTERN=()
     local EXTRA_OPTS=()
 
@@ -204,14 +219,14 @@ rgfS() {
             patterns=${arg#--glob=}
             while [[ -n $patterns ]]; do
                 pat=${patterns%%,*}
-                GLOB_PATTERN+=("-g" "'$pat'")
+                GLOB_PATTERN+=("-g" "$pat")
                 [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
             done
         elif [[ $arg == --exclude=* ]]; then
             patterns=${arg#--exclude=}
             while [[ -n $patterns ]]; do
                 pat=${patterns%%,*}
-                GLOB_PATTERN+=("-g" "'!$pat'")
+                GLOB_PATTERN+=("-g" "!$pat")
                 [[ $patterns == *,* ]] && patterns=${patterns#*,} || patterns=""
             done
         else
@@ -219,28 +234,31 @@ rgfS() {
         fi
     done
 
-    local RG_CMD="rg '' --color=always --line-number --no-heading ${GLOB_PATTERN[@]} ${EXTRA_OPTS[@]}"
+    # Every argument is shell-quoted (%q): the string is eval'd here and run by fzf through $SHELL -c.
+    # Lines come out as file:line:text, so a file name containing ':' cannot be told apart from the line number.
+    local RG_CMD
+    RG_CMD=$(printf '%q ' rg -e '' --color=always --line-number --no-heading "${GLOB_PATTERN[@]}" "${EXTRA_OPTS[@]}")
 
     eval "$RG_CMD" | LC_ALL=C sort | \
-    fzf --ansi --exact --no-sort --style full --wrap \
+    fzf -i --ansi --exact --no-sort --style full --wrap \
         --color 'preview-fg:bright-magenta,fg:252,fg+:252,bg:234,bg+:235,hl:green:underline,hl+:green:underline,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
         --delimiter : \
-        --preview 'bat --color=always {1} --highlight-line {2}' \
+        --preview 'bat --color=always --highlight-line {2} -- {1}' \
         --border top \
         --border-label " $(echo $PWD | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
         --preview-window 'up:70%:wrap:+{2}+3/3,~3' \
         --bind 'home:last,end:first' \
         --bind "ctrl-r:reload($RG_CMD | LC_ALL=C sort || echo 'No results found')" \
-        --bind 'enter:execute-silent(nohup xdg-open {1})' \
-        --bind "ctrl-o:execute-silent(tmux new-window -n nvim  nvim \"$(realpath \"{1}\"\"); tmux select-pane -T editor)" \
-        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager {1})" \
-        --bind "ctrl-c:execute-silent(echo -n {1} | wl-copy)" \
-        --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"$(realpath \"{1}\"\"); tmux select-pane -T file-content)" \
-        --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
-		--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
-		--bind "alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
+        --bind 'enter:execute-silent(nohup xdg-open ./{1})' \
+        --bind "ctrl-o:execute-silent(tmux new-window -n nvim  nvim \"\$PWD\"/{1}; tmux select-pane -T editor)" \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager \"\$PWD\"/{1})" \
+        --bind "ctrl-c:execute-silent(printf %s {1} | wl-copy)" \
+        --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"\$PWD\"/{1}; tmux select-pane -T file-content)" \
+        --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"\$PWD\"/{1}; tmux select-pane -T git)" \
+		--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"\$PWD\"/{1}; tmux select-pane -T git)" \
+		--bind "alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short \"\$PWD\"/{1}; tmux select-pane -T git)" \
         --bind "alt-j:execute-silent(tmux new-window -n folders ~/.SearchFunctions/sub-functions/folder_list_rgfS; tmux select-pane -T folder-list)" \
-        --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"$(realpath \"{1}\"\"); tmux select-pane -T git)" \
+        --bind "alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs \"\$PWD\"/{1}; tmux select-pane -T git)" \
         --bind "ctrl-j:execute-silent(tmux new-window -n files ~/.SearchFunctions/sub-functions/file_list; tmux select-pane -T file-list)" \
         --bind "ctrl-l:toggle-preview" \
         --bind "ctrl-alt-h:unix-line-discard" \

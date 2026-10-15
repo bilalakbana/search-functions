@@ -20,13 +20,16 @@ A collection of efficient and flexible search tools to search inside file conten
 | Function          | Description                                                                 |
 |-------------------|-----------------------------------------------------------------------------|
 | `advancedsearch`  | Search in text, binary, and most file types                                 |
-| `advancedsearch+` | Like `advancedsearch` + support for PDF, Word, DOCX                         |
+| `advancedsearch_plus` | Like `advancedsearch` + support for PDF, Word, DOCX                     |
 | `detailedsearch`  | Like `advancedsearch` + displays matching lines for filtering               |
 | `ugrep-fzf`       | Interactive search using `ugrep` and `fzf`, recursive in folders            |
-| `ugrep+fzf`       | Like `ugrep-fzf` + support for PDF, Word, DOCX                              |
-| `rga-fzf`         | Interactive search like `ugrep+fzf`, slightly slower but powerful           |
-| `f`, `fg`, `fh`   | Search in file paths only (normal, gitignored, hidden respectively)         |
-| `ugf`, `rgf`      | Search both file contents and file paths recursively                        |
+| `ugrep-fzf-plus`  | Like `ugrep-fzf` + support for PDF, Word, DOCX                              |
+| `rga-fzf`, `rga-fzfS` | Interactive search like `ugrep-fzf-plus`, slightly slower but powerful (`S`: sorted list) |
+| `f`               | Search in file paths only (respects .gitignore; pass `--hidden`/`--no-ignore` through to fd) |
+| `ugf`, `ugf-plus`, `rgf`, `rgfS` | Search both file contents and file paths recursively (`-plus`: PDF/Word/DOCX, `S`: sorted) |
+| `fbr`             | Browse the definitions of all shell functions                               |
+| `gfzf`, `gfzf-sbs`, `gfzf-full`, `gfzf-full-sbs` | Interactive git log with commit preview (side-by-side / full-file diffs) |
+| `logs`, `logs-and-diffs` (+ `-sbs`, `-full`, `-full-sbs`) | Numbered git log (optionally with diffs) in `less` |
 
 ---
 
@@ -45,30 +48,32 @@ detailedsearch 'search string' --glob='*.md,*.txt'
 ### 🔹 Advanced Search in PDFs, DOCX
 
 ```bash
-advancedsearch+ 'keyword'
+advancedsearch_plus 'keyword'
 ```
 
 ### 🔹 Interactive Search with FZF
 
 ```bash
 ugrep-fzf
-ugrep+fzf
+ugrep-fzf-plus
 rga-fzf
+rga-fzfS
 ```
 
 ### 🔹 File Path Search Only
 
 ```bash
-f
-fg   # respects .gitignore
-fh   # also includes hidden files
+f                          # respects .gitignore
+f --hidden --no-ignore     # extra arguments go to fd
+f --glob='*.cpp,*.py'     # by file-name pattern
 ```
 
 ### 🔹 Full Recursive Search (content + path)
 
 ```bash
-ugf 'search string'
-rgf 'search string'
+ugf    # ugf-plus for PDF/Word/DOCX
+rgf    # rgfS for a sorted list
+(the query is typed inside fzf)
 ```
 
 ---
@@ -81,9 +86,12 @@ These shortcuts apply when using the interactive search tools (`fzf`, `ugrep-fzf
 |----------|------------------------------------------|
 | `Enter`  | Open the selected file                   |
 | `Ctrl-e` | Open file location in file manager       |
-| `Ctrl-c` | Copy relative path of selected file      |
-| `Ctrl-t` | Open selected file in a new tmux window  |
-| `Ctrl-p` | Pop out the preview in a separate tmux pane |
+| `Ctrl-c` | Copy relative path of selected file (use `Esc` to quit) |
+| `Ctrl-o` | Open the file in nvim in a new tmux window |
+| `Ctrl-t` | Search inside the selected file in a new tmux window |
+| `Ctrl-u` / `Ctrl-g` / `Alt-g` / `Alt-u` | git diff / diff (delta) / short diff / log of the file |
+| `Alt-j` / `Ctrl-j` | Folder list / file list in a new tmux window |
+| `Ctrl-l` | Toggle the preview                       |
 
 > These are customizable if you tweak your FZF or terminal bindings.
 
@@ -104,22 +112,21 @@ cargo install ripgrep-all  # if using Rust
 mkdir ~/.SearchFunctions
 ```
 
-3. Following extraction files to the directory in step 2, make the followings executable
+3. Following extraction files to the directory in step 2, make the helper scripts executable
 ```bash
-chmod +x ~/.SearchFunctions/sub-functions/file_list
-chmod +x ~/.SearchFunctions/sub-functions/search_in_single_file
+chmod +x ~/.SearchFunctions/sub-functions/* ~/.SearchFunctions/sub-functions/launchers/*
 ```
 
 4. Then add those to your shell for example ~/.zshrc
 ```bash
-source ~/.SearchFunctions/advancedsearch                  # advancedsearch | advancedsearch_respect_gitignore
-source ~/.SearchFunctions/advancedsearch+                 # advancedsearch+ | advancedsearch_respect_gitignore+
-source ~/.SearchFunctions/detailedsearch                  # detailedsearch | detailedsearch_respect_gitignore
-source ~/.SearchFunctions/search_in_file_content          # ugrep-fzf | ugrep+fzf | rga-fzf
-source ~/.SearchFunctions/search_in_file_path_and_content # ugf | rgf
-source ~/.SearchFunctions/find_files                      # f | fh| fg
+source ~/.SearchFunctions/advancedsearch                  # advancedsearch
+source ~/.SearchFunctions/advancedsearch_plus             # advancedsearch_plus
+source ~/.SearchFunctions/detailedsearch                  # detailedsearch
+source ~/.SearchFunctions/search_in_file_content          # ugrep-fzf | ugrep-fzf-plus | rga-fzf | rga-fzfS
+source ~/.SearchFunctions/search_in_file_path_and_content # ugf | ugf-plus | rgf | rgfS
+source ~/.SearchFunctions/find_files                      # f
 source ~/.SearchFunctions/sub-functions/list_functions    # fbr
-source ~/.SearchFunctions/sub-functions/git_logs          # gfzf
+source ~/.SearchFunctions/sub-functions/git_logs          # gfzf* | logs* (need git-delta; show_diffs needs git-split-diffs)
 ```
 
 ---

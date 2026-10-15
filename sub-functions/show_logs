@@ -40,14 +40,14 @@ submodule_path=$(cd "$repo_root" && git config --file .gitmodules --get-regexp p
 done)
 
 if [[ -n "$submodule_path" ]]; then
-    relative_path="${file#*$submodule_path/}"
+    relative_path="${file#*"$submodule_path"/}"
     cd "$repo_root/$submodule_path" || {
         echo -e "\033[31mCannot cd into submodule.\033[0m"
         read -n1 -r -p "Press any key to exit..."
         exit 1
     }
 else
-    relative_path="${file#$repo_root/}"
+    relative_path="${file#"$repo_root"/}"
     cd "$repo_root" || {
         echo -e "\033[31mCannot cd into repo root.\033[0m"
         read -n1 -r -p "Press any key to exit..."
