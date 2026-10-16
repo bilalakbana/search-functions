@@ -49,10 +49,10 @@ ugrep-fzf() {
         --bind 'home:last,end:first' \
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
-        --bind 'enter:execute-silent(nohup xdg-open ./{})' \
+        --bind 'enter:execute-silent(~/.SearchFunctions/sub-functions/platform_action open ./{})' \
         --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n nvim nvim \"\$PWD\"/{} || tmux new-window -n nvim nvim \"\$PWD\"/{} -c /{q} -c \"set hlsearch\"; tmux select-pane -T editor)" \
-        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager \"\$PWD\"/{})" \
-        --bind "ctrl-c:execute-silent(printf %s {} | wl-copy)" \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/platform_action reveal \"\$PWD\"/{})" \
+        --bind "ctrl-c:execute-silent(~/.SearchFunctions/sub-functions/platform_action copy-path {})" \
         --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"\$PWD\"/{} {q}; tmux select-pane -T file-content)" \
         --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"\$PWD\"/{}; tmux select-pane -T git)" \
 		--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"\$PWD\"/{}; tmux select-pane -T git)" \
@@ -120,10 +120,10 @@ ugrep-fzf-plus() {
         --bind 'home:last,end:first' \
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
-        --bind 'enter:execute-silent(nohup xdg-open ./{})' \
+        --bind 'enter:execute-silent(~/.SearchFunctions/sub-functions/platform_action open ./{})' \
         --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n nvim nvim \"\$PWD\"/{} || tmux new-window -n nvim nvim \"\$PWD\"/{} -c /{q} -c \"set hlsearch\"; tmux select-pane -T editor)" \
-        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager \"\$PWD\"/{})" \
-        --bind "ctrl-c:execute-silent(printf %s {} | wl-copy)" \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/platform_action reveal \"\$PWD\"/{})" \
+        --bind "ctrl-c:execute-silent(~/.SearchFunctions/sub-functions/platform_action copy-path {})" \
         --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"\$PWD\"/{} {q}; tmux select-pane -T file-content)" \
         --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"\$PWD\"/{}; tmux select-pane -T git)" \
 		--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"\$PWD\"/{}; tmux select-pane -T git)" \
@@ -188,10 +188,10 @@ rga-fzf() {
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
         --bind "ctrl-l:toggle-preview" \
-        --bind 'enter:execute-silent(nohup xdg-open ./{})' \
+        --bind 'enter:execute-silent(~/.SearchFunctions/sub-functions/platform_action open ./{})' \
         --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n nvim nvim \"\$PWD\"/{} || tmux new-window -n nvim nvim \"\$PWD\"/{} -c /{q} -c \"set hlsearch\"; tmux select-pane -T editor)" \
-        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager \"\$PWD\"/{})" \
-        --bind "ctrl-c:execute-silent(printf %s {} | wl-copy)" \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/platform_action reveal \"\$PWD\"/{})" \
+        --bind "ctrl-c:execute-silent(~/.SearchFunctions/sub-functions/platform_action copy-path {})" \
         --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"\$PWD\"/{} {q}; tmux select-pane -T file-content)" \
         --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"\$PWD\"/{}; tmux select-pane -T git)" \
 		--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"\$PWD\"/{}; tmux select-pane -T git)" \
@@ -256,10 +256,10 @@ rga-fzfS() {
         --bind "alt-up:preview-page-up" \
         --bind "alt-down:preview-page-down" \
         --bind "ctrl-l:toggle-preview" \
-        --bind 'enter:execute-silent(nohup xdg-open ./{})' \
+        --bind 'enter:execute-silent(~/.SearchFunctions/sub-functions/platform_action open ./{})' \
         --bind "ctrl-o:execute([[ -z {q} ]] && tmux new-window -n nvim nvim \"\$PWD\"/{} || tmux new-window -n nvim nvim \"\$PWD\"/{} -c /{q} -c \"set hlsearch\"; tmux select-pane -T editor)" \
-        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/open_in_file_manager \"\$PWD\"/{})" \
-        --bind "ctrl-c:execute-silent(printf %s {} | wl-copy)" \
+        --bind "ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/platform_action reveal \"\$PWD\"/{})" \
+        --bind "ctrl-c:execute-silent(~/.SearchFunctions/sub-functions/platform_action copy-path {})" \
         --bind "ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file \"\$PWD\"/{} {q}; tmux select-pane -T file-content)" \
         --bind "ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs \"\$PWD\"/{}; tmux select-pane -T git)" \
 		--bind "ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff \"\$PWD\"/{}; tmux select-pane -T git)" \

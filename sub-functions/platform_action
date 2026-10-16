@@ -1,0 +1,43 @@
+#!/bin/bash
+# platform_action: open, reveal and copy for the fzf functions.
+#   usage: platform_action open      PATH   open PATH with its default application
+#          platform_action reveal    PATH   show PATH selected in the file manager
+#          platform_action copy-path PATH   copy PATH (on WSL its Windows form)
+#          platform_action copy-text TEXT   copy TEXT
+#
+# With sf (the Rust app, sf-rs) in PATH, sf does it: on any Linux desktop (D-Bus file manager, wl-copy,
+# xclip, xsel, OSC 52) and on WSL (PowerShell, Explorer). Without it, the Linux tools do (xdg-open,
+# open_in_file_manager, wl-copy). The value is always one argument, never part of a command line.
+#
+# fzf's execute-silent shows nothing, so a failure goes to stderr and, inside tmux, to the status line.
+
+fail() {
+    local msg="platform_action: $*"
+    printf '%s\n' "$msg" >&2
+    # -l: the message as it is, not a tmux format (a file named "#(cmd)" would run cmd)
+    [[ -n $TMUX ]] && tmux display-message -l -- "$msg"
+    exit 1
+}
+
+(( $# == 2 )) || fail "usage: platform_action open|reveal|copy-path PATH  or  platform_action copy-text TEXT"
+action=$1 value=$2
+case $action in
+    open|reveal|copy-path|copy-text) ;;
+    *) fail "unknown action: $action" ;;
+esac
+
+# only this project's sf names the actions in its usage; an older build, or another program called sf (the
+# Salesforce CLI is one), leaves the work to the Linux tools
+if sf --help 2>/dev/null | grep -qF 'sf open|reveal|copy-path PATH'; then
+    err=$(sf "$action" "$value" 2>&1 >/dev/null) || fail "${err:-sf $action failed}"
+    exit 0
+fi
+
+case $action in
+    open)
+        nohup xdg-open "$value" </dev/null >/dev/null 2>&1 || fail "xdg-open failed (exit $?): $value" ;;
+    reveal)
+        ~/.SearchFunctions/sub-functions/open_in_file_manager "$value" || fail "open_in_file_manager failed: $value" ;;
+    copy-path|copy-text)
+        printf '%s' "$value" | wl-copy >/dev/null 2>&1 || fail "wl-copy failed (exit $?)" ;;
+esac

@@ -59,6 +59,12 @@ the preview shows where you are in them. Filtering is case-insensitive and
 every word must match (as `fzf -i -e`); the matches are shown red. The options are remembered in `~/.config/sf/config.toml`
 (`$XDG_CONFIG_HOME/sf/config.toml`).
 
+`sf` works the same on any Linux desktop and on WSL. `Enter` opens with the default application (on WSL Windows'
+own), `Ctrl-e` shows the item selected in the file manager (Nautilus, Dolphin, Nemo, Caja, Thunar through D-Bus; on
+WSL Explorer), `Ctrl-c` copies (wl-copy, xclip or xsel; on WSL the Windows path to the Windows clipboard; without any
+of them OSC 52 through the terminal). `sf doctor` shows what it found and how each action works. `sf open|reveal|copy-path PATH`
+and `sf copy-text TEXT` do one action; the fzf functions below use them when `sf` is installed.
+
 The earlier fzf version (`~/.SearchFunctions/sf`, modes on F2–F8) still works until the app has replaced it.
 
 ### 🔹 Basic Content Search
@@ -112,7 +118,7 @@ These shortcuts apply when using the interactive search tools (`fzf`, `ugrep-fzf
 |----------|------------------------------------------|
 | `Enter`  | Open the selected file                   |
 | `Ctrl-e` | Open file location in file manager       |
-| `Ctrl-c` | Copy relative path of selected file (use `Esc` to quit) |
+| `Ctrl-c` | Copy relative path of selected file (on WSL its Windows path; use `Esc` to quit) |
 | `Ctrl-o` | Open the file in nvim in a new tmux window (`sf`: at the matching line; outside tmux in the same terminal) |
 | `Ctrl-t` | Search inside the selected file in a new tmux window (`sf`: with the Content pattern) |
 | `Ctrl-u` / `Ctrl-g` / `Alt-g` / `Alt-u` | git diff / diff (delta) / short diff / log of the file |
@@ -159,8 +165,15 @@ alias sf-fzf=~/.SearchFunctions/sf                        # the fzf version of s
 5. The `sf` app (Rust 1.88 or newer, as ratatui 0.30 needs; it runs fd, ugrep, bat, git and delta, and `ugrep+` for archives and documents):
 ```bash
 cargo install --path ~/.SearchFunctions/sf-rs   # installs ~/.cargo/bin/sf
+sf doctor                                        # what it found, how open / reveal / copy work here
 ```
-Its tests: `cargo test` in `sf-rs`, and `sf-rs/tests/e2e.sh NEW_EMPTY_FOLDER` (runs it in a private tmux server).
+Content needs ugrep 3.6.0 or newer for Matching lines; before 5.0.0 only the first match of a line is marked red
+(Ubuntu 22.04 ships 3.7.2, Debian 12 3.11.2; Ubuntu 24.04 and Debian 13 are fine). With `sf` installed, `Enter`,
+`Ctrl-e` and `Ctrl-c` of the fzf functions go through it (`sub-functions/platform_action`), so they work on WSL too;
+without it they use xdg-open, `open_in_file_manager` and wl-copy.
+
+Its tests: `cargo test` in `sf-rs`, `sf-rs/tests/e2e.sh NEW_EMPTY_FOLDER` (runs it in a private tmux server) and
+`sf-rs/tests/platform_action.sh NEW_EMPTY_FOLDER` (the wrapper of the fzf functions).
 
 ---
 

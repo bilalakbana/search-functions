@@ -31,7 +31,8 @@ fast tool he can ship and use on the Linux PC and on WSL.
 6. Look: Catppuccin Macchiato (as Ghostty, tmux, Obsidian and the prototype) drawn on the terminal's own
    background, so the window follows the terminal's opacity.
 7. Fast: results stream in as the engine finds them; filtering hundreds of thousands of items never freezes typing.
-8. Linux (Wayland: `xdg-open`, `open_in_file_manager`, `wl-copy`) and WSL (`sub-functions/windows_action`) alike.
+8. Linux (any desktop, Wayland or X11) and WSL alike, from one binary: open, reveal and copy go through sf's
+   platform layer (see "Platform layer" under "Decided while building"); `sf doctor` says how they work here.
 
 ## Non-goals (this version)
 
@@ -136,7 +137,7 @@ Details settled from the existing setup and the prototype:
   threads that send their lines over channels; a new query or tab cancels (kills) the running child.
 - Engines found at start (`fd`/`fdfind`, `bat`/`batcat`, `ugrep`, `ugrep+`, `git`, `delta`); a missing one is
   said in the window where it is needed.
-- Actions: a `platform` module (Linux tools, or `windows_action` on WSL), and the terminal programs (nvim and
+- Actions: the `platform` module (open, reveal, copy on Linux or WSL), and the terminal programs (nvim and
   the sub-functions `search_in_single_file`, `show_diffs`, `git_diff`, `git_diff_short`, `show_logs` from
   `~/.SearchFunctions/sub-functions`) in a new tmux window, or in the foreground with the TUI suspended.
 - Code in `~/.SearchFunctions/sf-rs` (crate and binary `sf`), installed with `cargo install --path sf-rs`
@@ -146,10 +147,13 @@ Details settled from the existing setup and the prototype:
 ## Testing
 
 - Unit tests: engine output parsing (ugrep lines with `:` and control characters in names, git log lines),
-  option → argument mapping, config load/save, WSL detection.
+  option → argument mapping, config load/save, WSL detection from injected environment and files, every
+  platform action's arguments, stdin and environment against stub programs, the `sf doctor` report.
 - Drawing tests with ratatui's `TestBackend` (tab bar, popup, footer) at 80 and 160 columns.
 - End-to-end in a private tmux server against the fixture tree used for the prototype (tricky names, zip, binary,
-  git repo), with xdg-open / wl-copy / nvim / file manager stubbed; screenshots rendered from the captures.
+  git repo), with xdg-open / wl-copy / dbus-send / nvim / sub-functions stubbed, a WSL run (`WSL_DISTRO_NAME`,
+  stub `powershell.exe` and `wslpath`), OSC 52 through tmux and the commands; screenshots rendered from the
+  captures. `tests/platform_action.sh`: the fzf functions' wrapper, with and without sf, and a real fzf function.
 - Speed: Search on `/usr/include` (2.8 million lines) keeps typing responsive.
 
 ## Calls made by Claude (check these)
@@ -184,3 +188,35 @@ Decided while building (2026-10-17):
   `git show --patch-with-stat` through delta.
 - The Config popup takes only its own keys while it is open; an unreadable config file is reported and never
   overwritten (the options then are not saved).
+
+Platform layer (Step 1 of `docs/sf-next-steps.md`, 2026-10-17):
+
+- `platform.rs` decides once: WSL when `WSL_DISTRO_NAME` or `WSL_INTEROP` is set, `/proc/sys/fs/binfmt_misc/
+  WSLInterop` exists or `/proc/version` says "microsoft"; Linux otherwise, with `WAYLAND_DISPLAY`, `DISPLAY`,
+  `XDG_SESSION_TYPE`, `XDG_CURRENT_DESKTOP`. The WSL edition's `windows_action` is no longer needed.
+- Open: `xdg-open PATH`; WSL `powershell.exe -NoProfile -NonInteractive -Command "$ErrorActionPreference='Stop';
+  Invoke-Item -LiteralPath $env:SF_VALUE"` with the `wslpath -w` path in `SF_VALUE` and `WSLENV=SF_VALUE[:old]`
+  (the statements hold no `"`; WSL quotes each argument). Open and reveal first check that the path exists.
+- Reveal: `dbus-send --session --print-reply … org.freedesktop.FileManager1.ShowItems array:string:file:///…
+  string:` with every byte but `A-Za-z0-9-._~/` percent-encoded (a `,` would split dbus-send's array); the reply
+  is waited for, so a missing file manager is noticed and `xdg-open` opens the folder instead, said in the status.
+  sf no longer runs `open_in_file_manager` (after xdg-open it added nothing). WSL: Explorer `/select,"PATH"`;
+  a Windows path with `"` or a control character is refused.
+- Copy: chosen by what the session has: Wayland `wl-copy`, X11 `xclip -selection clipboard` / `xsel --clipboard
+  --input`, WSL `Set-Clipboard`; without any, OSC 52: inside tmux `tmux load-buffer -w -` (works with tmux's
+  default `set-clipboard external`), else written to `/dev/tty`; the status then says so. A program that fails is
+  reported, not replaced by the next one.
+- `sf open|reveal|copy-path PATH`, `sf copy-text TEXT` (relative paths are taken in the current folder; exit 1 and
+  the reason on stderr on failure) and `sf doctor` (platform, the method of each action, every engine with path
+  and version, the sub-functions, the config; exit 0).
+- The fzf functions' Enter / Ctrl-e / Ctrl-c call `sub-functions/platform_action ACTION VALUE` (Bilal: all of
+  them). It uses sf only when `sf --help` names `sf open|reveal|copy-path PATH`: an older sf build or another
+  program called sf (the Salesforce CLI) leaves the work to xdg-open / `open_in_file_manager` / wl-copy. Errors go
+  to stderr and, in tmux, to `display-message -l` (printed as is, never expanded as a format). The fzf prototype
+  `~/.SearchFunctions/sf` keeps its own calls: it is to be retired, and its e2e must never reach a real sf.
+- ugrep, measured on 2026-10-17 by running sf's ugrep commands on the fixture with the distributions' packages
+  in Docker and comparing byte by byte with 7.8.5: 3.3.3 (Debian 11) rejects `--replace`, so Matching lines fail;
+  3.7.2 (Ubuntu 22.04) and 3.11.2 (Debian 12) work but mark only a line's first match; 5.0.0 (Ubuntu 24.04) is
+  identical. `sf doctor` warns below 3.6.0 and below 5.0.0.
+- The tests write their stub programs through a child process: a stub written by the test process itself could
+  be held open by a fork in another test thread, and running it then failed with "Text file busy" (ETXTBSY).
