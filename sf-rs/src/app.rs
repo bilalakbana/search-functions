@@ -156,6 +156,7 @@ impl App {
     pub fn show_hint(&mut self, hint: &str) {
         self.notes = vec![items::hint(hint)];
         self.loading = false;
+        self.preview = Text::default();
     }
 
     pub fn set_status(&mut self, text: &str, error: bool, now: Instant) {
@@ -328,18 +329,22 @@ impl App {
             ListMsg::Error(g, e) if g == self.list_gen => self.notes.push(items::error(&e)),
             ListMsg::Done(g) if g == self.list_gen => {
                 self.loading = false;
-                if self.tab == Tab::Search
+                // the old preview stays while a list runs (no flicker), but not over an empty one
+                if self.filter.len() == 0 {
+                    self.preview = Text::default();
+                }
+                if self.tab == Tab::Content
                     && self.filter.total() == 0
                     && self.notes.is_empty()
                     && self.query.is_empty()
                 {
                     self.notes.push(items::hint("No text files here"));
-                } else if self.tab == Tab::Search
+                } else if self.tab == Tab::Content
                     && self.filter.total() == 0
                     && self.notes.is_empty()
                 {
                     let mut hint = "No match".to_string();
-                    if !self.options.search.archives {
+                    if !self.options.content.archives {
                         hint += ". Archives & documents (⚙ Config) also searches inside zip, PDF and Office files";
                     }
                     self.notes.push(items::hint(&hint));
@@ -355,16 +360,20 @@ impl App {
             return;
         }
         self.preview = msg.text;
-        let third = 1 + self.layout.preview.height as u32 / 3;
-        let line = self.current().and_then(|i| i.line).unwrap_or(0);
-        self.preview_scroll = u16::try_from(line.saturating_sub(third)).unwrap_or(u16::MAX);
+        // a matching line about a third down the preview, below the header
+        let third = 1 + self.layout.preview.height as usize / 3;
+        let at = self
+            .current()
+            .and_then(|i| i.line)
+            .map_or(0, |n| (msg.header_lines + n as usize).saturating_sub(third));
+        self.preview_scroll = u16::try_from(at).unwrap_or(u16::MAX);
     }
 
     /// Starts the current tab's list afresh.
     fn run_list(&mut self) -> Effect {
         self.list_gen += 1;
         self.filter.clear();
-        self.filter.set_query(if self.tab == Tab::Search {
+        self.filter.set_query(if self.tab == Tab::Content {
             ""
         } else {
             &self.query
@@ -387,7 +396,7 @@ impl App {
 
     fn edit(&mut self, f: impl FnOnce(&mut String), now: Instant) -> Vec<Effect> {
         f(&mut self.query);
-        if self.tab == Tab::Search {
+        if self.tab == Tab::Content {
             self.search_due = Some(now + SEARCH_DELAY);
             return Vec::new();
         }
@@ -554,7 +563,7 @@ pub(crate) mod tests {
     pub fn feed(a: &mut App, names: &[&str]) -> Vec<Effect> {
         let kind = match a.tab {
             Tab::Folders => ParseKind::Folders,
-            Tab::Search => ParseKind::SearchFiles { archives: false },
+            Tab::Content => ParseKind::SearchFiles { archives: false },
             _ => ParseKind::Files,
         };
         a.on_list(ListMsg::Items(a.list_gen, rows(kind, names)))
@@ -586,7 +595,7 @@ pub(crate) mod tests {
     fn tab_and_backtab_cycle() {
         let (mut a, now) = app(Tab::Files);
         assert_eq!(a.handle_key(key(KeyCode::Tab), now), [Effect::RunList]);
-        assert_eq!(a.tab, Tab::Search);
+        assert_eq!(a.tab, Tab::Content);
         a.handle_key(key(KeyCode::BackTab), now);
         a.handle_key(key(KeyCode::BackTab), now);
         assert_eq!(a.tab, Tab::Git);
@@ -655,7 +664,7 @@ pub(crate) mod tests {
 
     #[test]
     fn typing_in_search_waits_150ms() {
-        let (mut a, now) = app(Tab::Search);
+        let (mut a, now) = app(Tab::Content);
         assert!(!typed(&mut a, "nee", now).contains(&Effect::RunList));
         assert_eq!(a.tick(now + Duration::from_millis(100)), []);
         typed(&mut a, "d", now + Duration::from_millis(100));
@@ -664,13 +673,13 @@ pub(crate) mod tests {
         assert_eq!(a.tick(now + Duration::from_millis(400)), []);
         assert_eq!(
             a.list_plan(),
-            commands::list_plan(Tab::Search, &a.options, "need", &a.engines)
+            commands::list_plan(Tab::Content, &a.options, "need", &a.engines)
         );
     }
 
     #[test]
     fn search_rows_are_not_filtered_by_the_pattern() {
-        let (mut a, now) = app(Tab::Search);
+        let (mut a, now) = app(Tab::Content);
         typed(&mut a, "zzz", now);
         a.tick(now + Duration::from_secs(1));
         feed(&mut a, &["a.txt"]);
@@ -679,7 +688,7 @@ pub(crate) mod tests {
 
     #[test]
     fn query_is_shared_by_the_tabs() {
-        let (mut a, now) = app(Tab::Search);
+        let (mut a, now) = app(Tab::Content);
         typed(&mut a, "x", now);
         a.handle_key(key(KeyCode::BackTab), now);
         assert_eq!(a.tab, Tab::Files);
@@ -722,7 +731,7 @@ pub(crate) mod tests {
 
     #[test]
     fn toggle_runs_list_and_saves() {
-        let (mut a, now) = app(Tab::Search);
+        let (mut a, now) = app(Tab::Content);
         assert_eq!(a.handle_key(ctrl('s'), now), []);
         assert_eq!(a.popup, Some(0));
         a.handle_key(key(KeyCode::Down), now);
@@ -731,13 +740,13 @@ pub(crate) mod tests {
             a.handle_key(key(KeyCode::Char(' ')), now),
             [Effect::RunList, Effect::SaveConfig]
         );
-        assert!(a.options.search.archives);
+        assert!(a.options.content.archives);
         assert_eq!(a.query, "", "space in the popup is no typing");
         a.handle_key(key(KeyCode::Up), now);
         a.handle_key(key(KeyCode::Up), now);
         assert_eq!(a.popup, Some(3), "the cursor wraps");
         a.handle_key(key(KeyCode::Enter), now);
-        assert!(a.options.search.ignored);
+        assert!(a.options.content.ignored);
     }
 
     #[test]
@@ -885,11 +894,13 @@ pub(crate) mod tests {
         feed(&mut a, &["a"]);
         let g0 = a.preview_gen;
         a.on_preview(PreviewMsg {
+            header_lines: 0,
             generation: g0 - 1,
             text: Text::raw("old"),
         });
         assert_eq!(a.preview, Text::default());
         a.on_preview(PreviewMsg {
+            header_lines: 0,
             generation: g0,
             text: Text::raw("new"),
         });
@@ -911,7 +922,7 @@ pub(crate) mod tests {
 
     #[test]
     fn empty_search_says_no_match() {
-        let (mut a, now) = app(Tab::Search);
+        let (mut a, now) = app(Tab::Content);
         typed(&mut a, "zzz", now);
         a.tick(now + Duration::from_secs(1));
         assert!(a.loading);
@@ -927,8 +938,39 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn no_match_clears_the_old_preview() {
+        let (mut a, now) = app(Tab::Content);
+        typed(&mut a, "needle", now);
+        a.tick(now + Duration::from_secs(1));
+        feed(&mut a, &["a.txt"]);
+        a.on_preview(PreviewMsg {
+            header_lines: 0,
+            generation: a.preview_gen,
+            text: Text::raw("a.txt with needle"),
+        });
+        typed(&mut a, "zzz", now + Duration::from_secs(2));
+        a.tick(now + Duration::from_secs(3));
+        a.on_list(ListMsg::Done(a.list_gen));
+        assert_eq!(a.preview, Text::default());
+    }
+
+    #[test]
+    fn a_hint_list_clears_the_old_preview() {
+        let (mut a, _) = app(Tab::Files);
+        feed(&mut a, &["a.txt"]);
+        a.on_preview(PreviewMsg {
+            header_lines: 0,
+            generation: a.preview_gen,
+            text: Text::raw("content"),
+        });
+        a.handle_key(ctrl('r'), Instant::now());
+        a.show_hint("fd is not installed");
+        assert_eq!(a.preview, Text::default());
+    }
+
+    #[test]
     fn empty_search_without_files_says_so() {
-        let (mut a, _) = app(Tab::Search);
+        let (mut a, _) = app(Tab::Content);
         a.on_list(ListMsg::Done(a.list_gen));
         let note: String = a.notes[0]
             .display()
@@ -941,8 +983,8 @@ pub(crate) mod tests {
 
     #[test]
     fn matching_line_preview_scrolls_to_the_line() {
-        let (mut a, now) = app(Tab::Search);
-        a.options.search.matching_lines = true;
+        let (mut a, now) = app(Tab::Content);
+        a.options.content.matching_lines = true;
         typed(&mut a, "x", now);
         a.tick(now + Duration::from_secs(1));
         a.layout.preview = Rect::new(1, 2, 80, 30);
@@ -951,10 +993,30 @@ pub(crate) mod tests {
             rows(ParseKind::SearchLines, &["a\x0050\x1fx"]),
         ));
         a.on_preview(PreviewMsg {
+            header_lines: 0,
             generation: a.preview_gen,
             text: Text::raw("t"),
         });
         assert_eq!(a.preview_scroll, 39);
+    }
+
+    #[test]
+    fn matching_line_scroll_skips_the_header() {
+        let (mut a, now) = app(Tab::Content);
+        a.options.content.matching_lines = true;
+        typed(&mut a, "x", now);
+        a.tick(now + Duration::from_secs(1));
+        a.layout.preview = Rect::new(1, 2, 80, 30);
+        a.on_list(ListMsg::Items(
+            a.list_gen,
+            rows(ParseKind::SearchLines, &["a\x0050\x1fx"]),
+        ));
+        a.on_preview(PreviewMsg {
+            header_lines: 4,
+            generation: a.preview_gen,
+            text: Text::raw("t"),
+        });
+        assert_eq!(a.preview_scroll, 43);
     }
 
     #[test]
@@ -963,6 +1025,7 @@ pub(crate) mod tests {
         feed(&mut a, &["a"]);
         a.layout.preview = Rect::new(1, 2, 80, 10);
         a.on_preview(PreviewMsg {
+            header_lines: 0,
             generation: a.preview_gen,
             text: Text::raw("x\n".repeat(100)),
         });
@@ -1004,7 +1067,7 @@ pub(crate) mod tests {
         drawn(&mut a);
         let search = a.layout.tabs[1].1;
         assert_eq!(a.handle_mouse(click(search), now), [Effect::RunList]);
-        assert_eq!(a.tab, Tab::Search);
+        assert_eq!(a.tab, Tab::Content);
         drawn(&mut a);
         assert_eq!(
             a.handle_mouse(click(a.layout.tabs[1].1), now),
@@ -1099,6 +1162,7 @@ pub(crate) mod tests {
         let (mut a, now) = app(Tab::Files);
         feed(&mut a, &["a"]);
         a.on_preview(PreviewMsg {
+            header_lines: 0,
             generation: a.preview_gen,
             text: Text::raw("x\n".repeat(100)),
         });
@@ -1110,7 +1174,7 @@ pub(crate) mod tests {
 
     #[test]
     fn click_popup_row_toggles() {
-        let (mut a, now) = app(Tab::Search);
+        let (mut a, now) = app(Tab::Content);
         a.handle_key(ctrl('s'), now);
         drawn(&mut a);
         let row = a.layout.popup_rows[1].1;
@@ -1118,19 +1182,19 @@ pub(crate) mod tests {
             a.handle_mouse(click(row), now),
             [Effect::RunList, Effect::SaveConfig]
         );
-        assert!(a.options.search.archives);
+        assert!(a.options.content.archives);
         assert_eq!(a.popup, Some(1));
     }
 
     #[test]
     fn click_outside_popup_closes() {
-        let (mut a, now) = app(Tab::Search);
+        let (mut a, now) = app(Tab::Content);
         feed(&mut a, &["a"]);
         a.handle_key(ctrl('s'), now);
         drawn(&mut a);
         assert_eq!(a.handle_mouse(click(Rect::new(0, 29, 1, 1)), now), []);
         assert_eq!(a.popup, None);
-        assert_eq!(a.tab, Tab::Search);
+        assert_eq!(a.tab, Tab::Content);
     }
 
     #[test]
@@ -1149,6 +1213,7 @@ pub(crate) mod tests {
         let (mut a, now) = app(Tab::Files);
         feed(&mut a, &["a"]);
         a.on_preview(PreviewMsg {
+            header_lines: 0,
             generation: a.preview_gen,
             text: Text::raw("content"),
         });

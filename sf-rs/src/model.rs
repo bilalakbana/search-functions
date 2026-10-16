@@ -5,18 +5,18 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tab {
     Files,
-    Search,
+    Content,
     Folders,
     Git,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 4] = [Tab::Files, Tab::Search, Tab::Folders, Tab::Git];
+    pub const ALL: [Tab; 4] = [Tab::Files, Tab::Content, Tab::Folders, Tab::Git];
 
     pub fn title(self) -> &'static str {
         match self {
             Tab::Files => "Files",
-            Tab::Search => "Search",
+            Tab::Content => "Content",
             Tab::Folders => "Folders",
             Tab::Git => "Git",
         }
@@ -34,8 +34,11 @@ impl Tab {
         Tab::ALL[(self.index() + Tab::ALL.len() - 1) % Tab::ALL.len()]
     }
 
-    /// "files", "Search", ... (the command-line argument).
+    /// "files", "Content", ... (the command-line argument; "search" is still taken).
     pub fn from_name(name: &str) -> Option<Tab> {
+        if name.eq_ignore_ascii_case("search") {
+            return Some(Tab::Content); // the name it had first
+        }
         Tab::ALL
             .into_iter()
             .find(|t| t.title().eq_ignore_ascii_case(name))
@@ -87,7 +90,7 @@ pub struct FilesOpts {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct SearchOpts {
+pub struct ContentOpts {
     pub matching_lines: bool,
     pub archives: bool,
     pub hidden: bool,
@@ -116,9 +119,9 @@ impl Default for FilesOpts {
     }
 }
 
-impl Default for SearchOpts {
+impl Default for ContentOpts {
     fn default() -> Self {
-        SearchOpts {
+        ContentOpts {
             matching_lines: false,
             archives: false,
             hidden: true,
@@ -147,7 +150,9 @@ impl Default for GitOpts {
 #[serde(default)]
 pub struct Options {
     pub files: FilesOpts,
-    pub search: SearchOpts,
+    /// `[search]` in files from when the tab was called Search
+    #[serde(alias = "search")]
+    pub content: ContentOpts,
     pub folders: FoldersOpts,
     pub git: GitOpts,
 }
@@ -157,7 +162,7 @@ impl Options {
     pub fn list(&self, tab: Tab) -> Vec<(Opt, bool)> {
         let order: &[Opt] = match tab {
             Tab::Files | Tab::Folders => &[Opt::Hidden, Opt::Ignored],
-            Tab::Search => &[Opt::MatchingLines, Opt::Archives, Opt::Hidden, Opt::Ignored],
+            Tab::Content => &[Opt::MatchingLines, Opt::Archives, Opt::Hidden, Opt::Ignored],
             Tab::Git => &[Opt::AllBranches],
         };
         order.iter().map(|&o| (o, self.get(tab, o))).collect()
@@ -179,10 +184,10 @@ impl Options {
         match (tab, opt) {
             (Tab::Files, Opt::Hidden) => Some(&mut self.files.hidden),
             (Tab::Files, Opt::Ignored) => Some(&mut self.files.ignored),
-            (Tab::Search, Opt::MatchingLines) => Some(&mut self.search.matching_lines),
-            (Tab::Search, Opt::Archives) => Some(&mut self.search.archives),
-            (Tab::Search, Opt::Hidden) => Some(&mut self.search.hidden),
-            (Tab::Search, Opt::Ignored) => Some(&mut self.search.ignored),
+            (Tab::Content, Opt::MatchingLines) => Some(&mut self.content.matching_lines),
+            (Tab::Content, Opt::Archives) => Some(&mut self.content.archives),
+            (Tab::Content, Opt::Hidden) => Some(&mut self.content.hidden),
+            (Tab::Content, Opt::Ignored) => Some(&mut self.content.ignored),
             (Tab::Folders, Opt::Hidden) => Some(&mut self.folders.hidden),
             (Tab::Folders, Opt::Ignored) => Some(&mut self.folders.ignored),
             (Tab::Git, Opt::AllBranches) => Some(&mut self.git.all_branches),
@@ -199,21 +204,31 @@ mod tests {
     fn tab_cycle_wraps() {
         assert_eq!(Tab::Git.next(), Tab::Files);
         assert_eq!(Tab::Files.prev(), Tab::Git);
-        assert_eq!(Tab::Files.next(), Tab::Search);
-        assert_eq!(Tab::Search.prev(), Tab::Files);
+        assert_eq!(Tab::Files.next(), Tab::Content);
+        assert_eq!(Tab::Content.prev(), Tab::Files);
     }
 
     #[test]
     fn from_name_ignores_case() {
-        assert_eq!(Tab::from_name("search"), Some(Tab::Search));
+        assert_eq!(Tab::from_name("content"), Some(Tab::Content));
+        assert_eq!(
+            Tab::from_name("search"),
+            Some(Tab::Content),
+            "the name it had first"
+        );
+        assert_eq!(Tab::Content.title(), "Content");
         assert_eq!(Tab::from_name("Git"), Some(Tab::Git));
-        assert_eq!(Tab::from_name("content"), None);
+        assert_eq!(Tab::from_name("lines"), None);
     }
 
     #[test]
     fn search_popup_order() {
         let opts = Options::default();
-        let order: Vec<Opt> = opts.list(Tab::Search).into_iter().map(|(o, _)| o).collect();
+        let order: Vec<Opt> = opts
+            .list(Tab::Content)
+            .into_iter()
+            .map(|(o, _)| o)
+            .collect();
         assert_eq!(
             order,
             [Opt::MatchingLines, Opt::Archives, Opt::Hidden, Opt::Ignored]
@@ -223,8 +238,8 @@ mod tests {
     #[test]
     fn toggle_changes_only_that_tab() {
         let mut opts = Options::default();
-        opts.toggle(Tab::Search, Opt::Hidden);
-        assert!(!opts.get(Tab::Search, Opt::Hidden));
+        opts.toggle(Tab::Content, Opt::Hidden);
+        assert!(!opts.get(Tab::Content, Opt::Hidden));
         assert!(opts.get(Tab::Files, Opt::Hidden));
         assert!(opts.get(Tab::Folders, Opt::Hidden));
     }
@@ -240,6 +255,6 @@ mod tests {
     #[test]
     fn folders_labels_say_folders() {
         assert_eq!(Opt::Hidden.label(Tab::Folders), "Hidden folders");
-        assert_eq!(Opt::Hidden.label(Tab::Search), "Hidden files");
+        assert_eq!(Opt::Hidden.label(Tab::Content), "Hidden files");
     }
 }

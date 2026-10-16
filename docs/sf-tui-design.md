@@ -159,6 +159,12 @@ Details settled from the existing setup and the prototype:
 
 Decided while building (2026-10-17):
 
+- After Bilal's first use: the Search tab is called **Content** (`sf content`; `sf search` and a config file's
+  `[search]` are still read); the keys for the selected item moved from the footer into the middle of the tab
+  bar; the Content preview starts with `File`, `Pattern` and `Matches` (`ugrep -c -o`: matches, not lines), as
+  ugrep-fzf; a bar on the right border of the list and the preview shows the position; an empty result clears
+  the preview.
+
 - tmux windows never get the folder with `new-window -c`: tmux expands formats there, so a folder named `#(cmd)`
   ran cmd (verified with tmux 3.5a; `##` escaping did not help). A fixed `sh -c 'cd -- "$1" && shift && exec "$@"'`
   gets the folder as an argument; `-e` values and program arguments are not expanded. Fixed in the prototype too.

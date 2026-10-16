@@ -276,7 +276,7 @@ fn terminal(
         ActionKind::Editor => ("nvim", "editor", editor(tab, item, query, path)),
         ActionKind::InFile => {
             let mut cmd = sub("search_in_single_file");
-            if tab == Tab::Search && !query.is_empty() {
+            if tab == Tab::Content && !query.is_empty() {
                 cmd = cmd.arg(query);
             }
             ("infile", "file-content", cmd)
@@ -321,7 +321,7 @@ fn terminal(
 /// would run whatever follows. Very magic (`\v`) is closest to ugrep's syntax; `\c` gives smart case.
 fn editor(tab: Tab, item: &Item, query: &str, path: &Path) -> Cmd {
     let mut cmd = Cmd::new("nvim");
-    if tab == Tab::Search {
+    if tab == Tab::Content {
         if let Some(line) = item.line {
             cmd = cmd.arg(format!("+{line}"));
         } else if !query.is_empty() {
@@ -545,7 +545,7 @@ mod tests {
     fn editor_outside_tmux_is_foreground_with_line() {
         let f = fixture("act_editor_fg", false, false);
         let item = parse(ParseKind::SearchLines, b"src/a.c\x0012\x1ftext", 0).unwrap();
-        let out = act(&f, ActionKind::Editor, Tab::Search, &item, "text");
+        let out = act(&f, ActionKind::Editor, Tab::Content, &item, "text");
         let path = f.root.join("src/a.c");
         assert_eq!(
             out,
@@ -559,7 +559,7 @@ mod tests {
         let out = act(
             &f,
             ActionKind::Editor,
-            Tab::Search,
+            Tab::Content,
             &file("a.txt"),
             "x/|!rm",
         );
@@ -577,7 +577,13 @@ mod tests {
             cmd.env,
             vec![("SF_QUERY".to_string(), "\\c\\vx/|!rm".to_string())]
         );
-        let out = act(&f, ActionKind::Editor, Tab::Search, &file("a.txt"), "Upper");
+        let out = act(
+            &f,
+            ActionKind::Editor,
+            Tab::Content,
+            &file("a.txt"),
+            "Upper",
+        );
         let Outcome::Foreground(cmds) = out else {
             panic!()
         };
@@ -603,7 +609,7 @@ mod tests {
         let f = fixture("act_editor_tmux", false, true);
         let item = parse(ParseKind::SearchLines, b"a.c\x007\x1fx", 0).unwrap();
         assert_eq!(
-            act(&f, ActionKind::Editor, Tab::Search, &item, "x"),
+            act(&f, ActionKind::Editor, Tab::Content, &item, "x"),
             Outcome::Done(None)
         );
         let root = f.root.to_str().unwrap();
@@ -661,7 +667,7 @@ mod tests {
     #[test]
     fn tmux_window_with_env_passes_it_with_e() {
         let f = fixture("act_tmux_env", false, true);
-        act(&f, ActionKind::Editor, Tab::Search, &file("a"), "q");
+        act(&f, ActionKind::Editor, Tab::Content, &file("a"), "q");
         let first = &calls(&f.bin, "tmux")[0];
         let at = first.iter().position(|a| a == "-e").unwrap();
         assert_eq!(first[at + 1], "SF_QUERY=\\c\\vq");
@@ -682,7 +688,7 @@ mod tests {
         let f = fixture("act_infile", false, false);
         let script = f.env.sub.join("search_in_single_file");
         let path = f.root.join("a");
-        let out = act(&f, ActionKind::InFile, Tab::Search, &file("a"), "nee dle");
+        let out = act(&f, ActionKind::InFile, Tab::Content, &file("a"), "nee dle");
         assert_eq!(
             out,
             Outcome::Foreground(vec![Cmd::new(&script).arg(&path).arg("nee dle")])

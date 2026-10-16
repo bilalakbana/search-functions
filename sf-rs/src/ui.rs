@@ -1,11 +1,14 @@
-//! Drawing. Top to bottom: the tab bar, the preview, the list, the input line and the footer; the
+//! Drawing. Top to bottom: the tab bar (the keys for the selected item in its middle), the preview,
+//! the list and the input line; the
 //! Config popup over them. Records where everything went in `app.layout` for the mouse.
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
+use ratatui::widgets::{
+    Block, BorderType, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+};
 
 use crate::app::{App, ScreenLayout};
 use crate::model::{Opt, Tab};
@@ -15,17 +18,16 @@ const CONFIG: &str = "⚙ Config";
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
-    let body = area.height.saturating_sub(3);
+    let body = area.height.saturating_sub(2);
     let preview_h = if app.preview_visible {
         body * 60 / 100
     } else {
         0
     };
-    let [bar, preview, list, input, footer] = Layout::vertical([
+    let [bar, preview, list, input] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(preview_h),
         Constraint::Length(body - preview_h),
-        Constraint::Length(1),
         Constraint::Length(1),
     ])
     .areas(area);
@@ -42,7 +44,6 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         if app.preview_visible { None } else { status },
     );
     draw_input(frame, app, input);
-    draw_footer(frame, app.tab, footer);
     if let Some(cursor) = app.popup {
         draw_popup(frame, app, cursor, &mut layout);
     }
@@ -95,6 +96,31 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect, layout: &mut ScreenLay
         layout.tabs.push((tab, rect));
         x += w + 1;
     }
+    // the keys for the selected item, between the tabs and Config
+    let from = layout.tabs.last().map_or(area.x, |(_, r)| r.right()) + 2;
+    let to = layout.config.x.saturating_sub(2);
+    if to > from {
+        draw_keys(frame, app.tab, Rect::new(from, area.y, to - from, 1));
+    }
+}
+
+/// A thin bar on the right border of `area` (a bordered block) when `total` rows do not fit.
+fn draw_scrollbar(frame: &mut Frame, area: Rect, total: usize, position: usize, visible: usize) {
+    if total <= visible || area.height < 3 {
+        return;
+    }
+    let bar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+        .begin_symbol(None)
+        .end_symbol(None)
+        .track_symbol(Some("│"))
+        .track_style(style(theme::FAINT))
+        .thumb_symbol("┃")
+        .thumb_style(style(theme::SUB));
+    let mut state = ScrollbarState::new(total - visible + 1)
+        .position(position)
+        .viewport_content_length(visible);
+    let track = Rect::new(area.x, area.y + 1, area.width, area.height - 2);
+    frame.render_stateful_widget(bar, track, &mut state);
 }
 
 fn status_line(app: &App) -> Option<Line<'static>> {
@@ -157,6 +183,13 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect, status: Option<Line<'s
         Paragraph::new(Text::from(shown)).wrap(Wrap { trim: false }),
         inner,
     );
+    draw_scrollbar(
+        frame,
+        area,
+        app.preview.lines.len(),
+        from,
+        inner.height as usize,
+    );
     inner
 }
 
@@ -187,7 +220,7 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
         y += 1;
     }
     // the filter's words, drawn red in the rows (Search's query is a pattern for the contents)
-    let words: Vec<String> = if app.tab == Tab::Search {
+    let words: Vec<String> = if app.tab == Tab::Content {
         Vec::new()
     } else {
         app.query
@@ -221,6 +254,7 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
         frame.render_widget(Paragraph::new(line), rect);
         y += 1;
     }
+    draw_scrollbar(frame, area, app.filter.len(), app.offset, visible);
     inner
 }
 
@@ -296,10 +330,10 @@ fn short(opt: Opt) -> &'static str {
 fn placeholder(app: &App) -> &'static str {
     match app.tab {
         Tab::Files => "type to filter file names",
-        Tab::Search if app.options.search.matching_lines => {
+        Tab::Content if app.options.content.matching_lines => {
             "type a pattern · lists the lines that contain it"
         }
-        Tab::Search => "type a pattern · lists the files that contain it",
+        Tab::Content => "type a pattern · lists the files that contain it",
         Tab::Folders => "type to filter folders · Enter goes inside, .. goes up",
         Tab::Git => "type to filter commits · Enter shows one",
     }
@@ -362,7 +396,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 
 fn footer_items(tab: Tab) -> &'static [&'static str] {
     match tab {
-        Tab::Files | Tab::Search => &[
+        Tab::Files | Tab::Content => &[
             "Enter open",
             "^O nvim",
             "^T in file",
@@ -378,17 +412,22 @@ fn footer_items(tab: Tab) -> &'static [&'static str] {
 }
 
 /// The keys for the selected item; when narrow, items before "Esc quit" are left out, never cut.
-fn draw_footer(frame: &mut Frame, tab: Tab, area: Rect) {
-    let all = footer_items(tab);
+/// The keys for the selected item, centred in `area`; when narrow, items before "Esc quit" are left
+/// out, never cut.
+fn draw_keys(frame: &mut Frame, tab: Tab, area: Rect) {
     let width = |items: &[&str]| {
-        1 + items.iter().map(|i| i.chars().count()).sum::<usize>()
-            + 3 * items.len().saturating_sub(1)
+        items.iter().map(|i| i.chars().count()).sum::<usize>() + 3 * items.len().saturating_sub(1)
     };
-    let mut items: Vec<&str> = all.to_vec();
+    let mut items: Vec<&str> = footer_items(tab).to_vec();
     while items.len() > 1 && width(&items) > area.width as usize {
         items.remove(items.len() - 2);
     }
-    let mut spans = vec![Span::raw(" ")];
+    let w = width(&items) as u16;
+    if w > area.width {
+        return;
+    }
+    let area = Rect::new(area.x + (area.width - w) / 2, area.y, w, 1);
+    let mut spans = Vec::new();
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
             spans.push(Span::styled(" · ", style(theme::FAINT)));
@@ -508,20 +547,20 @@ mod tests {
             let (mut a, _) = app(Tab::Files);
             let buf = render(&mut a, w, 24);
             let top = row(&buf, 0);
-            for t in ["Files", "Search", "Folders", "Git"] {
+            for t in ["Files", "Content", "Folders", "Git"] {
                 assert!(top.contains(t), "{w}: {top:?}");
             }
             assert!(top.trim_end().ends_with("⚙ Config"), "{w}: {top:?}");
             assert_eq!(buf[(w - 1, 0)].symbol(), "g");
-            assert!(!row(&buf, 1).contains("Search"));
+            assert!(!row(&buf, 1).contains("Content"));
         }
     }
 
     #[test]
     fn current_tab_is_a_mauve_block() {
-        let (mut a, _) = app(Tab::Search);
+        let (mut a, _) = app(Tab::Content);
         let buf = render(&mut a, 80, 24);
-        let (x, _) = find(&buf, "Search").unwrap();
+        let (x, _) = find(&buf, "Content").unwrap();
         assert_eq!(buf[(x, 0)].bg, theme::MAUVE);
         let (x, _) = find(&buf, "Files").unwrap();
         assert_ne!(buf[(x, 0)].bg, theme::MAUVE);
@@ -535,20 +574,22 @@ mod tests {
         let top = row(&buf, 0);
         assert!(top.trim_end().ends_with("⚙ Config"), "{top:?}");
         assert!(top.contains("Git"), "{top:?}");
-        let footer = row(&buf, 19);
+        let keys = top[top.find("Git").unwrap() + 3..top.find("⚙").unwrap()]
+            .trim()
+            .to_string();
         assert!(
-            footer.trim_end().ends_with("quit") || !footer.contains("Esc"),
-            "cut mid-item: {footer:?}"
+            keys.is_empty() || keys.ends_with("quit"),
+            "cut mid-item: {keys:?}"
         );
-        assert!(!footer.trim_end().ends_with('·'), "{footer:?}");
+        assert!(!keys.ends_with('·'), "{keys:?}");
     }
 
     #[test]
     fn popup_shows_search_options_with_boxes() {
-        let (mut a, now) = app(Tab::Search);
+        let (mut a, now) = app(Tab::Content);
         a.handle_key(ctrl('s'), now);
         let buf = render(&mut a, 80, 24);
-        assert!(find(&buf, "Search options").is_some());
+        assert!(find(&buf, "Content options").is_some());
         assert!(find(&buf, "[ ] Matching lines").is_some());
         assert!(find(&buf, "[ ] Archives & documents").is_some());
         assert!(find(&buf, "[x] Hidden files").is_some());
@@ -561,28 +602,28 @@ mod tests {
 
     #[test]
     fn placeholder_when_query_empty() {
-        let (mut a, now) = app(Tab::Search);
+        let (mut a, now) = app(Tab::Content);
         let buf = render(&mut a, 100, 24);
-        let input = row(&buf, 22);
+        let input = row(&buf, 23);
         assert!(
-            input.contains("Search › type a pattern · lists the files that contain it"),
+            input.contains("Content › type a pattern · lists the files that contain it"),
             "{input:?}"
         );
         a.handle_key(key(KeyCode::Char('n')), now);
         let buf = render(&mut a, 100, 24);
-        let input = row(&buf, 22);
-        assert!(input.contains("Search › n"), "{input:?}");
+        let input = row(&buf, 23);
+        assert!(input.contains("Content › n"), "{input:?}");
         assert!(!input.contains("type a pattern"));
     }
 
     #[test]
     fn input_shows_active_options_and_count() {
-        let (mut a, _) = app(Tab::Search);
-        a.options.search.archives = true;
+        let (mut a, _) = app(Tab::Content);
+        a.options.content.archives = true;
         feed(&mut a, &["a", "b"]);
         a.loading = false;
         let buf = render(&mut a, 100, 24);
-        let input = row(&buf, 22);
+        let input = row(&buf, 23);
         assert!(
             input
                 .trim_end()
@@ -592,7 +633,7 @@ mod tests {
     }
 
     #[test]
-    fn footer_matches_tab() {
+    fn keys_sit_in_the_middle_of_the_tab_bar() {
         let cases = [
             (
                 Tab::Files,
@@ -606,9 +647,66 @@ mod tests {
         ];
         for (tab, want) in cases {
             let (mut a, _) = app(tab);
-            let buf = render(&mut a, 120, 24);
-            assert_eq!(row(&buf, 23).trim(), want);
+            let buf = render(&mut a, 200, 24);
+            let top: Vec<String> = (0..200).map(|x| buf[(x, 0)].symbol().to_string()).collect();
+            let text = top.concat();
+            let at = text
+                .find(want)
+                .unwrap_or_else(|| panic!("{tab:?}: {text:?}"));
+            let start = text[..at].chars().count() as u16;
+            let end = start + want.chars().count() as u16;
+            let left = start - a.layout.tabs.last().unwrap().1.right();
+            let right = a.layout.config.x - end;
+            assert!(left.abs_diff(right) <= 1, "{tab:?}: {left} vs {right}");
+            assert!(!row(&buf, 23).contains("Esc quit"), "no footer any more");
         }
+    }
+
+    /// The cells of column `x` between rows `from` and `to`.
+    fn column(buf: &Buffer, x: u16, from: u16, to: u16) -> String {
+        (from..to).map(|y| buf[(x, y)].symbol()).collect()
+    }
+
+    #[test]
+    fn long_list_has_a_scrollbar() {
+        let (mut a, _) = app(Tab::Files);
+        let names: Vec<String> = (0..100).map(|i| format!("f{i:03}")).collect();
+        feed(
+            &mut a,
+            &names.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
+        render(&mut a, 80, 24);
+        let buf = render(&mut a, 80, 24);
+        let l = a.layout.list;
+        assert!(
+            column(&buf, l.right(), l.y, l.bottom()).contains('┃'),
+            "{:?}",
+            column(&buf, l.right(), l.y, l.bottom())
+        );
+    }
+
+    #[test]
+    fn short_list_has_no_scrollbar() {
+        let (mut a, _) = app(Tab::Files);
+        feed(&mut a, &["a", "b", "c"]);
+        let buf = render(&mut a, 80, 24);
+        let l = a.layout.list;
+        assert!(!column(&buf, l.right(), l.y, l.bottom()).contains('┃'));
+    }
+
+    #[test]
+    fn long_preview_has_a_scrollbar() {
+        let (mut a, _) = app(Tab::Files);
+        feed(&mut a, &["a"]);
+        a.on_preview(crate::preview::PreviewMsg {
+            header_lines: 0,
+            generation: a.preview_gen,
+            text: Text::raw("x\n".repeat(200)),
+        });
+        render(&mut a, 80, 24);
+        let buf = render(&mut a, 80, 24);
+        let p = a.layout.preview;
+        assert!(column(&buf, p.right(), p.y, p.bottom()).contains('┃'));
     }
 
     #[test]
@@ -671,7 +769,7 @@ mod tests {
 
     #[test]
     fn search_pattern_is_not_drawn_into_file_names() {
-        let (mut a, now) = app(Tab::Search);
+        let (mut a, now) = app(Tab::Content);
         a.handle_key(key(KeyCode::Char('m')), now);
         a.tick(now + std::time::Duration::from_secs(1));
         feed(&mut a, &["main.c"]);
@@ -724,7 +822,7 @@ mod tests {
         a.handle_key(ctrl('l'), now);
         render(&mut a, 80, 24);
         assert_eq!(a.layout.preview, Rect::default());
-        assert_eq!(a.layout.list.height, 24 - 1 - 2 - 2);
+        assert_eq!(a.layout.list.height, 24 - 1 - 1 - 2);
     }
 
     #[test]
@@ -752,7 +850,7 @@ mod tests {
     #[test]
     fn tiny_terminals_do_not_panic() {
         for (w, h) in [(1, 1), (5, 2), (10, 3), (20, 5), (30, 8)] {
-            let (mut a, now) = app(Tab::Search);
+            let (mut a, now) = app(Tab::Content);
             feed(&mut a, &["a", "b"]);
             a.on_list(crate::runner::ListMsg::Error(a.list_gen, "e".into()));
             render(&mut a, w, h);
@@ -768,8 +866,8 @@ mod tests {
         let mut t = Terminal::new(TestBackend::new(80, 24)).unwrap();
         t.draw(|f| draw(f, &mut a)).unwrap();
         let pos = t.get_cursor_position().unwrap();
-        let input = row(t.backend().buffer(), 22);
-        assert_eq!(pos.y, 22);
+        let input = row(t.backend().buffer(), 23);
+        assert_eq!(pos.y, 23);
         assert_eq!(input.chars().nth(pos.x as usize - 1), Some('a'));
         let _ = Instant::now();
     }

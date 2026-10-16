@@ -37,9 +37,9 @@ use crate::model::{Options, Tab};
 use crate::preview::Previewer;
 use crate::runner::Runner;
 
-const USAGE: &str = "usage: sf [files|search|folders|git]
+const USAGE: &str = "usage: sf [files|content|folders|git]
 
-The search functions in one window: Files, Search (file contents), Folders and Git. Tab / Shift-Tab or
+The search functions in one window: Files, Content (search inside files), Folders and Git. Tab / Shift-Tab or
 a click switch the tab; ⚙ Config (or Ctrl-S) holds the tab's options; Esc quits. The keys for the
 selected item are listed at the bottom. Options are kept in $XDG_CONFIG_HOME/sf/config.toml
 (~/.config/sf/config.toml).

@@ -71,7 +71,7 @@ tm rename-window -t e2e shell
 
 n_files=$(cd "$T" && fd --type f --hidden --no-ignore --exclude .git . | wc -l)
 keys "'$SF'" Enter
-expect 'start: tab bar with Config'        'Files +Search +Folders +Git .*⚙ Config'
+expect 'start: tab bar with Config'        'Files +Content +Folders +Git .*⚙ Config'
 expect "start: $n_files files listed"      "$n_files/$n_files"
 expect 'start: bat preview with numbers'   '│ *1 build/'
 expect 'start: footer'                     'Enter open · \^O nvim'
@@ -88,11 +88,13 @@ keys C-e;    expect_log 'files: Ctrl-E reveals'        "REVEAL [$T/src/main.c]"
 keys C-g;    expect_log 'files: Ctrl-G git diff'       "git_diff [$T/src/main.c]"; back_to_sf
 
 keys Tab
-expect 'tab: Search keeps the query'       'Search › main'
+expect 'tab: Search keeps the query'       'Content › main'
 expect 'search: one file'                  'src/main\.c'
 clear_query; type_ 'needle'
 expect 'search: files with needle'         '5/5'
 expect 'search: preview of the first file' '1:needle hidden'
+expect 'search: match count in the preview' 'Matches +1'
+expect 'search: file in the preview header' 'File +\.hidden/secret\.txt'
 shot search
 clear_query; type_ 'zzznotthere'
 expect 'search: no-match hint'             'No match\. Archives & documents'
@@ -101,14 +103,14 @@ expect 'search: broken pattern shown'      'mismatched'
 clear_query; type_ 'needle'
 expect 'search: back to needle'            '5/5'
 keys C-s
-expect 'config: popup'                     'Search options'
+expect 'config: popup'                     'Content options'
 expect 'config: boxes'                     '\[ \] Matching lines'
 shot popup
 keys Space
 expect 'config: Matching lines on'         '\[x\] Matching lines'
 grep -q 'matching_lines = true' "$XDG/sf/config.toml" 2>/dev/null && ok 'config: file written' || bad 'config: file written'
 keys Escape
-expect_not 'config: Esc closes the popup'  'Search options'
+expect_not 'config: Esc closes the popup'  'Content options'
 expect 'lines: file:line:text'             'src/main\.c:1:needle in main'
 expect 'lines: hint changes'               'matching lines'
 shot lines
@@ -150,14 +152,14 @@ keys Escape
 expect 'esc again'                         '^READY>\s*$'
 
 n_text=$(cd "$T" && ugrep -rlU --ignore-binary -s --hidden --ignore-files --exclude-dir=.git -e '' . | wc -l)
-keys "cd '$T' && env -u TMUX '$SF' search" Enter
-expect 'no tmux: starts in Search'         'Search › type a pattern'
+keys "cd '$T' && env -u TMUX '$SF' content" Enter
+expect 'no tmux: starts in Search'         'Content › type a pattern'
 expect "search: all $n_text text files before typing" "$n_text/$n_text"
 type_ 'needle'
 expect 'no tmux: results'                  '5/5'
 keys C-o
 expect_log 'no tmux: Ctrl-O runs nvim'     "NVIM [-c] [let @/ = \$SF_QUERY]"
-expect 'no tmux: sf comes back'            'Files +Search +Folders +Git .*⚙ Config'
+expect 'no tmux: sf comes back'            'Files +Content +Folders +Git .*⚙ Config'
 expect 'no tmux: results again'            '5/5'
 keys Escape
 expect 'no tmux: quit'                     '^READY>\s*$'

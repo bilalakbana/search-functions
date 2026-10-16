@@ -13,7 +13,7 @@ use std::thread;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 
-use crate::commands::{Binary, Cmd, PreviewPlan};
+use crate::commands::{Binary, Cmd, Header, PreviewPlan};
 use crate::items::{ansi_text, printable};
 use crate::theme;
 
@@ -28,6 +28,8 @@ const MIN_PRINTABLE: f64 = 0.95;
 pub struct PreviewMsg {
     pub generation: u64,
     pub text: Text<'static>,
+    /// Lines of `text` above the file's own (the Content header), for scrolling to a line.
+    pub header_lines: usize,
 }
 
 pub struct Previewer {
@@ -83,7 +85,7 @@ fn work(shared: &Shared, tx: &Sender<PreviewMsg>) {
                 st = shared.wake.wait(st).unwrap_or_else(|e| e.into_inner());
             }
         };
-        let text = produce(plan, shared);
+        let (text, header_lines) = produce(plan, shared);
         let st = lock(&shared.state);
         if st.closed {
             return;
@@ -92,39 +94,120 @@ fn work(shared: &Shared, tx: &Sender<PreviewMsg>) {
             continue; // overtaken by a newer request
         }
         drop(st);
-        if tx.send(PreviewMsg { generation, text }).is_err() {
+        if tx
+            .send(PreviewMsg {
+                generation,
+                text,
+                header_lines,
+            })
+            .is_err()
+        {
             return;
         }
     }
 }
 
-fn produce(plan: PreviewPlan, shared: &Shared) -> Text<'static> {
+/// The preview and how many of its lines are a header above the file's own.
+fn produce(plan: PreviewPlan, shared: &Shared) -> (Text<'static>, usize) {
+    match plan {
+        PreviewPlan::Sniff {
+            path,
+            text,
+            binary,
+            header,
+        } => {
+            let is_text = is_text(&path);
+            let body = sniffed(&path, &is_text, text, binary, shared);
+            let Some(header) = header else {
+                return (body, 0);
+            };
+            let mut lines = header_lines(header, matches!(is_text, Ok(true)), shared);
+            let n = lines.len();
+            lines.extend(body.lines);
+            (Text::from(lines), n)
+        }
+        other => (unsniffed(other, shared), 0),
+    }
+}
+
+/// `File  path`, with a pattern `Pattern  p` and `Matches  n`, then an empty line.
+fn header_lines(header: Header, text: bool, shared: &Shared) -> Vec<Line<'static>> {
+    let label = |l: &str| Span::styled(format!("{l:<9}"), Style::new().fg(theme::DIM));
+    let cut = header.file.rfind('/').map_or(0, |i| i + 1);
+    let (dir, name) = header.file.split_at(cut);
+    let mut lines = vec![Line::from(vec![
+        label("File"),
+        Span::styled(dir.to_string(), Style::new().fg(theme::DIM)),
+        Span::styled(name.to_string(), Style::new().fg(theme::TEXT)),
+    ])];
+    if let Some(m) = header.matches {
+        let count = run(&[if text { m.text } else { m.binary }], shared)
+            .ok()
+            .and_then(|out| count_of(&out.stdout));
+        lines.push(Line::from(vec![
+            label("Pattern"),
+            Span::styled(printable(&m.pattern), Style::new().fg(theme::RED)),
+        ]));
+        lines.push(Line::from(vec![
+            label("Matches"),
+            Span::styled(
+                count.map_or_else(|| "?".to_string(), |n| n.to_string()),
+                Style::new().fg(theme::PEACH),
+            ),
+        ]));
+    }
+    lines.push(Line::default());
+    lines
+}
+
+/// The total of `ugrep -c -o`: one count per line, after the last `:` when there is a name (archive
+/// members); `None` when the output is not that.
+fn count_of(stdout: &[u8]) -> Option<u64> {
+    let text = std::str::from_utf8(stdout).ok()?;
+    let mut total = 0;
+    for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        total += line.rsplit(':').next()?.parse::<u64>().ok()?;
+    }
+    Some(total)
+}
+
+fn unsniffed(plan: PreviewPlan, shared: &Shared) -> Text<'static> {
     match plan {
         PreviewPlan::Nothing => Text::default(),
         PreviewPlan::Text(s) => dim(&s),
         PreviewPlan::Run(cmd) => shown(run(&[cmd], shared)),
         PreviewPlan::Pipe(first, second) => shown(run(&[first, second], shared)),
-        PreviewPlan::Sniff { path, text, binary } => match is_text(&path) {
-            Err(e) => red_lines(&format!("{}: {e}", path.display())),
-            Ok(true) => match text {
-                Some(cmd) => shown(run(&[cmd], shared)),
-                None => file_text(&path),
-            },
-            Ok(false) => match binary {
-                Binary::Show(cmd) => shown(run(&[cmd], shared)),
-                Binary::Describe(None) => dim("No text preview: binary file"),
-                Binary::Describe(Some(cmd)) => match run(&[cmd], shared) {
-                    Ok(out) => {
-                        let what = String::from_utf8_lossy(&out.stdout).trim().to_string();
-                        let what = if what.is_empty() {
-                            "binary file".to_string()
-                        } else {
-                            what
-                        };
-                        dim(&format!("No text preview: {what}"))
-                    }
-                    Err(e) => red_lines(&e),
-                },
+        PreviewPlan::Sniff { .. } => unreachable!("handled by produce"),
+    }
+}
+
+fn sniffed(
+    path: &Path,
+    is_text: &io::Result<bool>,
+    text: Option<Cmd>,
+    binary: Binary,
+    shared: &Shared,
+) -> Text<'static> {
+    match is_text {
+        Err(e) => red_lines(&format!("{}: {e}", path.display())),
+        Ok(true) => match text {
+            Some(cmd) => shown(run(&[cmd], shared)),
+            None => file_text(path),
+        },
+        Ok(false) => match binary {
+            Binary::Show(cmd) => shown(run(&[cmd], shared)),
+            Binary::Describe(None) => dim("No text preview: binary file"),
+            Binary::Describe(Some(cmd)) => match run(&[cmd], shared) {
+                Ok(out) => {
+                    let what = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    let what = if what.is_empty() {
+                        "binary file".to_string()
+                    } else {
+                        what
+                    };
+                    dim(&format!("No text preview: {what}"))
+                }
+                Err(e) => red_lines(&e),
             },
         },
     }
@@ -319,6 +402,7 @@ pub fn is_text(path: &Path) -> io::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::commands::Matches;
     use crate::testutil::temp_dir;
     use std::sync::mpsc::{Receiver, channel};
     use std::time::{Duration, Instant};
@@ -418,6 +502,7 @@ mod tests {
             path: path.clone(),
             text: Some(Cmd::new("/usr/bin/printf").arg("TEXT")),
             binary: Binary::Show(Cmd::new("/usr/bin/printf").arg("BIN")),
+            header: None,
         });
         assert_eq!(plain(&t), "TEXT");
     }
@@ -429,14 +514,94 @@ mod tests {
             path: path.clone(),
             text: None,
             binary: Binary::Describe(Some(Cmd::new("/usr/bin/printf").arg("data\\n"))),
+            header: None,
         });
         assert_eq!(plain(&t), "No text preview: data");
         let t = one(PreviewPlan::Sniff {
             path,
             text: None,
             binary: Binary::Describe(None),
+            header: None,
         });
         assert_eq!(plain(&t), "No text preview: binary file");
+    }
+
+    fn printf(s: &str) -> Cmd {
+        Cmd::new("/usr/bin/printf").arg(s)
+    }
+
+    fn header(file: &str, count: Option<Cmd>) -> Option<Header> {
+        Some(Header {
+            file: file.into(),
+            matches: count.map(|c| Matches {
+                pattern: "ne".into(),
+                text: c.clone(),
+                binary: c,
+            }),
+        })
+    }
+
+    fn msg(plan: PreviewPlan) -> PreviewMsg {
+        let (tx, rx) = channel();
+        let p = Previewer::new(tx);
+        p.request(1, plan);
+        rx.recv_timeout(Duration::from_secs(5))
+            .expect("no preview within 5 s")
+    }
+
+    #[test]
+    fn header_shows_file_pattern_and_count() {
+        let path = file("h.txt", b"text\n");
+        let m = msg(PreviewPlan::Sniff {
+            path,
+            text: Some(printf("BODY")),
+            binary: Binary::Describe(None),
+            header: header("src/h.txt", Some(printf("3\\n"))),
+        });
+        assert_eq!(
+            plain(&m.text),
+            "File     src/h.txt\nPattern  ne\nMatches  3\n\nBODY"
+        );
+        assert_eq!(m.header_lines, 4);
+        assert_eq!(m.text.lines[1].spans[1].style.fg, Some(theme::RED));
+        assert_eq!(m.text.lines[2].spans[1].style.fg, Some(theme::PEACH));
+    }
+
+    #[test]
+    fn header_without_pattern_is_the_file() {
+        let path = file("h2.txt", b"text\n");
+        let m = msg(PreviewPlan::Sniff {
+            path,
+            text: Some(printf("BODY")),
+            binary: Binary::Describe(None),
+            header: header("h2.txt", None),
+        });
+        assert_eq!(plain(&m.text), "File     h2.txt\n\nBODY");
+        assert_eq!(m.header_lines, 2);
+    }
+
+    #[test]
+    fn count_adds_up_archive_members() {
+        let path = file("h.zip", b"PK\x03\x04\0\0");
+        let m = msg(PreviewPlan::Sniff {
+            path,
+            text: None,
+            binary: Binary::Show(printf("BIN")),
+            header: header("h.zip", Some(printf("h.zip{a}:1\\nh.zip{b:c}:2\\n"))),
+        });
+        assert!(plain(&m.text).contains("Matches  3"), "{}", plain(&m.text));
+    }
+
+    #[test]
+    fn count_that_fails_shows_a_question_mark() {
+        let path = file("h3.txt", b"text\n");
+        let m = msg(PreviewPlan::Sniff {
+            path,
+            text: Some(printf("BODY")),
+            binary: Binary::Describe(None),
+            header: header("h3.txt", Some(Cmd::new("/nonexistent/ugrep"))),
+        });
+        assert!(plain(&m.text).contains("Matches  ?"), "{}", plain(&m.text));
     }
 
     #[test]
@@ -449,6 +614,7 @@ mod tests {
             path,
             text: None,
             binary: Binary::Describe(None),
+            header: None,
         });
         assert_eq!(
             plain(&t),
@@ -462,6 +628,7 @@ mod tests {
             path: missing_dir(),
             text: None,
             binary: Binary::Describe(None),
+            header: None,
         });
         assert!(plain(&t).contains("not-there"), "{}", plain(&t));
     }

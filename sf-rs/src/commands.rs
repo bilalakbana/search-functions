@@ -133,13 +133,13 @@ pub fn list_plan(tab: Tab, opts: &Options, query: &str, e: &Engines) -> ListPlan
                 kind,
             }
         }
-        Tab::Search => {
+        Tab::Content => {
             // While the pattern is empty every file is listed (as ugrep-fzf does), always as a plain file
             // list: every line of every file, or every PDF converted, would be far too much.
             let (matching_lines, archives) = if query.is_empty() {
                 (false, false)
             } else {
-                (opts.search.matching_lines, opts.search.archives)
+                (opts.content.matching_lines, opts.content.archives)
             };
             let program = if archives {
                 let Some(p) = &e.ugrep_plus else {
@@ -232,14 +232,30 @@ pub enum PreviewPlan {
     Run(Cmd),
     /// The first command's output is the second one's input.
     Pipe(Cmd, Cmd),
-    /// `text` for a text file (`None`: the file itself), `binary` for any other.
+    /// `text` for a text file (`None`: the file itself), `binary` for any other; `header` above it.
     Sniff {
         path: PathBuf,
         text: Option<Cmd>,
         binary: Binary,
+        header: Option<Header>,
     },
     Text(String),
     Nothing,
+}
+
+/// The lines above a Content preview: the file, and with a pattern the pattern and its count.
+#[derive(Debug, PartialEq)]
+pub struct Header {
+    pub file: String,
+    pub matches: Option<Matches>,
+}
+
+/// How many times the pattern occurs: `ugrep -c -o` for a text file (`text`) or any other (`binary`).
+#[derive(Debug, PartialEq)]
+pub struct Matches {
+    pub pattern: String,
+    pub text: Cmd,
+    pub binary: Cmd,
 }
 
 /// What a binary file's preview shows.
@@ -290,11 +306,33 @@ pub fn preview_plan(
         Tab::Files => PreviewPlan::Sniff {
             text: bat(None),
             binary: file_type(),
+            header: None,
             path,
         },
-        Tab::Search => {
-            let s = &opts.search;
+        Tab::Content => {
+            let s = &opts.content;
             let grep = if s.archives { &e.ugrep_plus } else { &e.ugrep };
+            let count = |g: &PathBuf, opts: &[&str]| {
+                Cmd::new(g)
+                    .args(opts)
+                    .arg("-e")
+                    .arg(query)
+                    .arg("--")
+                    .arg(&path)
+            };
+            let header = Some(Header {
+                file: crate::items::printable(&String::from_utf8_lossy(
+                    item.key.as_encoded_bytes(),
+                )),
+                matches: grep
+                    .as_ref()
+                    .filter(|_| !query.is_empty())
+                    .map(|g| Matches {
+                        pattern: query.to_string(),
+                        text: count(g, &["-c", "-o", "-U", "--smart-case"]),
+                        binary: count(g, &["-z", "-c", "-o", "-a", "--smart-case"]),
+                    }),
+            });
             if s.matching_lines {
                 // documents and archives: their text as ugrep+ converts it
                 let binary = match &e.ugrep_plus {
@@ -309,6 +347,7 @@ pub fn preview_plan(
                 return PreviewPlan::Sniff {
                     text: bat(item.line),
                     binary,
+                    header,
                     path,
                 };
             }
@@ -316,6 +355,7 @@ pub fn preview_plan(
                 return PreviewPlan::Sniff {
                     text: bat(None),
                     binary: file_type(),
+                    header,
                     path,
                 };
             };
@@ -344,6 +384,7 @@ pub fn preview_plan(
                     "-B200",
                     "-A200",
                 ])),
+                header,
                 path,
             }
         }
@@ -520,15 +561,15 @@ mod tests {
             "",
             ".",
         ]);
-        let (cmd, kind) = run(list_plan(Tab::Search, &Options::default(), "", &engines()));
+        let (cmd, kind) = run(list_plan(Tab::Content, &Options::default(), "", &engines()));
         assert_eq!(cmd.program, PathBuf::from("/bin/ugrep"));
         assert_eq!(cmd.args, want);
         assert_eq!(kind, ParseKind::SearchFiles { archives: false });
         // also with Matching lines and Archives: every line / every converted PDF would be far too much
         let mut o = Options::default();
-        o.toggle(Tab::Search, Opt::MatchingLines);
-        o.toggle(Tab::Search, Opt::Archives);
-        let (cmd, kind) = run(list_plan(Tab::Search, &o, "", &engines()));
+        o.toggle(Tab::Content, Opt::MatchingLines);
+        o.toggle(Tab::Content, Opt::Archives);
+        let (cmd, kind) = run(list_plan(Tab::Content, &o, "", &engines()));
         assert_eq!(
             (cmd.program, cmd.args, kind),
             (
@@ -545,7 +586,7 @@ mod tests {
             ugrep: None,
             ..engines()
         };
-        let ListPlan::Hint(h) = list_plan(Tab::Search, &Options::default(), "", &e) else {
+        let ListPlan::Hint(h) = list_plan(Tab::Content, &Options::default(), "", &e) else {
             panic!("expected a hint")
         };
         assert!(h.contains("ugrep is not installed"), "{h}");
@@ -554,7 +595,7 @@ mod tests {
     #[test]
     fn search_files_cmd() {
         let (cmd, kind) = run(list_plan(
-            Tab::Search,
+            Tab::Content,
             &Options::default(),
             "needle",
             &engines(),
@@ -583,9 +624,9 @@ mod tests {
     #[test]
     fn search_ignored_option_drops_ignore_files() {
         let mut o = Options::default();
-        o.toggle(Tab::Search, Opt::Ignored);
-        o.toggle(Tab::Search, Opt::Hidden);
-        let (cmd, _) = run(list_plan(Tab::Search, &o, "x", &engines()));
+        o.toggle(Tab::Content, Opt::Ignored);
+        o.toggle(Tab::Content, Opt::Hidden);
+        let (cmd, _) = run(list_plan(Tab::Content, &o, "x", &engines()));
         assert!(!cmd.args.contains(&"--ignore-files".into()));
         assert!(!cmd.args.contains(&"--hidden".into()));
     }
@@ -593,8 +634,8 @@ mod tests {
     #[test]
     fn search_archives_uses_ugrep_plus_z() {
         let mut o = Options::default();
-        o.toggle(Tab::Search, Opt::Archives);
-        let (cmd, kind) = run(list_plan(Tab::Search, &o, "needle", &engines()));
+        o.toggle(Tab::Content, Opt::Archives);
+        let (cmd, kind) = run(list_plan(Tab::Content, &o, "needle", &engines()));
         assert_eq!(cmd.program, PathBuf::from("/bin/ugrep+"));
         assert_eq!(
             cmd.args,
@@ -619,8 +660,8 @@ mod tests {
     #[test]
     fn search_lines_key_ends_at_nul() {
         let mut o = Options::default();
-        o.toggle(Tab::Search, Opt::MatchingLines);
-        let (cmd, kind) = run(list_plan(Tab::Search, &o, "needle", &engines()));
+        o.toggle(Tab::Content, Opt::MatchingLines);
+        let (cmd, kind) = run(list_plan(Tab::Content, &o, "needle", &engines()));
         assert_eq!(cmd.program, PathBuf::from("/bin/ugrep"));
         assert_eq!(
             cmd.args,
@@ -648,9 +689,9 @@ mod tests {
     #[test]
     fn search_lines_with_archives() {
         let mut o = Options::default();
-        o.toggle(Tab::Search, Opt::MatchingLines);
-        o.toggle(Tab::Search, Opt::Archives);
-        let (cmd, kind) = run(list_plan(Tab::Search, &o, "needle", &engines()));
+        o.toggle(Tab::Content, Opt::MatchingLines);
+        o.toggle(Tab::Content, Opt::Archives);
+        let (cmd, kind) = run(list_plan(Tab::Content, &o, "needle", &engines()));
         assert_eq!(cmd.program, PathBuf::from("/bin/ugrep+"));
         assert_eq!(&cmd.args[..2], &os(&["-rzn", "--sort=name"])[..]);
         assert!(cmd.args.contains(&"--replace=\x01%o\x02".into()));
@@ -661,7 +702,7 @@ mod tests {
     #[test]
     fn query_starting_with_dash_follows_e() {
         let (cmd, _) = run(list_plan(
-            Tab::Search,
+            Tab::Content,
             &Options::default(),
             "-rf",
             &engines(),
@@ -673,12 +714,12 @@ mod tests {
     #[test]
     fn missing_ugrep_plus_is_hint() {
         let mut o = Options::default();
-        o.toggle(Tab::Search, Opt::Archives);
+        o.toggle(Tab::Content, Opt::Archives);
         let e = Engines {
             ugrep_plus: None,
             ..engines()
         };
-        let ListPlan::Hint(h) = list_plan(Tab::Search, &o, "x", &e) else {
+        let ListPlan::Hint(h) = list_plan(Tab::Content, &o, "x", &e) else {
             panic!("expected a hint")
         };
         assert!(h.contains("ugrep+ is not installed"), "{h}");
@@ -690,7 +731,7 @@ mod tests {
             ugrep: None,
             ..engines()
         };
-        let ListPlan::Hint(h) = list_plan(Tab::Search, &Options::default(), "x", &e) else {
+        let ListPlan::Hint(h) = list_plan(Tab::Content, &Options::default(), "x", &e) else {
             panic!("expected a hint")
         };
         assert!(h.contains("ugrep is not installed"), "{h}");
@@ -726,7 +767,10 @@ mod tests {
             &engines(),
             Path::new("/r"),
         );
-        let PreviewPlan::Sniff { path, text, binary } = plan else {
+        let PreviewPlan::Sniff {
+            path, text, binary, ..
+        } = plan
+        else {
             panic!("{plan:?}")
         };
         assert_eq!(path, PathBuf::from("/r/-a b"));
@@ -780,7 +824,7 @@ mod tests {
     #[test]
     fn preview_search_shows_matches_with_context() {
         let plan = preview_plan(
-            Tab::Search,
+            Tab::Content,
             &Options::default(),
             "ne",
             &item("a", None),
@@ -816,9 +860,9 @@ mod tests {
     #[test]
     fn preview_search_with_archives_uses_ugrep_plus_for_binaries() {
         let mut o = Options::default();
-        o.toggle(Tab::Search, Opt::Archives);
+        o.toggle(Tab::Content, Opt::Archives);
         let plan = preview_plan(
-            Tab::Search,
+            Tab::Content,
             &o,
             "ne",
             &item("a.zip", None),
@@ -850,12 +894,114 @@ mod tests {
         );
     }
 
+    fn header_of(plan: PreviewPlan) -> Option<Header> {
+        match plan {
+            PreviewPlan::Sniff { header, .. } => header,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[test]
+    fn preview_content_has_a_header_with_the_match_count() {
+        let h = header_of(preview_plan(
+            Tab::Content,
+            &Options::default(),
+            "ne",
+            &item("src/a b", None),
+            72,
+            &engines(),
+            Path::new("/r"),
+        ));
+        let h = h.expect("a header");
+        assert_eq!(h.file, "src/a b");
+        let m = h.matches.expect("the matches");
+        assert_eq!(m.pattern, "ne");
+        assert_eq!(m.text.program, PathBuf::from("/bin/ugrep"));
+        assert_eq!(
+            m.text.args,
+            os(&[
+                "-c",
+                "-o",
+                "-U",
+                "--smart-case",
+                "-e",
+                "ne",
+                "--",
+                "/r/src/a b"
+            ])
+        );
+        assert_eq!(
+            m.binary.args,
+            os(&[
+                "-z",
+                "-c",
+                "-o",
+                "-a",
+                "--smart-case",
+                "-e",
+                "ne",
+                "--",
+                "/r/src/a b"
+            ])
+        );
+    }
+
+    #[test]
+    fn preview_content_header_counts_with_ugrep_plus_for_archives() {
+        let mut o = Options::default();
+        o.toggle(Tab::Content, Opt::Archives);
+        o.toggle(Tab::Content, Opt::MatchingLines);
+        let h = header_of(preview_plan(
+            Tab::Content,
+            &o,
+            "ne",
+            &item("a.zip", Some(3)),
+            72,
+            &engines(),
+            Path::new("/r"),
+        ));
+        assert_eq!(
+            h.unwrap().matches.unwrap().binary.program,
+            PathBuf::from("/bin/ugrep+")
+        );
+    }
+
+    #[test]
+    fn preview_content_without_pattern_shows_only_the_file() {
+        let h = header_of(preview_plan(
+            Tab::Content,
+            &Options::default(),
+            "",
+            &item("a\x1bb", None),
+            72,
+            &engines(),
+            Path::new("/r"),
+        ));
+        let h = h.unwrap();
+        assert_eq!(h.file, "a\u{fffd}b");
+        assert!(h.matches.is_none());
+    }
+
+    #[test]
+    fn preview_in_files_has_no_header() {
+        let h = header_of(preview_plan(
+            Tab::Files,
+            &Options::default(),
+            "ne",
+            &item("a", None),
+            72,
+            &engines(),
+            Path::new("/r"),
+        ));
+        assert!(h.is_none());
+    }
+
     #[test]
     fn preview_matching_line_highlights_it() {
         let mut o = Options::default();
-        o.toggle(Tab::Search, Opt::MatchingLines);
+        o.toggle(Tab::Content, Opt::MatchingLines);
         let plan = preview_plan(
-            Tab::Search,
+            Tab::Content,
             &o,
             "ne",
             &item("a", Some(42)),

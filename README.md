@@ -19,7 +19,7 @@ A collection of efficient and flexible search tools to search inside file conten
 
 | Function          | Description                                                                 |
 |-------------------|-----------------------------------------------------------------------------|
-| `sf`              | All of it in one window (a compiled app): tabs Files · Search · Folders · Git, options under ⚙ Config, mouse and keys |
+| `sf`              | All of it in one window (a compiled app): tabs Files · Content · Folders · Git, options under ⚙ Config, mouse and keys |
 | `advancedsearch`  | Search in text, binary, and most file types                                 |
 | `advancedsearch_plus` | Like `advancedsearch` + support for PDF, Word, DOCX                     |
 | `detailedsearch`  | Like `advancedsearch` + displays matching lines for filtering               |
@@ -40,20 +40,21 @@ A collection of efficient and flexible search tools to search inside file conten
 
 ```bash
 sf            # starts in Files
-sf search     # or: folders, git
+sf content    # or: folders, git
 ```
 
 | Tab | Lists | Typing | Options (⚙ Config, defaults) |
 |-----|-------|--------|------------------------------|
 | Files | every file below the folder | filters the names | Hidden files ✓, Ignored files ✓ |
-| Search | the files that contain the pattern (ugrep); every text file while it is empty | the pattern, searched 150 ms after the last key | Matching lines ✗ (list the lines instead), Archives & documents ✗ (zip, tar, 7z, PDF, Office via `ugrep+`), Hidden files ✓, Ignored files ✗ |
+| Content | the files that contain the pattern (ugrep); every text file while it is empty | the pattern, searched 150 ms after the last key; the preview shows the file, the pattern and how often it occurs | Matching lines ✗ (list the lines instead), Archives & documents ✗ (zip, tar, 7z, PDF, Office via `ugrep+`), Hidden files ✓, Ignored files ✗ |
 | Folders | every folder, `..` first | filters the names; `Enter` goes inside | Hidden folders ✓, Ignored folders ✓ |
 | Git | the commit graph, numbered | filters the commits; `Enter` shows one | All branches ✓ |
 
 Click a tab or use `Tab` / `Shift-Tab`; click **⚙ Config** (or `Ctrl-S`) for the tab's options, `Space` or a click
 toggles one. A double click is `Enter`, the wheel scrolls the list or the preview. `Alt-Up` / `Alt-Down` scroll the
 preview, `Ctrl-L` hides it, `Ctrl-R` runs the list again, `Esc` quits. The keys for the selected item are those under
-[Keyboard Shortcuts](#-keyboard-shortcuts) and are shown at the bottom of the window. Filtering is case-insensitive and
+[Keyboard Shortcuts](#-keyboard-shortcuts) and are shown in the middle of the tab bar. A bar on the right of the list and
+the preview shows where you are in them. Filtering is case-insensitive and
 every word must match (as `fzf -i -e`); the matches are shown red. The options are remembered in `~/.config/sf/config.toml`
 (`$XDG_CONFIG_HOME/sf/config.toml`).
 
@@ -112,7 +113,7 @@ These shortcuts apply when using the interactive search tools (`fzf`, `ugrep-fzf
 | `Ctrl-e` | Open file location in file manager       |
 | `Ctrl-c` | Copy relative path of selected file (use `Esc` to quit) |
 | `Ctrl-o` | Open the file in nvim in a new tmux window (`sf`: at the matching line; outside tmux in the same terminal) |
-| `Ctrl-t` | Search inside the selected file in a new tmux window (`sf`: with the Search pattern) |
+| `Ctrl-t` | Search inside the selected file in a new tmux window (`sf`: with the Content pattern) |
 | `Ctrl-u` / `Ctrl-g` / `Alt-g` / `Alt-u` | git diff / diff (delta) / short diff / log of the file |
 | `Alt-j` / `Ctrl-j` | Folder list / file list in a new tmux window |
 | `Ctrl-l` | Toggle the preview                       |

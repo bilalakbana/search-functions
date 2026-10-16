@@ -49,10 +49,10 @@ mod tests {
         let on = |tab, opt| o.get(tab, opt);
         assert!(on(Tab::Files, Opt::Hidden));
         assert!(on(Tab::Files, Opt::Ignored));
-        assert!(!on(Tab::Search, Opt::MatchingLines));
-        assert!(!on(Tab::Search, Opt::Archives));
-        assert!(on(Tab::Search, Opt::Hidden));
-        assert!(!on(Tab::Search, Opt::Ignored));
+        assert!(!on(Tab::Content, Opt::MatchingLines));
+        assert!(!on(Tab::Content, Opt::Archives));
+        assert!(on(Tab::Content, Opt::Hidden));
+        assert!(!on(Tab::Content, Opt::Ignored));
         assert!(on(Tab::Folders, Opt::Hidden));
         assert!(on(Tab::Folders, Opt::Ignored));
         assert!(on(Tab::Git, Opt::AllBranches));
@@ -62,7 +62,7 @@ mod tests {
     fn round_trip() {
         let path = temp_dir("config_round_trip").join("sub/config.toml");
         let mut o = Options::default();
-        o.toggle(Tab::Search, Opt::MatchingLines);
+        o.toggle(Tab::Content, Opt::MatchingLines);
         o.toggle(Tab::Git, Opt::AllBranches);
         save(&path, &o).unwrap();
         assert_eq!(load(&path).unwrap(), o);
@@ -93,11 +93,18 @@ mod tests {
     }
 
     #[test]
+    fn a_config_from_when_content_was_called_search_still_loads() {
+        let path = temp_dir("config_old_name").join("config.toml");
+        fs::write(&path, "[search]\nmatching_lines = true\n").unwrap();
+        assert!(load(&path).unwrap().get(Tab::Content, Opt::MatchingLines));
+    }
+
+    #[test]
     fn partial_file_fills_defaults() {
         let path = temp_dir("config_partial").join("config.toml");
         fs::write(&path, "[search]\nmatching_lines = true\n").unwrap();
         let mut want = Options::default();
-        want.search.matching_lines = true;
+        want.content.matching_lines = true;
         assert_eq!(load(&path).unwrap(), want);
     }
 }
