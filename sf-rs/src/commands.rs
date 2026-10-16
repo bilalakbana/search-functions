@@ -134,11 +134,14 @@ pub fn list_plan(tab: Tab, opts: &Options, query: &str, e: &Engines) -> ListPlan
             }
         }
         Tab::Search => {
-            if query.is_empty() {
-                return hint("type a pattern");
-            }
-            let s = &opts.search;
-            let program = if s.archives {
+            // While the pattern is empty every file is listed (as ugrep-fzf does), always as a plain file
+            // list: every line of every file, or every PDF converted, would be far too much.
+            let (matching_lines, archives) = if query.is_empty() {
+                (false, false)
+            } else {
+                (opts.search.matching_lines, opts.search.archives)
+            };
+            let program = if archives {
                 let Some(p) = &e.ugrep_plus else {
                     return hint("ugrep+ is not installed (needed for Archives & documents)");
                 };
@@ -152,7 +155,7 @@ pub fn list_plan(tab: Tab, opts: &Options, query: &str, e: &Engines) -> ListPlan
             // -s: no messages about unreadable files; what stays on stderr (a broken pattern) is shown
             let lines = ["--separator=\x1f", "--color=never", "--replace=\x01%o\x02"];
             let cmd = Cmd::new(program);
-            let mut cmd = match (s.matching_lines, s.archives) {
+            let mut cmd = match (matching_lines, archives) {
                 (false, false) => cmd.args([
                     "-rlU",
                     "--sort=name",
@@ -197,12 +200,10 @@ pub fn list_plan(tab: Tab, opts: &Options, query: &str, e: &Engines) -> ListPlan
             if !ignored {
                 cmd = cmd.arg("--ignore-files");
             }
-            let kind = if s.matching_lines {
+            let kind = if matching_lines {
                 ParseKind::SearchLines
             } else {
-                ParseKind::SearchFiles {
-                    archives: s.archives,
-                }
+                ParseKind::SearchFiles { archives }
             };
             ListPlan::Run {
                 cmd: cmd.args(["--exclude-dir=.git", "-e", query, "."]),
@@ -503,11 +504,51 @@ mod tests {
     }
 
     #[test]
-    fn search_empty_query_is_hint() {
+    fn search_empty_query_lists_all_files() {
+        // as ugrep-fzf: `-e ''` matches every text file
+        let want = os(&[
+            "-rlU",
+            "--sort=name",
+            "--smart-case",
+            "--ignore-binary",
+            "-s",
+            "--null",
+            "--hidden",
+            "--ignore-files",
+            "--exclude-dir=.git",
+            "-e",
+            "",
+            ".",
+        ]);
+        let (cmd, kind) = run(list_plan(Tab::Search, &Options::default(), "", &engines()));
+        assert_eq!(cmd.program, PathBuf::from("/bin/ugrep"));
+        assert_eq!(cmd.args, want);
+        assert_eq!(kind, ParseKind::SearchFiles { archives: false });
+        // also with Matching lines and Archives: every line / every converted PDF would be far too much
+        let mut o = Options::default();
+        o.toggle(Tab::Search, Opt::MatchingLines);
+        o.toggle(Tab::Search, Opt::Archives);
+        let (cmd, kind) = run(list_plan(Tab::Search, &o, "", &engines()));
         assert_eq!(
-            list_plan(Tab::Search, &Options::default(), "", &engines()),
-            ListPlan::Hint("type a pattern".into())
+            (cmd.program, cmd.args, kind),
+            (
+                PathBuf::from("/bin/ugrep"),
+                want,
+                ParseKind::SearchFiles { archives: false }
+            )
         );
+    }
+
+    #[test]
+    fn search_empty_query_without_ugrep_is_hint() {
+        let e = Engines {
+            ugrep: None,
+            ..engines()
+        };
+        let ListPlan::Hint(h) = list_plan(Tab::Search, &Options::default(), "", &e) else {
+            panic!("expected a hint")
+        };
+        assert!(h.contains("ugrep is not installed"), "{h}");
     }
 
     #[test]

@@ -403,7 +403,10 @@ key_action() {
         *)
             terminal_cmd "$name" "$PWD/$key" "$line" || { status_err "Unknown key: $name"; return; }
             if [[ -n $TMUX ]]; then
-                if err=$(tmux new-window -n "$WINDOW" -c "$PWD" "${CMD[@]}" 2>&1) && tmux select-pane -T "$TITLE"; then status ''
+                # Never `-c "$PWD"`: tmux expands formats there, so a folder named `#(cmd)` would run cmd.
+                # A fixed script changes into the folder, which is only one of its arguments.
+                if err=$(tmux new-window -n "$WINDOW" sh -c 'cd -- "$1" && shift && exec "$@"' sf "$PWD" "${CMD[@]}" 2>&1) &&
+                    tmux select-pane -T "$TITLE"; then status ''
                 else status_err "${err:-tmux new-window failed}"; fi
             else
                 printf 'execute:%s --run %s {1} {2}' "$(q "$SELF")" "$name"   # in the foreground

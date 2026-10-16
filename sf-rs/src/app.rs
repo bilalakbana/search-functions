@@ -328,7 +328,16 @@ impl App {
             ListMsg::Error(g, e) if g == self.list_gen => self.notes.push(items::error(&e)),
             ListMsg::Done(g) if g == self.list_gen => {
                 self.loading = false;
-                if self.tab == Tab::Search && self.filter.total() == 0 && self.notes.is_empty() {
+                if self.tab == Tab::Search
+                    && self.filter.total() == 0
+                    && self.notes.is_empty()
+                    && self.query.is_empty()
+                {
+                    self.notes.push(items::hint("No text files here"));
+                } else if self.tab == Tab::Search
+                    && self.filter.total() == 0
+                    && self.notes.is_empty()
+                {
                     let mut hint = "No match".to_string();
                     if !self.options.search.archives {
                         hint += ". Archives & documents (⚙ Config) also searches inside zip, PDF and Office files";
@@ -915,6 +924,19 @@ pub(crate) mod tests {
             .map(|s| s.content.as_ref())
             .collect();
         assert!(note.starts_with("No match"), "{note}");
+    }
+
+    #[test]
+    fn empty_search_without_files_says_so() {
+        let (mut a, _) = app(Tab::Search);
+        a.on_list(ListMsg::Done(a.list_gen));
+        let note: String = a.notes[0]
+            .display()
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert_eq!(note, "No text files here");
     }
 
     #[test]

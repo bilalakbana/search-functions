@@ -96,8 +96,11 @@ in Git it shows the whole commit (delta, paged). The app starts in the current d
 Details settled from the existing setup and the prototype:
 
 - Filtering in Files, Folders and Git matches as Bilal's fzf does (`FZF_DEFAULT_OPTS="-i -e"`): case-insensitive
-  substring, words separated by spaces must all match; no fuzzy matching.
-- Search with an empty query lists nothing and says "type a pattern"; a broken pattern shows ugrep's message.
+  substring, words separated by spaces must all match; no fuzzy matching. Every occurrence of the typed words is
+  drawn red in the rows (Bilal, 2026-10-17: "yazdığım nereye tekabül etmiş bilmiyorum").
+- Search with an empty query lists every text file, as `ugrep-fzf` does (`ugrep -rl … -e ''`), whatever the
+  options: every line of every file, or every PDF converted, would be far too much (Bilal, 2026-10-17: the files
+  should be there at the start). A broken pattern shows ugrep's message.
   In Matching lines with archives, a member `a.zip{m}` is shown as such and acted on as `a.zip`.
 - Ctrl-O in Search opens nvim searching for the query; Ctrl-T in Search passes the query on.
 - Ctrl-C copies the path relative to the root on Linux, the Windows path on WSL; the result ("Copied") or the
@@ -155,6 +158,12 @@ Details settled from the existing setup and the prototype:
 - Engines stay external; the prototype's sub-function windows are reused for Ctrl-T/U/G/Alt-G/Alt-U.
 
 Decided while building (2026-10-17):
+
+- tmux windows never get the folder with `new-window -c`: tmux expands formats there, so a folder named `#(cmd)`
+  ran cmd (verified with tmux 3.5a; `##` escaping did not help). A fixed `sh -c 'cd -- "$1" && shift && exec "$@"'`
+  gets the folder as an argument; `-e` values and program arguments are not expanded. Fixed in the prototype too.
+- A list reads each record bounded (64 KiB, stderr lines 4 KiB): a minified file's 20 MB line never sits in memory
+  whole; a cut path is left out and said, since it would name another file.
 
 - Matching lines come from `ugrep -n --null --separator=0x1f --replace=0x01%o0x02`: the path ends at a NUL (it
   cannot hold one), every match is marked, so the list shows them red; `--format` printed a line once per match.

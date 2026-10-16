@@ -50,6 +50,8 @@ expect_log() { local i; for i in $(seq 50); do grep -qF -- "$2" "$LOG" && { ok "
 keys() { tm send-keys -t e2e "$@"; }
 type_() { tm send-keys -t e2e -l "$1"; }
 shot() { tm capture-pane -e -p -t e2e > "$SHOTS/$1.ansi"; }
+# red_on TEXT: TEXT is drawn in Catppuccin red somewhere on the screen (a highlighted match)
+red_on() { local i; for i in $(seq 30); do tm capture-pane -e -p -t e2e | grep -qF -- "237;135;150m$1" && return 0; sleep 0.1; done; return 1; }
 clear_query() { keys C-M-h; }
 # back_to_sf: a terminal action opened a tmux window (it has the focus); wait until its stub ends
 back_to_sf() {
@@ -77,6 +79,7 @@ expect 'start: footer'                     'Enter open · \^O nvim'
 shot files
 type_ 'main'
 expect 'files: query filters'              "Files › main .* 1/$n_files"
+red_on 'main' && ok 'files: typed text highlighted' || bad 'files: typed text not highlighted'
 keys Enter;  expect_log 'files: Enter opens'           "OPEN [$T/src/main.c]"
 keys C-c;    expect_log 'files: Ctrl-C copies'         'COPY <src/main.c>'
 expect 'files: copy shows a status'        'Copied to the clipboard'
@@ -146,8 +149,10 @@ expect 'git outside a repository says so'  'not a git repository'
 keys Escape
 expect 'esc again'                         '^READY>\s*$'
 
+n_text=$(cd "$T" && ugrep -rlU --ignore-binary -s --hidden --ignore-files --exclude-dir=.git -e '' . | wc -l)
 keys "cd '$T' && env -u TMUX '$SF' search" Enter
 expect 'no tmux: starts in Search'         'Search › type a pattern'
+expect "search: all $n_text text files before typing" "$n_text/$n_text"
 type_ 'needle'
 expect 'no tmux: results'                  '5/5'
 keys C-o

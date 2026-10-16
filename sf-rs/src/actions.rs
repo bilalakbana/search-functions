@@ -84,6 +84,8 @@ impl Env {
 }
 
 const COPIED: &str = "Copied to the clipboard";
+/// `sh -c CD_AND_EXEC sf DIR PROGRAM ARGS...`: runs PROGRAM in DIR; the script itself holds no data.
+const CD_AND_EXEC: &str = "cd -- \"$1\" && shift && exec \"$@\"";
 /// How long a launcher (xdg-open, wl-copy, ...) may take before sf stops waiting for its exit status.
 const LAUNCH_WAIT: Duration = Duration::from_secs(3);
 
@@ -288,15 +290,16 @@ fn terminal(
     if !env.tmux {
         return Outcome::Foreground(vec![cmd]);
     }
-    // More than one argument after the options: tmux runs the program itself, no shell.
-    let mut args: Vec<OsString> = ["new-window", "-n", window, "-c"]
-        .map(OsString::from)
-        .into();
-    args.push(root.into());
+    // More than one argument after the options: tmux runs the program itself, no shell. The folder
+    // is never given with `-c`, which tmux expands as a format (a folder named `#(cmd)` would run
+    // cmd); a fixed script changes into it, the folder being one of its arguments.
+    let mut args: Vec<OsString> = ["new-window", "-n", window].map(OsString::from).into();
     for (k, v) in &cmd.env {
-        args.push("-e".into());
+        args.push("-e".into()); // -e values are not expanded
         args.push(format!("{k}={v}").into());
     }
+    args.extend(["sh", "-c", CD_AND_EXEC, "sf"].map(OsString::from));
+    args.push(root.into());
     args.push(cmd.program.into());
     args.extend(cmd.args);
     let args: Vec<&std::ffi::OsStr> = args.iter().map(OsString::as_os_str).collect();
@@ -612,7 +615,10 @@ mod tests {
                     "new-window",
                     "-n",
                     "nvim",
+                    "sh",
                     "-c",
+                    "cd -- \"$1\" && shift && exec \"$@\"",
+                    "sf",
                     root,
                     "nvim",
                     "+7",
@@ -620,6 +626,34 @@ mod tests {
                     path.to_str().unwrap()
                 ],
                 vec!["select-pane", "-T", "editor"]
+            ]
+        );
+    }
+
+    #[test]
+    fn tmux_never_gets_the_folder_as_an_option() {
+        // tmux expands formats in `new-window -c DIR`: a folder named `#(cmd)` would run cmd
+        // (verified with tmux 3.5a); program arguments are not expanded
+        let mut f = fixture("act_tmux_format", false, true);
+        f.root = f.root.join("a#(touch PWNED)b");
+        std::fs::create_dir_all(&f.root).unwrap();
+        act(&f, ActionKind::Log, Tab::Files, &file("x"), "");
+        let first = &calls(&f.bin, "tmux")[0];
+        let at = first.iter().position(|a| a == "sf").unwrap();
+        assert_eq!(
+            first[at + 1],
+            f.root.to_str().unwrap(),
+            "the folder is an argument of the wrapper"
+        );
+        assert_eq!(
+            &first[..at],
+            [
+                "new-window",
+                "-n",
+                "logs",
+                "sh",
+                "-c",
+                "cd -- \"$1\" && shift && exec \"$@\""
             ]
         );
     }

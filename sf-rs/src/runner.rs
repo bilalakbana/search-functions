@@ -6,7 +6,7 @@
 //! and every stderr line becomes an `Error`.
 
 use std::collections::HashSet;
-use std::io::{BufRead, BufReader, Read};
+use std::io::{self, BufRead, BufReader, Read};
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -31,6 +31,11 @@ const BATCH: usize = 512;
 const BATCH_TIME: Duration = Duration::from_millis(50);
 /// More stderr lines than this are counted, not shown.
 const MAX_ERRORS: usize = 100;
+/// The longest record kept: paths, line numbers and the start of a matching line fit many times over
+/// (its text is cut at 1000 characters anyway).
+const MAX_RECORD: usize = 64 << 10;
+/// The longest stderr line kept.
+const MAX_ERROR_LINE: usize = 4 << 10;
 
 pub struct Runner {
     tx: Sender<ListMsg>,
@@ -123,8 +128,8 @@ fn reap(job: &Mutex<(Child, bool)>) {
 fn read_errors(generation: u64, stderr: impl Read, tx: &Sender<ListMsg>) {
     let mut shown = 0;
     let mut more = 0;
-    for line in BufReader::new(stderr).split(b'\n') {
-        let Ok(line) = line else { break };
+    let (mut reader, mut line) = (BufReader::new(stderr), Vec::new());
+    while let Ok(Some(_)) = read_record(&mut reader, b'\n', &mut line, MAX_ERROR_LINE) {
         let line = String::from_utf8_lossy(&line).trim().to_string();
         if line.is_empty() {
             continue;
@@ -170,17 +175,21 @@ fn read_items(generation: u64, kind: ParseKind, stdout: impl Read, tx: &Sender<L
             }
             sent = Instant::now();
         }
-        record.clear();
-        match reader.read_until(delimiter, &mut record) {
-            Ok(0) => break,
-            Ok(_) => {}
+        let cut = match read_record(&mut reader, delimiter, &mut record, MAX_RECORD) {
+            Ok(None) => break,
+            Ok(Some(cut)) => cut,
             Err(e) => {
                 let _ = tx.send(ListMsg::Error(generation, format!("reading the list: {e}")));
                 break;
             }
-        }
-        if record.last() == Some(&delimiter) {
-            record.pop();
+        };
+        // a cut path would name another file; a cut line or commit only loses its end
+        if cut && delimiter == 0 {
+            let message = format!("left out a name longer than {} KiB", MAX_RECORD >> 10);
+            if tx.send(ListMsg::Error(generation, message)).is_err() {
+                return;
+            }
+            continue;
         }
         if kind == ParseKind::Git {
             records.push(std::mem::take(&mut record)); // numbered once all are there
@@ -221,6 +230,40 @@ fn numbered(records: &[Vec<u8>]) -> Vec<Item> {
             item
         })
         .collect()
+}
+
+/// Reads the next record (up to `delimiter`, which is not kept) into `buf`, keeping at most `max` bytes
+/// of it and skipping the rest, so one huge line never sits in memory whole. `Ok(None)` at the end,
+/// else whether the record was cut.
+fn read_record(
+    r: &mut impl BufRead,
+    delimiter: u8,
+    buf: &mut Vec<u8>,
+    max: usize,
+) -> io::Result<Option<bool>> {
+    buf.clear();
+    let (mut cut, mut any) = (false, false);
+    loop {
+        let available = match r.fill_buf() {
+            Ok(b) => b,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        if available.is_empty() {
+            return Ok(any.then_some(cut));
+        }
+        any = true;
+        let end = available.iter().position(|&b| b == delimiter);
+        let part = &available[..end.unwrap_or(available.len())];
+        let room = max - buf.len();
+        cut |= part.len() > room;
+        buf.extend_from_slice(&part[..part.len().min(room)]);
+        let used = end.map_or(available.len(), |i| i + 1);
+        r.consume(used);
+        if end.is_some() {
+            return Ok(Some(cut));
+        }
+    }
 }
 
 impl Drop for Runner {
@@ -296,6 +339,69 @@ mod tests {
             thread::sleep(Duration::from_millis(10));
         }
         panic!("{} was not written", path.display());
+    }
+
+    #[test]
+    fn read_record_keeps_at_most_max_bytes() {
+        let mut data = vec![b'x'; 10 << 20];
+        data.extend_from_slice(b"\nsecond\nlast");
+        let mut r = BufReader::with_capacity(64 * 1024, &data[..]);
+        let mut buf = Vec::new();
+        assert_eq!(
+            read_record(&mut r, b'\n', &mut buf, 1000).unwrap(),
+            Some(true)
+        );
+        assert_eq!(buf.len(), 1000);
+        assert!(buf.capacity() < 64 * 1024, "capacity {}", buf.capacity());
+        assert_eq!(
+            read_record(&mut r, b'\n', &mut buf, 1000).unwrap(),
+            Some(false)
+        );
+        assert_eq!(buf, b"second");
+        assert_eq!(
+            read_record(&mut r, b'\n', &mut buf, 1000).unwrap(),
+            Some(false)
+        );
+        assert_eq!(buf, b"last");
+        assert_eq!(read_record(&mut r, b'\n', &mut buf, 1000).unwrap(), None);
+    }
+
+    #[test]
+    fn read_record_handles_empty_records_and_nul() {
+        let mut r = BufReader::new(&b"a\0\0b\0"[..]);
+        let mut buf = Vec::new();
+        let mut got = Vec::new();
+        while let Some(cut) = read_record(&mut r, 0, &mut buf, 10).unwrap() {
+            got.push((buf.clone(), cut));
+        }
+        assert_eq!(
+            got,
+            [
+                (b"a".to_vec(), false),
+                (b"".to_vec(), false),
+                (b"b".to_vec(), false)
+            ]
+        );
+    }
+
+    #[test]
+    fn a_huge_matching_line_is_cut() {
+        // 20 MB on one line: the row keeps its key and line number, its text is cut
+        let script =
+            "printf 'big.min.js\\0001\\037'; head -c 20000000 /dev/zero | tr '\\0' x; printf '\\n'";
+        let (items, errors) = run(sh(script), ParseKind::SearchLines);
+        assert_eq!(keys(&items), ["big.min.js"]);
+        assert_eq!(items[0].line, Some(1));
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn a_name_too_long_is_left_out_and_said() {
+        let script = "head -c 100000 /dev/zero | tr '\\0' a; printf '\\0ok\\0'";
+        let (items, errors) = run(sh(script), ParseKind::SearchFiles { archives: false });
+        assert_eq!(keys(&items), ["ok"]);
+        assert_eq!(errors.len(), 1);
+        assert!(errors[0].contains("longer than"), "{errors:?}");
     }
 
     #[test]

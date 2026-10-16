@@ -186,6 +186,15 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
         frame.render_widget(Paragraph::new(line), Rect::new(inner.x, y, inner.width, 1));
         y += 1;
     }
+    // the filter's words, drawn red in the rows (Search's query is a pattern for the contents)
+    let words: Vec<String> = if app.tab == Tab::Search {
+        Vec::new()
+    } else {
+        app.query
+            .split_whitespace()
+            .map(str::to_lowercase)
+            .collect()
+    };
     for i in app.offset..app.offset + visible {
         let Some(item) = app.filter.get(i) else { break };
         let rect = Rect::new(inner.x, y, inner.width, 1);
@@ -195,7 +204,10 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
         } else {
             Span::raw(" ")
         };
-        let mut spans: Vec<Span> = [marker].into_iter().chain(item.display().spans).collect();
+        let mut spans: Vec<Span> = [marker]
+            .into_iter()
+            .chain(highlight(item.display(), &words).spans)
+            .collect();
         if selected {
             // the band under every span: coloured engine output carries its own (reset) background
             frame
@@ -210,6 +222,65 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
         y += 1;
     }
     inner
+}
+
+/// Every occurrence of every word (lower case) in `line`, case-insensitive, drawn red and bold.
+fn highlight(line: Line<'static>, words: &[String]) -> Line<'static> {
+    if words.is_empty() {
+        return line;
+    }
+    let chars: Vec<(usize, char)> = line
+        .spans
+        .iter()
+        .enumerate()
+        .flat_map(|(i, s)| s.content.chars().map(move |c| (i, c)))
+        .collect();
+    // the line in lower case, each lower-case char pointing back at the char it came from
+    let (mut lower, mut from) = (Vec::new(), Vec::new());
+    for (k, &(_, c)) in chars.iter().enumerate() {
+        for l in c.to_lowercase() {
+            lower.push(l);
+            from.push(k);
+        }
+    }
+    let mut hit = vec![false; chars.len()];
+    for word in words {
+        let w: Vec<char> = word.chars().collect();
+        if w.is_empty() || w.len() > lower.len() {
+            continue;
+        }
+        for start in 0..=lower.len() - w.len() {
+            if lower[start..start + w.len()] == w[..] {
+                for &k in &from[start..start + w.len()] {
+                    hit[k] = true;
+                }
+            }
+        }
+    }
+    if !hit.contains(&true) {
+        return line;
+    }
+    let mut spans: Vec<Span<'static>> = Vec::new();
+    let mut run = (usize::MAX, false, String::new());
+    for (k, &(span, c)) in chars.iter().enumerate() {
+        if (run.0, run.1) != (span, hit[k]) && !run.2.is_empty() {
+            spans.push(hit_span(&line, &mut run));
+        }
+        (run.0, run.1) = (span, hit[k]);
+        run.2.push(c);
+    }
+    if !run.2.is_empty() {
+        spans.push(hit_span(&line, &mut run));
+    }
+    Line { spans, ..line }
+}
+
+fn hit_span(line: &Line<'static>, run: &mut (usize, bool, String)) -> Span<'static> {
+    let mut style = line.spans[run.0].style;
+    if run.1 {
+        style = style.fg(theme::RED).add_modifier(Modifier::BOLD);
+    }
+    Span::styled(std::mem::take(&mut run.2), style)
 }
 
 fn short(opt: Opt) -> &'static str {
@@ -566,6 +637,46 @@ mod tests {
         let (x, y) = find(&buf, "abc1234").unwrap();
         assert_eq!(buf[(x, y)].bg, theme::SURFACE);
         assert_eq!(buf[(x + 8, y)].bg, theme::SURFACE, "after the reset");
+    }
+
+    fn fg_at(buf: &Buffer, text: &str, offset: u16) -> ratatui::style::Color {
+        let (x, y) = find(buf, text).unwrap();
+        buf[(x + offset, y)].fg
+    }
+
+    #[test]
+    fn typed_words_are_highlighted() {
+        let (mut a, now) = app(Tab::Files);
+        feed(&mut a, &["src/Main.rs", "docs/other.md"]);
+        for c in "main s".chars() {
+            a.handle_key(key(KeyCode::Char(c)), now);
+        }
+        let buf = render(&mut a, 80, 24);
+        assert_eq!(fg_at(&buf, "src/Main.rs", 4), theme::RED, "M of Main");
+        assert_eq!(fg_at(&buf, "src/Main.rs", 7), theme::RED, "n of Main");
+        assert_eq!(fg_at(&buf, "src/Main.rs", 0), theme::RED, "s of src");
+        assert_eq!(
+            fg_at(&buf, "src/Main.rs", 1),
+            theme::DIM,
+            "r of src is folder colour"
+        );
+        assert_eq!(fg_at(&buf, "src/Main.rs", 10), theme::RED, "s of .rs");
+        let (x, y) = find(&buf, "src/Main.rs").unwrap();
+        assert_eq!(
+            buf[(x + 4, y)].bg,
+            theme::SURFACE,
+            "the band stays under a highlight"
+        );
+    }
+
+    #[test]
+    fn search_pattern_is_not_drawn_into_file_names() {
+        let (mut a, now) = app(Tab::Search);
+        a.handle_key(key(KeyCode::Char('m')), now);
+        a.tick(now + std::time::Duration::from_secs(1));
+        feed(&mut a, &["main.c"]);
+        let buf = render(&mut a, 80, 24);
+        assert_ne!(fg_at(&buf, "main.c", 0), theme::RED);
     }
 
     #[test]

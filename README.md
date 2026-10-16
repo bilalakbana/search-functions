@@ -46,7 +46,7 @@ sf search     # or: folders, git
 | Tab | Lists | Typing | Options (⚙ Config, defaults) |
 |-----|-------|--------|------------------------------|
 | Files | every file below the folder | filters the names | Hidden files ✓, Ignored files ✓ |
-| Search | the files that contain the pattern (ugrep) | the pattern, searched 150 ms after the last key | Matching lines ✗ (list the lines instead), Archives & documents ✗ (zip, tar, 7z, PDF, Office via `ugrep+`), Hidden files ✓, Ignored files ✗ |
+| Search | the files that contain the pattern (ugrep); every text file while it is empty | the pattern, searched 150 ms after the last key | Matching lines ✗ (list the lines instead), Archives & documents ✗ (zip, tar, 7z, PDF, Office via `ugrep+`), Hidden files ✓, Ignored files ✗ |
 | Folders | every folder, `..` first | filters the names; `Enter` goes inside | Hidden folders ✓, Ignored folders ✓ |
 | Git | the commit graph, numbered | filters the commits; `Enter` shows one | All branches ✓ |
 
@@ -54,7 +54,7 @@ Click a tab or use `Tab` / `Shift-Tab`; click **⚙ Config** (or `Ctrl-S`) for t
 toggles one. A double click is `Enter`, the wheel scrolls the list or the preview. `Alt-Up` / `Alt-Down` scroll the
 preview, `Ctrl-L` hides it, `Ctrl-R` runs the list again, `Esc` quits. The keys for the selected item are those under
 [Keyboard Shortcuts](#-keyboard-shortcuts) and are shown at the bottom of the window. Filtering is case-insensitive and
-every word must match (as `fzf -i -e`). The options are remembered in `~/.config/sf/config.toml`
+every word must match (as `fzf -i -e`); the matches are shown red. The options are remembered in `~/.config/sf/config.toml`
 (`$XDG_CONFIG_HOME/sf/config.toml`).
 
 The earlier fzf version (`~/.SearchFunctions/sf`, modes on F2–F8) still works until the app has replaced it.
