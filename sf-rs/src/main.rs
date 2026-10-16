@@ -4,10 +4,12 @@ mod actions;
 mod app;
 mod commands;
 mod config;
+mod doctor;
 mod engines;
 mod filter;
 mod items;
 mod model;
+mod platform;
 mod preview;
 mod runner;
 #[cfg(test)]
@@ -16,7 +18,7 @@ mod theme;
 mod ui;
 
 use std::collections::VecDeque;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::stdout;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
@@ -38,11 +40,18 @@ use crate::preview::Previewer;
 use crate::runner::Runner;
 
 const USAGE: &str = "usage: sf [files|content|folders|git]
+       sf open|reveal|copy-path PATH
+       sf copy-text TEXT
+       sf doctor
 
 The search functions in one window: Files, Content (search inside files), Folders and Git. Tab / Shift-Tab or
 a click switch the tab; ⚙ Config (or Ctrl-S) holds the tab's options; Esc quits. The keys for the
 selected item are listed at the bottom. Options are kept in $XDG_CONFIG_HOME/sf/config.toml
 (~/.config/sf/config.toml).
+
+The other forms do one action as the window does, on Linux and on WSL alike: open PATH with its default
+application, reveal it in the file manager, copy PATH (on WSL its Windows form) or TEXT to the
+clipboard. doctor shows what sf finds here and how each action works.
 ";
 
 /// How long the loop waits for a key before it looks at the engines' output again.
@@ -51,14 +60,22 @@ const FRAME: Duration = Duration::from_millis(30);
 const MESSAGES_PER_FRAME: usize = 2000;
 
 fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let tab = match args.as_slice() {
+    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    let words: Vec<Option<&str>> = args.iter().map(|a| a.to_str()).collect();
+    let tab = match words.as_slice() {
         [] => Tab::Files,
-        [a] if a == "-h" || a == "--help" => {
+        [Some("-h" | "--help")] => {
             print!("{USAGE}");
             return ExitCode::SUCCESS;
         }
-        [a] => match Tab::from_name(a) {
+        [Some("doctor")] => return doctor(),
+        [Some(name), _] if platform::COMMANDS.contains(name) => return command(name, &args[1]),
+        [Some(name), ..] if platform::COMMANDS.contains(name) => {
+            let what = if *name == "copy-text" { "TEXT" } else { "PATH" };
+            eprint!("sf {name}: one {what} expected\n{USAGE}");
+            return ExitCode::from(2);
+        }
+        [Some(a)] => match Tab::from_name(a) {
             Some(tab) => tab,
             None => {
                 eprint!("sf: unknown tab: {a}\n{USAGE}");
@@ -77,6 +94,38 @@ fn main() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+
+/// `sf open|reveal|copy-path PATH`, `sf copy-text TEXT`: a note or the error on stderr; exit 1 on error.
+fn command(name: &str, value: &OsStr) -> ExitCode {
+    let result = std::env::current_dir()
+        .map_err(|e| format!("reading the current folder: {e}"))
+        .and_then(|cwd| platform::command(name, value, &Env::detect().platform, &cwd));
+    match result {
+        Ok(note) => {
+            if let Some(note) = note {
+                eprintln!("sf {name}: {note}");
+            }
+            ExitCode::SUCCESS
+        }
+        Err(e) => {
+            eprintln!("sf {name}: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn doctor() -> ExitCode {
+    let env = Env::detect();
+    let engines = engines::discover(&env.platform.path);
+    let run = |program: &Path, args: &[&str]| {
+        doctor::run_program(&env.platform.path, program, args, Duration::from_secs(3))
+    };
+    print!(
+        "{}",
+        doctor::report(&env, &engines, config::default_path().as_deref(), &run)
+    );
+    ExitCode::SUCCESS
 }
 
 fn run(tab: Tab) -> anyhow::Result<()> {
@@ -306,7 +355,7 @@ impl TmuxWindow {
     }
 
     fn rename(env: &Env) -> Option<TmuxWindow> {
-        if !env.tmux {
+        if !env.platform.tmux {
             return None;
         }
         let mut w = TmuxWindow {

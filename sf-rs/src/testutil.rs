@@ -1,6 +1,5 @@
 //! Helpers shared by the unit tests.
 
-use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -21,10 +20,65 @@ pub fn temp_dir(name: &str) -> PathBuf {
     dir
 }
 
-/// Writes an executable script (mode 755) at `path`.
+/// Writes an executable script (mode 755) at `path`. A child process writes it: were the file open for
+/// writing in this process while another test thread forks, the fork would hold that descriptor until
+/// its exec, and running the script meanwhile fails with "Text file busy" (ETXTBSY).
 pub fn executable(path: &Path, script: &str) {
-    std::fs::write(path, script).unwrap();
-    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let status = std::process::Command::new("/bin/sh")
+        .args([
+            "-c",
+            "printf '%s' \"$1\" > \"$2\" && chmod 755 \"$2\"",
+            "sh",
+            script,
+        ])
+        .arg(path)
+        .status()
+        .unwrap();
+    assert!(status.success(), "writing {}", path.display());
+}
+
+/// A stub program NAME in `dir`. Every call appends its arguments (each ended by NUL, the call by a
+/// newline) to NAME.args and the values of `$SF_VALUE` and `$WSLENV` the same way to NAME.env, and
+/// writes its stdin to NAME.stdin. It prints NAME.out to stdout and NAME.err to stderr and exits
+/// with the code in NAME.exit, each when that file is there.
+pub fn stub(dir: &Path, name: &str) {
+    let script = format!(
+        "#!/bin/sh\nd='{d}'\nfor a in \"$@\"; do printf '%s\\0' \"$a\" >> \"$d/{name}.args\"; done\n\
+         printf '\\n' >> \"$d/{name}.args\"\n\
+         printf 'SF_VALUE=%s\\0WSLENV=%s\\0\\n' \"$SF_VALUE\" \"$WSLENV\" >> \"$d/{name}.env\"\n\
+         /bin/cat > \"$d/{name}.stdin\"\n\
+         [ -f \"$d/{name}.out\" ] && /bin/cat \"$d/{name}.out\"\n\
+         [ -f \"$d/{name}.err\" ] && /bin/cat \"$d/{name}.err\" >&2\n\
+         [ -f \"$d/{name}.exit\" ] && exit \"$(/bin/cat \"$d/{name}.exit\")\"\nexit 0\n",
+        d = dir.display()
+    );
+    executable(&dir.join(name), &script);
+}
+
+/// The argument lists of every call of the stub NAME in `dir`.
+pub fn calls(dir: &Path, name: &str) -> Vec<Vec<String>> {
+    records(&dir.join(format!("{name}.args")))
+}
+
+/// `SF_VALUE=…` and `WSLENV=…` as the stub NAME saw them, per call.
+pub fn envs(dir: &Path, name: &str) -> Vec<Vec<String>> {
+    records(&dir.join(format!("{name}.env")))
+}
+
+fn records(file: &Path) -> Vec<Vec<String>> {
+    let Ok(log) = std::fs::read(file) else {
+        return Vec::new();
+    };
+    let calls = log.strip_suffix(b"\n").unwrap_or(&log);
+    calls
+        .split(|&b| b == b'\n')
+        .map(|l| {
+            l.split(|&b| b == 0)
+                .filter(|a| !a.is_empty())
+                .map(|a| String::from_utf8_lossy(a).into_owned())
+                .collect()
+        })
+        .collect()
 }
 
 /// The test binary's allocator: the system's, counting the live heap bytes of each thread, so a test

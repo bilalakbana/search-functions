@@ -41,7 +41,7 @@ pub fn discover(path_var: &OsStr) -> Engines {
 }
 
 /// The first of `names` found as an executable file in `path_var`, names in order of preference.
-fn find(path_var: &OsStr, names: &[&str]) -> Option<PathBuf> {
+pub fn find(path_var: &OsStr, names: &[&str]) -> Option<PathBuf> {
     let dirs: Vec<PathBuf> = std::env::split_paths(path_var)
         .filter(|d| !d.as_os_str().is_empty())
         .collect();

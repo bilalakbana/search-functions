@@ -2,18 +2,13 @@
 //! come after `--`; the Search pattern reaches nvim through the environment, never as an Ex command.
 
 use std::ffi::OsString;
-use std::io::Write;
-use std::os::unix::ffi::OsStrExt;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
 
 use crate::commands::{Cmd, delta_args, is_hash};
 use crate::engines::Engines;
 use crate::items::Item;
 use crate::model::Tab;
+use crate::platform::{Clipboard, Platform, launch};
 
 /// One action on the selected item.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -52,13 +47,10 @@ pub enum Outcome {
 /// Where sf runs.
 #[derive(Clone, Debug)]
 pub struct Env {
-    /// WSL with `windows_action` from the WSL edition of the search functions.
-    pub wsl: bool,
-    pub tmux: bool,
+    /// Linux or WSL, the session, tmux, `$PATH`.
+    pub platform: Platform,
     /// The sub-functions folder (`$SF_SUBFUNCTIONS`, else `~/.SearchFunctions/sub-functions`).
     pub sub: PathBuf,
-    /// The `$PATH` the programs are looked up in.
-    pub path: OsString,
 }
 
 impl Env {
@@ -68,26 +60,15 @@ impl Env {
             .map(PathBuf::from)
             .or_else(|| dirs::home_dir().map(|h| h.join(".SearchFunctions/sub-functions")))
             .unwrap_or_else(|| PathBuf::from("sub-functions"));
-        let windows_action = sub
-            .join("windows_action")
-            .metadata()
-            .is_ok_and(|m| m.is_file());
-        let microsoft = std::fs::read_to_string("/proc/version")
-            .is_ok_and(|v| v.to_ascii_lowercase().contains("microsoft"));
         Env {
-            wsl: windows_action && microsoft,
-            tmux: std::env::var_os("TMUX").is_some_and(|t| !t.is_empty()),
+            platform: Platform::detect(),
             sub,
-            path: std::env::var_os("PATH").unwrap_or_default(),
         }
     }
 }
 
-const COPIED: &str = "Copied to the clipboard";
 /// `sh -c CD_AND_EXEC sf DIR PROGRAM ARGS...`: runs PROGRAM in DIR; the script itself holds no data.
 const CD_AND_EXEC: &str = "cd -- \"$1\" && shift && exec \"$@\"";
-/// How long a launcher (xdg-open, wl-copy, ...) may take before sf stops waiting for its exit status.
-const LAUNCH_WAIT: Duration = Duration::from_secs(3);
 
 pub fn perform(
     kind: ActionKind,
@@ -101,149 +82,38 @@ pub fn perform(
     if !item.selectable {
         return Outcome::Failed("Nothing selected".into());
     }
+    let platform = &env.platform;
     if tab == Tab::Git {
         let Some(hash) = item.key.to_str().filter(|h| is_hash(h)) else {
             return Outcome::Failed("Not a commit".into());
         };
         return match kind {
             ActionKind::ShowCommit | ActionKind::Open => show_commit(hash, e),
-            ActionKind::Copy if env.wsl => {
-                done(windows(env, "copy-text", hash.as_ref()), Some(COPIED))
-            }
-            ActionKind::Copy => done(
-                launch(env, "wl-copy".as_ref(), &[], Some(hash.as_bytes()), false),
-                Some(COPIED),
-            ),
+            ActionKind::Copy => copied(platform.copy_text(hash.as_bytes())),
             _ => Outcome::Failed("Not available in Git".into()),
         };
     }
     let path = root.join(&item.key);
     match kind {
-        ActionKind::Open if env.wsl => done(windows(env, "open", path.as_os_str()), None),
-        ActionKind::Open => done(
-            launch(env, "xdg-open".as_ref(), &[path.as_os_str()], None, false),
-            None,
-        ),
-        ActionKind::Reveal if env.wsl => done(windows(env, "reveal", path.as_os_str()), None),
-        ActionKind::Reveal => {
-            let fm = env.sub.join("open_in_file_manager");
-            done(
-                launch(env, fm.as_os_str(), &[path.as_os_str()], None, true),
-                None,
-            )
-        }
+        ActionKind::Open => done(platform.open(&path).map(|()| None)),
+        ActionKind::Reveal => done(platform.reveal(&path)),
         // Linux: the path as listed (relative to the root); WSL: its Windows form
-        ActionKind::Copy if env.wsl => {
-            done(windows(env, "copy-path", path.as_os_str()), Some(COPIED))
-        }
-        ActionKind::Copy => done(
-            launch(
-                env,
-                "wl-copy".as_ref(),
-                &[],
-                Some(item.key.as_bytes()),
-                false,
-            ),
-            Some(COPIED),
-        ),
+        ActionKind::Copy => copied(platform.copy_path(item.key.as_os_str(), &path)),
         ActionKind::ShowCommit => Outcome::Failed("Not available here".into()),
         _ => terminal(kind, tab, item, query, root, &path, env),
     }
 }
 
-fn done(result: Result<(), String>, message: Option<&str>) -> Outcome {
+fn done(result: Result<Option<String>, String>) -> Outcome {
     match result {
-        Ok(()) => Outcome::Done(message.map(String::from)),
+        Ok(note) => Outcome::Done(note),
         Err(e) => Outcome::Failed(e),
     }
 }
 
-fn windows(env: &Env, action: &str, value: &std::ffi::OsStr) -> Result<(), String> {
-    let program = env.sub.join("windows_action");
-    launch(
-        env,
-        program.as_os_str(),
-        &[action.as_ref(), value],
-        None,
-        true,
-    )
-}
-
-/// Runs a launcher with no terminal: stdin from `input` (or nothing), stdout to /dev/null, stderr kept
-/// only when `keep_stderr` (a program that leaves a daemon behind, as xdg-open's application or
-/// wl-copy's clipboard server, would otherwise hold the pipe open). Its exit status is checked.
-fn launch(
-    env: &Env,
-    program: &std::ffi::OsStr,
-    args: &[&std::ffi::OsStr],
-    input: Option<&[u8]>,
-    keep_stderr: bool,
-) -> Result<(), String> {
-    let name = Path::new(program)
-        .file_name()
-        .unwrap_or(program)
-        .to_string_lossy()
-        .into_owned();
-    let mut child = Command::new(program)
-        .args(args)
-        .env("PATH", &env.path)
-        .stdin(if input.is_some() {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .stdout(Stdio::null())
-        .stderr(if keep_stderr {
-            Stdio::piped()
-        } else {
-            Stdio::null()
-        })
-        .process_group(0)
-        .spawn()
-        .map_err(|e| format!("{name}: {e}"))?;
-    if let Some(bytes) = input {
-        let mut stdin = child.stdin.take().expect("stdin is piped");
-        stdin
-            .write_all(bytes)
-            .map_err(|e| format!("{name}: writing to it: {e}"))?;
-    }
-    let mut stderr = child.stderr.take();
-    let started = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if started.elapsed() < LAUNCH_WAIT => thread::sleep(Duration::from_millis(10)),
-            Ok(None) => {
-                thread::spawn(move || child.wait()); // still running: reap it later, assume it works
-                return Ok(());
-            }
-            Err(e) => return Err(format!("{name}: {e}")),
-        }
-    };
-    if status.success() {
-        return Ok(());
-    }
-    let mut message = String::new();
-    if let Some(err) = stderr.as_mut() {
-        let _ = std::io::Read::read_to_string(err, &mut message);
-    }
-    let first = message
-        .lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty())
-        .unwrap_or_default()
-        .to_string();
-    let code = status
-        .code()
-        .map_or_else(|| "a signal".to_string(), |c| format!("exit {c}"));
-    let what = if first.is_empty() {
-        args.last()
-            .map(|a| a.to_string_lossy().into_owned())
-            .unwrap_or_default()
-    } else {
-        first
-    };
-    Err(format!("{name} failed ({code}): {what}"))
+/// What the status says after copying: how, when it was no clipboard program.
+fn copied(result: Result<Clipboard, String>) -> Outcome {
+    done(result.map(|how| Some(how.note().unwrap_or("Copied to the clipboard").to_string())))
 }
 
 fn show_commit(hash: &str, e: &Engines) -> Outcome {
@@ -287,7 +157,7 @@ fn terminal(
         ActionKind::Log => ("logs", "git", sub("show_logs")),
         _ => return Outcome::Failed(format!("{kind:?} needs no terminal")),
     };
-    if !env.tmux {
+    if !env.platform.tmux {
         return Outcome::Foreground(vec![cmd]);
     }
     // More than one argument after the options: tmux runs the program itself, no shell. The folder
@@ -304,16 +174,12 @@ fn terminal(
     args.extend(cmd.args);
     let args: Vec<&std::ffi::OsStr> = args.iter().map(OsString::as_os_str).collect();
     let tmux = std::ffi::OsStr::new("tmux");
-    let result = launch(env, tmux, &args, None, true).and_then(|()| {
-        launch(
-            env,
-            tmux,
-            &["select-pane".as_ref(), "-T".as_ref(), title.as_ref()],
-            None,
-            true,
-        )
+    let path = &env.platform.path;
+    let result = launch(path, tmux, &args, None, &[], true).and_then(|()| {
+        let select = ["select-pane", "-T", title].map(std::ffi::OsStr::new);
+        launch(path, tmux, &select, None, &[], true)
     });
-    done(result, None)
+    done(result.map(|()| None))
 }
 
 /// nvim at the matching line, or searching for the Search pattern. The pattern goes in $SF_QUERY and
@@ -350,37 +216,10 @@ mod tests {
     use super::*;
     use crate::commands::ParseKind;
     use crate::items::parse;
-    use crate::testutil::{executable, temp_dir};
-    use std::os::unix::ffi::OsStringExt;
-
-    /// A stub that writes its arguments (NUL-terminated) to NAME.args, appending, and its stdin to
-    /// NAME.stdin; it exits with the code in the file NAME.exit, if there is one.
-    fn stub(dir: &Path, name: &str) {
-        let script = format!(
-            "#!/bin/sh\nd='{d}'\nfor a in \"$@\"; do printf '%s\\0' \"$a\" >> \"$d/{name}.args\"; done\n\
-             printf '\\n' >> \"$d/{name}.args\"\ncat > \"$d/{name}.stdin\"\n\
-             [ -f \"$d/{name}.exit\" ] && exit \"$(cat \"$d/{name}.exit\")\"\nexit 0\n",
-            d = dir.display()
-        );
-        executable(&dir.join(name), &script);
-    }
-
-    /// The argument lists of every call of the stub NAME.
-    fn calls(dir: &Path, name: &str) -> Vec<Vec<String>> {
-        let Ok(log) = std::fs::read(dir.join(format!("{name}.args"))) else {
-            return Vec::new();
-        };
-        let calls = log.strip_suffix(b"\n").unwrap_or(&log);
-        calls
-            .split(|&b| b == b'\n')
-            .map(|l| {
-                l.split(|&b| b == 0)
-                    .filter(|a| !a.is_empty())
-                    .map(|a| String::from_utf8_lossy(a).into_owned())
-                    .collect()
-            })
-            .collect()
-    }
+    use crate::platform::Platform;
+    use crate::testutil::{calls, envs, stub, temp_dir};
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
     struct Fixture {
         bin: PathBuf,
@@ -394,12 +233,19 @@ mod tests {
         for d in [&bin, &sub, &root] {
             std::fs::create_dir_all(d).unwrap();
         }
-        for p in ["xdg-open", "wl-copy", "tmux", "nvim"] {
+        for p in [
+            "xdg-open",
+            "wl-copy",
+            "dbus-send",
+            "tmux",
+            "nvim",
+            "powershell.exe",
+            "wslpath",
+        ] {
             stub(&bin, p);
         }
+        std::fs::write(bin.join("wslpath.out"), "C:\\w\\a.txt\n").unwrap();
         for p in [
-            "open_in_file_manager",
-            "windows_action",
             "search_in_single_file",
             "show_diffs",
             "git_diff",
@@ -414,16 +260,26 @@ mod tests {
             PathBuf::from("/bin"),
         ])
         .unwrap();
+        let platform = Platform {
+            wsl: wsl.then(|| "Ubuntu".to_string()),
+            wayland: Some("wayland-0".into()),
+            tmux,
+            path,
+            ..Platform::default()
+        };
         Fixture {
             bin,
-            env: Env {
-                wsl,
-                tmux,
-                sub,
-                path,
-            },
+            env: Env { platform, sub },
             root,
         }
+    }
+
+    /// The item for `key`, which is created as a file under the fixture's root.
+    fn existing(f: &Fixture, key: &[u8]) -> Item {
+        let path = f.root.join(OsStr::from_bytes(key));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "").unwrap();
+        parse(ParseKind::Files, key, 0).unwrap()
     }
 
     fn engines() -> Engines {
@@ -448,7 +304,13 @@ mod tests {
         let f = fixture("act_open", false, false);
         let key = "-a b&c'd $(x).txt";
         assert_eq!(
-            act(&f, ActionKind::Open, Tab::Files, &file(key), ""),
+            act(
+                &f,
+                ActionKind::Open,
+                Tab::Files,
+                &existing(&f, key.as_bytes()),
+                ""
+            ),
             Outcome::Done(None)
         );
         assert_eq!(
@@ -460,7 +322,7 @@ mod tests {
     #[test]
     fn open_keeps_non_utf8_bytes() {
         let f = fixture("act_open_bytes", false, false);
-        let item = parse(ParseKind::Files, b"caf\xe9.txt", 0).unwrap();
+        let item = existing(&f, b"caf\xe9.txt");
         act(&f, ActionKind::Open, Tab::Files, &item, "");
         let log = std::fs::read(f.bin.join("xdg-open.args")).unwrap();
         let mut want = f
@@ -476,7 +338,8 @@ mod tests {
     fn xdg_open_failure_is_reported() {
         let f = fixture("act_open_fail", false, false);
         std::fs::write(f.bin.join("xdg-open.exit"), "4").unwrap();
-        let Outcome::Failed(msg) = act(&f, ActionKind::Open, Tab::Files, &file("a"), "") else {
+        let item = existing(&f, b"a");
+        let Outcome::Failed(msg) = act(&f, ActionKind::Open, Tab::Files, &item, "") else {
             panic!()
         };
         assert!(msg.starts_with("xdg-open failed (exit 4)"), "{msg}");
@@ -485,11 +348,22 @@ mod tests {
     #[test]
     fn missing_program_is_reported() {
         let mut f = fixture("act_missing", false, false);
-        f.env.path = f.root.clone().into_os_string();
-        let Outcome::Failed(msg) = act(&f, ActionKind::Copy, Tab::Files, &file("a"), "") else {
+        f.env.platform.path = f.root.clone().into_os_string();
+        let item = existing(&f, b"a");
+        let Outcome::Failed(msg) = act(&f, ActionKind::Open, Tab::Files, &item, "") else {
             panic!()
         };
-        assert!(msg.starts_with("wl-copy: "), "{msg}");
+        assert!(msg.starts_with("xdg-open is not installed"), "{msg}");
+    }
+
+    #[test]
+    fn missing_file_is_reported() {
+        let f = fixture("act_gone", false, false);
+        let Outcome::Failed(msg) = act(&f, ActionKind::Open, Tab::Files, &file("gone"), "") else {
+            panic!()
+        };
+        assert!(msg.starts_with("no such file or folder"), "{msg}");
+        assert!(calls(&f.bin, "xdg-open").is_empty());
     }
 
     #[test]
@@ -505,40 +379,72 @@ mod tests {
     }
 
     #[test]
-    fn reveal_runs_open_in_file_manager() {
+    fn reveal_asks_the_file_manager_over_dbus() {
         let f = fixture("act_reveal", false, false);
+        std::fs::create_dir(f.root.join("src")).unwrap();
+        let src = parse(ParseKind::Files, b"src", 0).unwrap();
         assert_eq!(
-            act(&f, ActionKind::Reveal, Tab::Folders, &file("src"), ""),
+            act(&f, ActionKind::Reveal, Tab::Folders, &src, ""),
             Outcome::Done(None)
         );
-        assert_eq!(
-            calls(&f.env.sub, "open_in_file_manager"),
-            [[f.root.join("src").to_str().unwrap()]]
+        let calls = calls(&f.bin, "dbus-send");
+        assert_eq!(calls.len(), 1);
+        assert!(
+            calls[0].last().unwrap() == "string:"
+                && calls[0].iter().any(|a| a.ends_with("/root%20dir/src")),
+            "{calls:?}"
         );
     }
 
     #[test]
-    fn wsl_uses_windows_action() {
+    fn reveal_fallback_says_so() {
+        let f = fixture("act_reveal_fallback", false, false);
+        std::fs::write(f.bin.join("dbus-send.exit"), "1").unwrap();
+        let item = existing(&f, b"a.txt");
+        let Outcome::Done(Some(note)) = act(&f, ActionKind::Reveal, Tab::Files, &item, "") else {
+            panic!()
+        };
+        assert!(note.starts_with("Opened the folder"), "{note}");
+        assert_eq!(calls(&f.bin, "xdg-open"), [[f.root.to_str().unwrap()]]);
+    }
+
+    #[test]
+    fn wsl_goes_through_powershell() {
         let f = fixture("act_wsl", true, false);
+        let item = existing(&f, b"a.txt");
         let abs = f.root.join("a.txt").to_str().unwrap().to_string();
-        act(&f, ActionKind::Open, Tab::Files, &file("a.txt"), "");
-        act(&f, ActionKind::Reveal, Tab::Files, &file("a.txt"), "");
+        act(&f, ActionKind::Open, Tab::Files, &item, "");
+        act(&f, ActionKind::Reveal, Tab::Files, &item, "");
         assert_eq!(
-            act(&f, ActionKind::Copy, Tab::Files, &file("a.txt"), ""),
+            act(&f, ActionKind::Copy, Tab::Files, &item, ""),
             Outcome::Done(Some("Copied to the clipboard".into()))
         );
         let hash = "abcdef1";
         act(&f, ActionKind::Copy, Tab::Git, &git_item(hash), "");
         assert_eq!(
-            calls(&f.env.sub, "windows_action"),
-            [
-                vec!["open".to_string(), abs.clone()],
-                vec!["reveal".to_string(), abs.clone()],
-                vec!["copy-path".to_string(), abs],
-                vec!["copy-text".to_string(), hash.to_string()]
-            ]
+            calls(&f.bin, "wslpath"),
+            vec![vec!["-w".to_string(), abs]; 3]
         );
+        let values: Vec<String> = envs(&f.bin, "powershell.exe")
+            .into_iter()
+            .map(|e| e[0].clone())
+            .collect();
+        let win = "SF_VALUE=C:\\w\\a.txt";
+        assert_eq!(values, [win, win, win, "SF_VALUE=abcdef1"]);
         assert!(calls(&f.bin, "xdg-open").is_empty() && calls(&f.bin, "wl-copy").is_empty());
+    }
+
+    #[test]
+    fn copy_through_tmux_says_how() {
+        let mut f = fixture("act_copy_tmux", false, true);
+        f.env.platform.wayland = None;
+        let out = act(&f, ActionKind::Copy, Tab::Files, &file("a b"), "");
+        assert_eq!(
+            out,
+            Outcome::Done(Some("Copied through tmux (OSC 52)".into()))
+        );
+        assert_eq!(calls(&f.bin, "tmux"), [["load-buffer", "-w", "-"]]);
+        assert_eq!(std::fs::read(f.bin.join("tmux.stdin")).unwrap(), b"a b");
     }
 
     #[test]
@@ -757,14 +663,5 @@ mod tests {
         let f = fixture("act_git_other", false, false);
         let out = act(&f, ActionKind::Editor, Tab::Git, &git_item("abcdef1"), "");
         assert_eq!(out, Outcome::Failed("Not available in Git".into()));
-    }
-
-    #[test]
-    fn detect_reads_sub_functions_override() {
-        // Env::detect reads the process environment; only the override is checked here.
-        let env = Env::detect();
-        assert!(
-            env.sub.ends_with("sub-functions") || std::env::var_os("SF_SUBFUNCTIONS").is_some()
-        );
     }
 }
