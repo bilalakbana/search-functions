@@ -133,13 +133,9 @@ fn produce(plan: PreviewPlan, shared: &Shared) -> (Text<'static>, usize) {
 /// `File  path`, with a pattern `Pattern  p` and `Matches  n`, then an empty line.
 fn header_lines(header: Header, text: bool, shared: &Shared) -> Vec<Line<'static>> {
     let label = |l: &str| Span::styled(format!("{l:<9}"), Style::new().fg(theme::DIM));
-    let cut = header.file.rfind('/').map_or(0, |i| i + 1);
-    let (dir, name) = header.file.split_at(cut);
-    let mut lines = vec![Line::from(vec![
-        label("File"),
-        Span::styled(dir.to_string(), Style::new().fg(theme::DIM)),
-        Span::styled(name.to_string(), Style::new().fg(theme::TEXT)),
-    ])];
+    let mut file = vec![label("File")];
+    file.extend(crate::items::path_spans(&header.file));
+    let mut lines = vec![Line::from(file)];
     if let Some(m) = header.matches {
         let count = run(&[if text { m.text } else { m.binary }], shared)
             .ok()
@@ -564,6 +560,18 @@ mod tests {
         );
         assert_eq!(m.header_lines, 4);
         assert_eq!(m.text.lines[1].spans[1].style.fg, Some(theme::RED));
+        let file: Vec<_> = m.text.lines[0].spans[1..]
+            .iter()
+            .map(|s| (s.content.to_string(), s.style.fg))
+            .collect();
+        assert_eq!(
+            file,
+            [
+                ("src".to_string(), Some(theme::BLUE)),
+                ("/".to_string(), Some(theme::YELLOW)),
+                ("h.txt".to_string(), Some(theme::GREEN)),
+            ]
+        );
         assert_eq!(m.text.lines[2].spans[1].style.fg, Some(theme::PEACH));
     }
 

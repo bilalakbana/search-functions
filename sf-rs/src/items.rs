@@ -7,7 +7,7 @@ use std::ffi::OsString;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
 use ansi_to_tui::IntoText;
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 
 use crate::commands::{MATCH_END, MATCH_START, ParseKind, SEP, is_hash};
@@ -26,9 +26,9 @@ pub struct Item {
 
 #[derive(Clone, Debug, PartialEq)]
 enum Look {
-    /// The key as a path: folders dim, slashes faint, the name in `name`. `lower`: the shown text in
-    /// lower case, for the filter.
-    Path { name: Color, lower: Box<str> },
+    /// The key as a path (coloured by `path_spans`). `lower`: the shown text in lower case, for the
+    /// filter.
+    Path { lower: Box<str> },
     /// A matching line: the key (and an archive member) blue, the line number dim, then `text`,
     /// printable already, its matches between MATCH_START and MATCH_END; `cut` when it was longer.
     /// Not filtered (in Search the pattern is the filter), so no lower-case copy.
@@ -54,7 +54,7 @@ const ARCHIVES: [&str; 23] = [
 ];
 
 impl Item {
-    fn path(key: &[u8], name: Color) -> Item {
+    fn path(key: &[u8]) -> Item {
         let lower = printable(&String::from_utf8_lossy(key))
             .to_lowercase()
             .into_boxed_str();
@@ -62,7 +62,7 @@ impl Item {
             key: OsString::from_vec(key.to_vec()),
             line: None,
             selectable: true,
-            look: Look::Path { name, lower },
+            look: Look::Path { lower },
         }
     }
 
@@ -88,23 +88,22 @@ impl Item {
     /// The coloured line; control characters are shown as U+FFFD.
     pub fn display(&self) -> Line<'static> {
         match &self.look {
-            Look::Path { name, .. } => path_line(
-                &printable(&String::from_utf8_lossy(self.key.as_bytes())),
-                *name,
-            ),
+            Look::Path { .. } => Line::from(path_spans(&printable(&String::from_utf8_lossy(
+                self.key.as_bytes(),
+            )))),
             Look::Match { member, text, cut } => {
                 let faint = Style::new().fg(theme::FAINT);
                 let mut path = printable(&String::from_utf8_lossy(self.key.as_bytes()));
                 path.push_str(member);
-                let mut spans = vec![
-                    Span::styled(path, Style::new().fg(theme::BLUE)),
+                let mut spans = path_spans(&path);
+                spans.extend([
                     Span::styled(":", faint),
                     Span::styled(
                         self.line.unwrap_or(0).to_string(),
                         Style::new().fg(theme::DIM),
                     ),
                     Span::styled(":", faint),
-                ];
+                ]);
                 spans.extend(match_spans(text));
                 if *cut {
                     spans.push(Span::styled("…", Style::new().fg(theme::DIM)));
@@ -146,7 +145,7 @@ pub fn error(text: &str) -> Item {
 /// The `..` row at the top of Folders.
 pub fn parent() -> Item {
     let line = Line::from(vec![
-        Span::styled("..", Style::new().fg(theme::BLUE)),
+        Span::styled("..", Style::new().fg(theme::GREEN)),
         Span::styled(
             "  parent folder",
             Style::new().fg(theme::DIM).add_modifier(Modifier::ITALIC),
@@ -164,36 +163,38 @@ pub fn parse(kind: ParseKind, raw: &[u8], git_number: u32) -> Option<Item> {
             if kind == ParseKind::Folders {
                 path = path.strip_suffix(b"/").unwrap_or(path);
             }
-            let name = if kind == ParseKind::Folders {
-                theme::BLUE
-            } else {
-                theme::TEXT
-            };
-            (!path.is_empty()).then(|| Item::path(path, name))
+            (!path.is_empty()).then(|| Item::path(path))
         }
         ParseKind::SearchFiles { archives } => {
             let path = raw.strip_prefix(b"./").unwrap_or(raw);
             let key = if archives { archive_of(path) } else { path };
-            (!key.is_empty()).then(|| Item::path(key, theme::TEXT))
+            (!key.is_empty()).then(|| Item::path(key))
         }
         ParseKind::SearchLines => search_line(raw),
         ParseKind::Git => Some(git_line(raw, git_number)),
     }
 }
 
-/// `dir/dir/name`: folders dim, slashes faint, the name in `name_color`.
-fn path_line(text: &str, name_color: Color) -> Line<'static> {
+/// A path as ugrep-fzf colours it: folders blue, slashes yellow, the name green.
+pub fn path_spans(text: &str) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     let mut parts = text.split('/').peekable();
+    let mut first = true;
     while let Some(part) = parts.next() {
-        if parts.peek().is_some() {
-            spans.push(Span::styled(part.to_string(), Style::new().fg(theme::DIM)));
-            spans.push(Span::styled("/", Style::new().fg(theme::FAINT)));
-        } else {
-            spans.push(Span::styled(part.to_string(), Style::new().fg(name_color)));
+        if !first {
+            spans.push(Span::styled("/", Style::new().fg(theme::YELLOW)));
+        }
+        first = false;
+        if !part.is_empty() {
+            let colour = if parts.peek().is_some() {
+                theme::BLUE
+            } else {
+                theme::GREEN
+            };
+            spans.push(Span::styled(part.to_string(), Style::new().fg(colour)));
         }
     }
-    Line::from(spans)
+    spans
 }
 
 /// `a.zip{member}` → `a.zip`, for the archive types in ARCHIVES; anything else unchanged.
@@ -371,18 +372,44 @@ mod tests {
         parse(ParseKind::Files, raw, 0).unwrap()
     }
 
+    /// (text, colour) of every span
+    fn colours(line: &Line) -> Vec<(String, Option<ratatui::style::Color>)> {
+        line.spans
+            .iter()
+            .map(|s| (s.content.to_string(), s.style.fg))
+            .collect()
+    }
+
     #[test]
-    fn file_display_dims_folder_part() {
+    fn paths_are_coloured_as_ugrep_fzf_does() {
+        // folders blue, slashes yellow, the name green
         let it = files(b"./src/deep dir/a b&c.txt");
         assert_eq!(it.key, "src/deep dir/a b&c.txt");
-        assert_eq!(text_of(&it.display()), "src/deep dir/a b&c.txt");
-        let shown = it.display();
-        let last = shown.spans.last().unwrap();
-        assert_eq!(last.content, "a b&c.txt");
-        assert_eq!(last.style.fg, Some(theme::TEXT));
-        assert_eq!(it.display().spans[0].content, "src");
-        assert_eq!(it.display().spans[0].style.fg, Some(theme::DIM));
+        let (b, y, g) = (Some(theme::BLUE), Some(theme::YELLOW), Some(theme::GREEN));
+        let want = [
+            ("src", b),
+            ("/", y),
+            ("deep dir", b),
+            ("/", y),
+            ("a b&c.txt", g),
+        ];
+        assert_eq!(
+            colours(&it.display()),
+            want.map(|(t, c)| (t.to_string(), c))
+        );
         assert!(it.selectable);
+        assert_eq!(
+            colours(&files(b"README.md").display()),
+            [("README.md".to_string(), g)]
+        );
+    }
+
+    #[test]
+    fn path_spans_for_an_absolute_path() {
+        let (b, y, g) = (Some(theme::BLUE), Some(theme::YELLOW), Some(theme::GREEN));
+        let line = Line::from(path_spans("/home/x"));
+        let want = [("/", y), ("home", b), ("/", y), ("x", g)];
+        assert_eq!(colours(&line), want.map(|(t, c)| (t.to_string(), c)));
     }
 
     #[test]
@@ -408,13 +435,13 @@ mod tests {
     }
 
     #[test]
-    fn folder_names_are_blue_without_trailing_slash() {
+    fn folders_without_trailing_slash_and_their_name_green() {
         let it = parse(ParseKind::Folders, b"./src/deep dir/", 0).unwrap();
         assert_eq!(it.key, "src/deep dir");
         assert_eq!(text_of(&it.display()), "src/deep dir");
         assert_eq!(
             it.display().spans.last().unwrap().style.fg,
-            Some(theme::BLUE)
+            Some(theme::GREEN)
         );
     }
 
@@ -453,7 +480,11 @@ mod tests {
             .map(|s| s.content.as_ref())
             .collect();
         assert_eq!(red, ["ee", "e"]);
-        assert_eq!(it.display().spans[0].style.fg, Some(theme::BLUE));
+        assert_eq!(
+            it.display().spans[0].style.fg,
+            Some(theme::GREEN),
+            "a.c: no folder, so the name"
+        );
     }
 
     #[test]
@@ -490,6 +521,15 @@ mod tests {
         assert_eq!(
             text_of(&it.display()),
             "docs/arch.zip{inzip.txt}:1:needle inside"
+        );
+        let shown = it.display();
+        assert_eq!(
+            colours(&shown)[..3],
+            [
+                ("docs".to_string(), Some(theme::BLUE)),
+                ("/".to_string(), Some(theme::YELLOW)),
+                ("arch.zip{inzip.txt}".to_string(), Some(theme::GREEN)),
+            ]
         );
     }
 

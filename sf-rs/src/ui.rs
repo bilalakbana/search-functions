@@ -142,7 +142,7 @@ fn bordered() -> Block<'static> {
         .border_style(style(theme::FAINT))
 }
 
-/// The root, `~` for the home folder: its folder part dim, its name bright.
+/// The root, `~` for the home folder, coloured as every path (`items::path_spans`).
 fn root_title(app: &App) -> Line<'static> {
     let mut path = app.root.display().to_string();
     if let Some(home) = dirs::home_dir() {
@@ -154,15 +154,10 @@ fn root_title(app: &App) -> Line<'static> {
             };
         }
     }
-    let path = crate::items::printable(&path);
-    let cut = path.rfind('/').map_or(0, |i| i + 1).min(path.len());
-    let (dir, name) = path.split_at(if path.len() > 1 { cut } else { 0 });
-    Line::from(vec![
-        Span::raw(" "),
-        Span::styled(dir.to_string(), style(theme::DIM)),
-        Span::styled(name.to_string(), style(theme::TEXT)),
-        Span::raw(" "),
-    ])
+    let mut spans = vec![Span::raw(" ")];
+    spans.extend(crate::items::path_spans(&crate::items::printable(&path)));
+    spans.push(Span::raw(" "));
+    Line::from(spans)
 }
 
 fn draw_preview(frame: &mut Frame, app: &App, area: Rect, status: Option<Line<'static>>) -> Rect {
@@ -755,8 +750,8 @@ mod tests {
         assert_eq!(fg_at(&buf, "src/Main.rs", 0), theme::RED, "s of src");
         assert_eq!(
             fg_at(&buf, "src/Main.rs", 1),
-            theme::DIM,
-            "r of src is folder colour"
+            theme::BLUE,
+            "r of src keeps the folder colour"
         );
         assert_eq!(fg_at(&buf, "src/Main.rs", 10), theme::RED, "s of .rs");
         let (x, y) = find(&buf, "src/Main.rs").unwrap();
@@ -809,8 +804,11 @@ mod tests {
         a.root = "/r/project".into();
         a.set_status("Copied to the clipboard", false, now);
         let buf = render(&mut a, 80, 24);
-        let (_, y) = find(&buf, "/r/project").unwrap();
+        let (x, y) = find(&buf, "/r/project").unwrap();
         assert_eq!(y, 1);
+        assert_eq!(buf[(x, y)].fg, theme::YELLOW, "the slashes yellow");
+        assert_eq!(buf[(x + 1, y)].fg, theme::BLUE, "the folders blue");
+        assert_eq!(buf[(x + 3, y)].fg, theme::GREEN, "the name green");
         let (x, y) = find(&buf, "Copied to the clipboard").unwrap();
         assert_eq!(buf[(x, y)].fg, theme::GREEN);
         assert_eq!(y, a.layout.preview.y + a.layout.preview.height);

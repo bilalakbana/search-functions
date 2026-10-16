@@ -64,8 +64,9 @@ fast tool he can ship and use on the Linux PC and on WSL.
 ```
 
 - The current tab is a mauve block (as the tmux session name); the others dim text. ⚙ Config at the far right.
-- The border of the preview carries the current folder; the selected list row a darker band, its name bright,
-  its folder part dim. In Matching lines: path blue, line number dim, text bright, the match red.
+- The border of the preview carries the current folder; the selected list row a darker band. Every path (rows,
+  the border, the preview's `File`) is coloured as ugrep-fzf does: folders blue, slashes yellow, the name green
+  (Bilal, 2026-10-17). In Matching lines: the path so, line number dim, text bright, the match red.
 - The input line: tab name, the query; while empty a dim explanation of the tab ("type a pattern · lists the
   files that contain it"); on the right the active options and the count.
 
