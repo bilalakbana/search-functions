@@ -1,5 +1,5 @@
 //! Drawing. Top to bottom: the tab bar (the keys for the selected item in its middle), the preview,
-//! the list and the input line; the
+//! the list (filled from the bottom, as fzf) and the input line; the
 //! Config popup over them. Records where everything went in `app.layout` for the mouse.
 
 use ratatui::Frame;
@@ -203,8 +203,10 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
     } else if visible > 0 && app.selected >= app.offset + visible {
         app.offset = app.selected + 1 - visible;
     }
-    let mut y = inner.y;
+    // bottom up, as in fzf: the notes next to the input line, then the rows, the first one lowest
+    let mut y = inner.bottom();
     for note in &app.notes[..notes] {
+        y -= 1;
         let line = Line::from(
             [Span::raw(" ")]
                 .into_iter()
@@ -212,7 +214,6 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
                 .collect::<Vec<_>>(),
         );
         frame.render_widget(Paragraph::new(line), Rect::new(inner.x, y, inner.width, 1));
-        y += 1;
     }
     // the filter's words, drawn red in the rows (Search's query is a pattern for the contents)
     let words: Vec<String> = if app.tab == Tab::Content {
@@ -225,6 +226,7 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
     };
     for i in app.offset..app.offset + visible {
         let Some(item) = app.filter.get(i) else { break };
+        y -= 1;
         let rect = Rect::new(inner.x, y, inner.width, 1);
         let selected = i == app.selected;
         let marker = if selected {
@@ -247,9 +249,11 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
         }
         let line = Line::from(spans);
         frame.render_widget(Paragraph::new(line), rect);
-        y += 1;
     }
-    draw_scrollbar(frame, area, app.filter.len(), app.offset, visible);
+    // the bar counts from the top, where the last rows are
+    let total = app.filter.len();
+    let from_top = total.saturating_sub(visible).saturating_sub(app.offset);
+    draw_scrollbar(frame, area, total, from_top, visible);
     inner
 }
 
@@ -708,7 +712,7 @@ mod tests {
     fn selected_row_has_a_band() {
         let (mut a, now) = app(Tab::Files);
         feed(&mut a, &["src/a.rs", "src/b.rs"]);
-        a.handle_key(key(KeyCode::Down), now);
+        a.handle_key(key(KeyCode::Up), now);
         let buf = render(&mut a, 80, 24);
         let (x, y) = find(&buf, "src/b.rs").unwrap();
         assert_eq!(buf[(x, y)].bg, theme::SURFACE);
@@ -781,7 +785,7 @@ mod tests {
             &names.iter().map(String::as_str).collect::<Vec<_>>(),
         );
         render(&mut a, 80, 24);
-        a.handle_key(key(KeyCode::End), now);
+        a.handle_key(key(KeyCode::Home), now);
         let buf = render(&mut a, 80, 24);
         assert!(find(&buf, "f099").is_some());
         assert!(find(&buf, "f000").is_none());
@@ -795,7 +799,40 @@ mod tests {
         let buf = render(&mut a, 80, 24);
         let (_, note_y) = find(&buf, "fd: boom").unwrap();
         let (_, row_y) = find(&buf, "a.txt").unwrap();
-        assert_eq!(row_y, note_y + 1);
+        // bottom up, as in fzf: the note next to the input line, the first row above it
+        assert_eq!(note_y, a.layout.list.bottom() - 1);
+        assert_eq!(row_y, note_y - 1);
+    }
+
+    #[test]
+    fn the_first_row_is_at_the_bottom() {
+        let (mut a, _) = app(Tab::Files);
+        feed(&mut a, &["first.txt", "second.txt"]);
+        let buf = render(&mut a, 80, 24);
+        let (_, first) = find(&buf, "first.txt").unwrap();
+        let (_, second) = find(&buf, "second.txt").unwrap();
+        assert_eq!(first, a.layout.list.bottom() - 1);
+        assert_eq!(second, first - 1);
+        assert_eq!(
+            buf[(1, first)].symbol(),
+            "▌",
+            "the selection starts at the bottom"
+        );
+    }
+
+    #[test]
+    fn scrollbar_thumb_is_at_the_bottom_at_the_start() {
+        let (mut a, _) = app(Tab::Files);
+        let names: Vec<String> = (0..100).map(|i| format!("f{i:03}")).collect();
+        feed(
+            &mut a,
+            &names.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
+        render(&mut a, 80, 24);
+        let buf = render(&mut a, 80, 24);
+        let l = a.layout.list;
+        let col = column(&buf, l.right(), l.y, l.bottom());
+        assert!(col.ends_with('┃') && !col.starts_with('┃'), "{col:?}");
     }
 
     #[test]

@@ -50,7 +50,8 @@ sf content    # or: folders, git
 | Folders | every folder, `..` first | filters the names; `Enter` goes inside | Hidden folders ✓, Ignored folders ✓ |
 | Git | the commit graph, numbered | filters the commits; `Enter` shows one | All branches ✓ |
 
-Click a tab or use `Tab` / `Shift-Tab`; click **⚙ Config** (or `Ctrl-S`) for the tab's options, `Space` or a click
+As in fzf, the list fills from the bottom: the first row sits right above the input line, `Up` goes to the next
+one, `Home` to the top. Click a tab or use `Tab` / `Shift-Tab`; click **⚙ Config** (or `Ctrl-S`) for the tab's options, `Space` or a click
 toggles one. A double click is `Enter`, the wheel scrolls the list or the preview. `Alt-Up` / `Alt-Down` scroll the
 preview, `Ctrl-L` hides it, `Ctrl-R` runs the list again, `Esc` quits. The keys for the selected item are those under
 [Keyboard Shortcuts](#-keyboard-shortcuts) and are shown in the middle of the tab bar. A bar on the right of the list and

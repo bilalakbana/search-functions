@@ -67,6 +67,8 @@ fast tool he can ship and use on the Linux PC and on WSL.
 - The border of the preview carries the current folder; the selected list row a darker band. Every path (rows,
   the border, the preview's `File`) is coloured as ugrep-fzf does: folders blue, slashes yellow, the name green
   (Bilal, 2026-10-17). In Matching lines: the path so, line number dim, text bright, the match red.
+- The list fills from the bottom as in fzf's default layout (Bilal, 2026-10-17): the first row right above the
+  input line and selected; Up / PgUp / the wheel up go to later rows, Home to the top, End to the first row.
 - The input line: tab name, the query; while empty a dim explanation of the tab ("type a pattern · lists the
   files that contain it"); on the right the active options and the count.
 

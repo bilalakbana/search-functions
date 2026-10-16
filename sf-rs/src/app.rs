@@ -46,7 +46,7 @@ pub enum Effect {
 pub struct ScreenLayout {
     pub tabs: Vec<(Tab, Rect)>,
     pub config: Rect,
-    /// The rows of the list (inside its border); the notes come first.
+    /// The rows of the list (inside its border), filled from the bottom: the notes, then the rows.
     pub list: Rect,
     /// The text area of the preview (inside its border); empty when hidden.
     pub preview: Rect,
@@ -190,12 +190,13 @@ impl App {
             KeyCode::Enter => self.enter(now),
             KeyCode::Up if alt => self.scroll_preview(-preview_page),
             KeyCode::Down if alt => self.scroll_preview(preview_page),
-            KeyCode::Up => self.select(self.selected.saturating_sub(1)),
-            KeyCode::Down => self.select(self.selected + 1),
-            KeyCode::PageUp => self.select(self.selected.saturating_sub(page)),
-            KeyCode::PageDown => self.select(self.selected + page),
-            KeyCode::Home => self.select(0),
-            KeyCode::End => self.select(usize::MAX),
+            // as fzf: the first row is at the bottom, so Up goes to the next one, Home to the last
+            KeyCode::Up => self.select(self.selected + 1),
+            KeyCode::Down => self.select(self.selected.saturating_sub(1)),
+            KeyCode::PageUp => self.select(self.selected + page),
+            KeyCode::PageDown => self.select(self.selected.saturating_sub(page)),
+            KeyCode::Home => self.select(usize::MAX),
+            KeyCode::End => self.select(0),
             KeyCode::Backspace if alt => self.edit(delete_word, now),
             KeyCode::Backspace => self.edit(
                 |q| {
@@ -283,10 +284,11 @@ impl App {
                 if self.layout.preview.contains(at) {
                     self.scroll_preview(if down { WHEEL as i32 } else { -(WHEEL as i32) })
                 } else if self.layout.list.contains(at) {
+                    // the rows run upwards: the wheel up goes to later rows
                     self.select(if down {
-                        self.selected + WHEEL
-                    } else {
                         self.selected.saturating_sub(WHEEL)
+                    } else {
+                        self.selected + WHEEL
                     })
                 } else {
                     Vec::new()
@@ -301,7 +303,7 @@ impl App {
         if !self.layout.list.contains(at) {
             return None;
         }
-        let row = usize::from(at.y - self.layout.list.y);
+        let row = usize::from(self.layout.list.bottom() - 1 - at.y); // counted from the bottom
         let notes = self.notes.len().min(usize::from(self.layout.list.height));
         let i = self.offset + row.checked_sub(notes)?;
         (i < self.filter.len()).then_some(i)
@@ -638,13 +640,16 @@ pub(crate) mod tests {
     fn current_row_change_requests_a_preview() {
         let (mut a, now) = app(Tab::Files);
         feed(&mut a, &["a", "b"]);
-        assert_eq!(a.handle_key(key(KeyCode::Down), now), [Effect::Preview]);
+        // as fzf: the first row at the bottom, Up goes to the next one
+        assert_eq!(a.handle_key(key(KeyCode::Up), now), [Effect::Preview]);
         assert_eq!(current_key(&a), "b");
-        assert_eq!(a.handle_key(key(KeyCode::Down), now), []);
-        assert_eq!(a.handle_key(key(KeyCode::Home), now), [Effect::Preview]);
+        assert_eq!(a.handle_key(key(KeyCode::Up), now), []);
+        assert_eq!(a.handle_key(key(KeyCode::End), now), [Effect::Preview]);
+        assert_eq!(current_key(&a), "a", "End: the bottom row, the first");
+        a.handle_key(key(KeyCode::Home), now);
+        assert_eq!(current_key(&a), "b", "Home: the top row, the last");
+        a.handle_key(key(KeyCode::Down), now);
         assert_eq!(current_key(&a), "a");
-        a.handle_key(key(KeyCode::End), now);
-        assert_eq!(current_key(&a), "b");
     }
 
     #[test]
@@ -656,9 +661,9 @@ pub(crate) mod tests {
             &names.iter().map(String::as_str).collect::<Vec<_>>(),
         );
         a.layout.list = Rect::new(1, 10, 40, 10);
-        a.handle_key(key(KeyCode::PageDown), now);
-        assert_eq!(current_key(&a), "f10");
         a.handle_key(key(KeyCode::PageUp), now);
+        assert_eq!(current_key(&a), "f10");
+        a.handle_key(key(KeyCode::PageDown), now);
         assert_eq!(current_key(&a), "f00");
     }
 
@@ -802,7 +807,7 @@ pub(crate) mod tests {
             a.handle_key(key(KeyCode::Enter), now),
             [Effect::ChangeRoot("/r".into())]
         );
-        a.handle_key(key(KeyCode::Down), now);
+        a.handle_key(key(KeyCode::Up), now);
         assert_eq!(
             a.handle_key(key(KeyCode::Enter), now),
             [Effect::ChangeRoot("/r/p/src/deep dir".into())]
@@ -1057,8 +1062,14 @@ pub(crate) mod tests {
         mouse(MouseEventKind::Down(MouseButton::Left), r)
     }
 
+    /// The `i`-th row of the list counted from the bottom (the first row is at the bottom, as in fzf).
     fn list_row(a: &App, i: u16) -> Rect {
-        Rect::new(a.layout.list.x, a.layout.list.y + i, a.layout.list.width, 1)
+        Rect::new(
+            a.layout.list.x,
+            a.layout.list.bottom() - 1 - i,
+            a.layout.list.width,
+            1,
+        )
     }
 
     #[test]
@@ -1151,9 +1162,13 @@ pub(crate) mod tests {
             &names.iter().map(String::as_str).collect::<Vec<_>>(),
         );
         drawn(&mut a);
-        a.handle_mouse(mouse(MouseEventKind::ScrollDown, a.layout.list), now);
-        assert_eq!(current_key(&a), "f3");
         a.handle_mouse(mouse(MouseEventKind::ScrollUp, a.layout.list), now);
+        assert_eq!(
+            current_key(&a),
+            "f3",
+            "the wheel up goes up the screen, to later rows"
+        );
+        a.handle_mouse(mouse(MouseEventKind::ScrollDown, a.layout.list), now);
         assert_eq!(current_key(&a), "f0");
     }
 
