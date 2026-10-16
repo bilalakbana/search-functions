@@ -69,11 +69,12 @@ keys "PS1='READY> '; cd '$T'" Enter
 wait_pane '^READY>' || { echo "e2e: shell did not start" >&2; exit 2; }
 tm rename-window -t e2e shell
 
-n_files=$(cd "$T" && fd --type f --hidden --no-ignore --exclude .git . | wc -l)
+# the defaults: hidden files off, ignored files on
+n_files=$(cd "$T" && fd --type f --no-ignore --exclude .git . | wc -l)
 keys "'$SF'" Enter
 expect 'start: tab bar with Config'        'Files +Content +Folders +Git .*⚙ Config'
 expect "start: $n_files files listed"      "$n_files/$n_files"
-expect 'start: bat preview with numbers'   '│ *1 build/'
+expect 'start: bat preview with numbers'   '│ *1 needle ignored'
 expect 'start: footer'                     'Enter open · \^O nvim'
 [[ $(tm display-message -p -t e2e '#W') == search ]] && ok 'tmux: window named search' || bad 'tmux: window not renamed'
 shot files
@@ -92,9 +93,9 @@ expect 'tab: Search keeps the query'       'Content › main'
 expect 'search: one file'                  'src/main\.c'
 clear_query; type_ 'needle'
 expect 'search: files with needle'         '5/5'
-expect 'search: preview of the first file' '1:needle hidden'
+expect 'search: preview of the first file' '1:needle ignored'
 expect 'search: match count in the preview' 'Matches +1'
-expect 'search: file in the preview header' 'File +\.hidden/secret\.txt'
+expect 'search: file in the preview header' 'File +build/out\.txt'
 shot search
 clear_query; type_ 'zzznotthere'
 expect 'search: no-match hint'             'No match\. Archives & documents'
@@ -151,7 +152,7 @@ expect 'git outside a repository says so'  'not a git repository'
 keys Escape
 expect 'esc again'                         '^READY>\s*$'
 
-n_text=$(cd "$T" && ugrep -rlU --ignore-binary -s --hidden --ignore-files --exclude-dir=.git -e '' . | wc -l)
+n_text=$(cd "$T" && ugrep -rlU --ignore-binary -s --exclude-dir=.git -e '' . | wc -l)
 keys "cd '$T' && env -u TMUX '$SF' content" Enter
 expect 'no tmux: starts in Search'         'Content › type a pattern'
 expect "search: all $n_text text files before typing" "$n_text/$n_text"

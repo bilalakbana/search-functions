@@ -45,9 +45,9 @@ sf content    # or: folders, git
 
 | Tab | Lists | Typing | Options (⚙ Config, defaults) |
 |-----|-------|--------|------------------------------|
-| Files | every file below the folder | filters the names | Hidden files ✓, Ignored files ✓ |
-| Content | the files that contain the pattern (ugrep); every text file while it is empty | the pattern, searched 150 ms after the last key; the preview shows the file, the pattern and how often it occurs | Matching lines ✗ (list the lines instead), Archives & documents ✗ (zip, tar, 7z, PDF, Office via `ugrep+`), Hidden files ✓, Ignored files ✗ |
-| Folders | every folder, `..` first | filters the names; `Enter` goes inside | Hidden folders ✓, Ignored folders ✓ |
+| Files | every file below the folder | filters the names | Hidden files ✗, Ignored files ✓ |
+| Content | the files that contain the pattern (ugrep); every text file while it is empty | the pattern, searched 150 ms after the last key; the preview shows the file, the pattern and how often it occurs | Matching lines ✗ (list the lines instead), Archives & documents ✗ (zip, tar, 7z, PDF, Office via `ugrep+`), Hidden files ✗, Ignored files ✓ |
+| Folders | every folder, `..` first | filters the names; `Enter` goes inside | Hidden folders ✗, Ignored folders ✓ |
 | Git | the commit graph, numbered | filters the commits; `Enter` shows one | All branches ✓ |
 
 As in fzf, the list fills from the bottom: the first row sits right above the input line, `Up` goes to the next

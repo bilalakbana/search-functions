@@ -488,7 +488,6 @@ mod tests {
                 "f",
                 "--color=never",
                 "-0",
-                "--hidden",
                 "--no-ignore",
                 "--exclude",
                 ".git"
@@ -498,14 +497,21 @@ mod tests {
     }
 
     #[test]
-    fn files_cmd_without_hidden_and_ignored() {
+    fn files_cmd_with_hidden_without_ignored() {
         let mut o = Options::default();
-        o.toggle(Tab::Files, Opt::Hidden);
-        o.toggle(Tab::Files, Opt::Ignored);
+        (o.files.hidden, o.files.ignored) = (true, false);
         let (cmd, _) = run(list_plan(Tab::Files, &o, "", &engines()));
         assert_eq!(
             cmd.args,
-            os(&["--type", "f", "--color=never", "-0", "--exclude", ".git"])
+            os(&[
+                "--type",
+                "f",
+                "--color=never",
+                "-0",
+                "--hidden",
+                "--exclude",
+                ".git"
+            ])
         );
     }
 
@@ -535,7 +541,6 @@ mod tests {
                 "d",
                 "--color=never",
                 "-0",
-                "--hidden",
                 "--no-ignore",
                 "--exclude",
                 ".git"
@@ -554,8 +559,6 @@ mod tests {
             "--ignore-binary",
             "-s",
             "--null",
-            "--hidden",
-            "--ignore-files",
             "--exclude-dir=.git",
             "-e",
             "",
@@ -610,8 +613,6 @@ mod tests {
                 "--ignore-binary",
                 "-s",
                 "--null",
-                "--hidden",
-                "--ignore-files",
                 "--exclude-dir=.git",
                 "-e",
                 "needle",
@@ -622,10 +623,16 @@ mod tests {
     }
 
     #[test]
-    fn search_ignored_option_drops_ignore_files() {
+    fn search_hidden_and_ignored_flags() {
         let mut o = Options::default();
-        o.toggle(Tab::Content, Opt::Ignored);
-        o.toggle(Tab::Content, Opt::Hidden);
+        (o.content.hidden, o.content.ignored) = (true, false);
+        let (cmd, _) = run(list_plan(Tab::Content, &o, "x", &engines()));
+        assert!(
+            cmd.args.contains(&"--ignore-files".into()),
+            "ignored off: .gitignore is honoured"
+        );
+        assert!(cmd.args.contains(&"--hidden".into()));
+        (o.content.hidden, o.content.ignored) = (false, true);
         let (cmd, _) = run(list_plan(Tab::Content, &o, "x", &engines()));
         assert!(!cmd.args.contains(&"--ignore-files".into()));
         assert!(!cmd.args.contains(&"--hidden".into()));
@@ -646,8 +653,6 @@ mod tests {
                 "-s",
                 "--null",
                 "--exclude=*.rar",
-                "--hidden",
-                "--ignore-files",
                 "--exclude-dir=.git",
                 "-e",
                 "needle",
@@ -675,8 +680,6 @@ mod tests {
                 "--separator=\x1f",
                 "--color=never",
                 "--replace=\x01%o\x02",
-                "--hidden",
-                "--ignore-files",
                 "--exclude-dir=.git",
                 "-e",
                 "needle",

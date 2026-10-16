@@ -47,14 +47,13 @@ mod tests {
     fn defaults_match_spec() {
         let o = Options::default();
         let on = |tab, opt| o.get(tab, opt);
-        assert!(on(Tab::Files, Opt::Hidden));
-        assert!(on(Tab::Files, Opt::Ignored));
+        // Bilal, 2026-10-17: hidden off, ignored on, in every tab that has them
+        for tab in [Tab::Files, Tab::Content, Tab::Folders] {
+            assert!(!on(tab, Opt::Hidden), "{tab:?} hidden");
+            assert!(on(tab, Opt::Ignored), "{tab:?} ignored");
+        }
         assert!(!on(Tab::Content, Opt::MatchingLines));
         assert!(!on(Tab::Content, Opt::Archives));
-        assert!(on(Tab::Content, Opt::Hidden));
-        assert!(!on(Tab::Content, Opt::Ignored));
-        assert!(on(Tab::Folders, Opt::Hidden));
-        assert!(on(Tab::Folders, Opt::Ignored));
         assert!(on(Tab::Git, Opt::AllBranches));
     }
 

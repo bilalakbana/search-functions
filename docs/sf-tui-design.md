@@ -88,9 +88,9 @@ Config popup (Search):
 
 | Tab | Lists | Typing | Options (default) |
 |---|---|---|---|
-| Files | `fd --type f`, sorted | filters the list (fuzzy) | Hidden files ✓, Ignored files ✓ (Bilal) |
-| Search | `ugrep -rl` (files) or matching lines (`ugrep -rn`); `ugrep+ -z` with archives | the ugrep pattern; runs after a short pause (150 ms) | Matching lines ✗ (Bilal), Archives & documents ✗, Hidden files ✓, Ignored files ✗ |
-| Folders | `fd --type d`, sorted by depth, `..` first | filters the list | Hidden folders ✓, Ignored folders ✓ |
+| Files | `fd --type f`, sorted | filters the list (fuzzy) | Hidden files ✗, Ignored files ✓ (Bilal) |
+| Search | `ugrep -rl` (files) or matching lines (`ugrep -rn`); `ugrep+ -z` with archives | the ugrep pattern; runs after a short pause (150 ms) | Matching lines ✗ (Bilal), Archives & documents ✗, Hidden files ✗, Ignored files ✓ (Bilal) |
+| Folders | `fd --type d`, sorted by depth, `..` first | filters the list | Hidden folders ✗, Ignored folders ✓ (Bilal) |
 | Git | `git log --graph`, numbered | filters the list | All branches ✓ |
 
 `.git` itself is never listed. Enter in Folders makes the selected folder the new root of every tab (`..` goes up);
@@ -154,8 +154,9 @@ Details settled from the existing setup and the prototype:
 
 ## Calls made by Claude (check these)
 
-- Search defaults: Hidden ✓, Ignored ✗ (searching `node_modules` / `target` by default is slow and noisy),
-  Archives ✗ (slow); Folders: Hidden ✓, Ignored ✓; Git: All branches ✓.
+- Defaults changed by Bilal (2026-10-17): Hidden ✗ and Ignored ✓ in Files, Content and Folders (my first call
+  for Content, Hidden ✓ / Ignored ✗, is gone: `node_modules` / `target` are now searched unless switched off);
+  Archives ✗ (slow); Git: All branches ✓.
 - Config is remembered across runs in `~/.config/sf/config.toml`.
 - Quit with Esc (Ctrl-C stays "copy the path"); Config also with Ctrl-S; footer instead of a help screen.
 - Engines stay external; the prototype's sub-function windows are reused for Ctrl-T/U/G/Alt-G/Alt-U.

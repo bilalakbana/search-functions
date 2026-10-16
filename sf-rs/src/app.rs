@@ -751,7 +751,7 @@ pub(crate) mod tests {
         a.handle_key(key(KeyCode::Up), now);
         assert_eq!(a.popup, Some(3), "the cursor wraps");
         a.handle_key(key(KeyCode::Enter), now);
-        assert!(a.options.content.ignored);
+        assert!(!a.options.content.ignored, "on by default, so off now");
     }
 
     #[test]

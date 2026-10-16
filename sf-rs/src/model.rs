@@ -113,7 +113,7 @@ pub struct GitOpts {
 impl Default for FilesOpts {
     fn default() -> Self {
         FilesOpts {
-            hidden: true,
+            hidden: false,
             ignored: true,
         }
     }
@@ -124,8 +124,8 @@ impl Default for ContentOpts {
         ContentOpts {
             matching_lines: false,
             archives: false,
-            hidden: true,
-            ignored: false,
+            hidden: false,
+            ignored: true,
         }
     }
 }
@@ -133,7 +133,7 @@ impl Default for ContentOpts {
 impl Default for FoldersOpts {
     fn default() -> Self {
         FoldersOpts {
-            hidden: true,
+            hidden: false,
             ignored: true,
         }
     }
@@ -239,9 +239,9 @@ mod tests {
     fn toggle_changes_only_that_tab() {
         let mut opts = Options::default();
         opts.toggle(Tab::Content, Opt::Hidden);
-        assert!(!opts.get(Tab::Content, Opt::Hidden));
-        assert!(opts.get(Tab::Files, Opt::Hidden));
-        assert!(opts.get(Tab::Folders, Opt::Hidden));
+        assert!(opts.get(Tab::Content, Opt::Hidden));
+        assert!(!opts.get(Tab::Files, Opt::Hidden));
+        assert!(!opts.get(Tab::Folders, Opt::Hidden));
     }
 
     #[test]

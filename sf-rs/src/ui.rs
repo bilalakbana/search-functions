@@ -591,8 +591,8 @@ mod tests {
         assert!(find(&buf, "Content options").is_some());
         assert!(find(&buf, "[ ] Matching lines").is_some());
         assert!(find(&buf, "[ ] Archives & documents").is_some());
-        assert!(find(&buf, "[x] Hidden files").is_some());
-        assert!(find(&buf, "[ ] Ignored files").is_some());
+        assert!(find(&buf, "[ ] Hidden files").is_some());
+        assert!(find(&buf, "[x] Ignored files").is_some());
         assert_eq!(a.layout.popup_rows.len(), 4);
         assert_eq!(a.layout.popup_rows[0].0, Opt::MatchingLines);
         let (_, y) = find(&buf, "[ ] Matching lines").unwrap();
@@ -626,7 +626,7 @@ mod tests {
         assert!(
             input
                 .trim_end()
-                .ends_with("archives & documents · hidden   2/2"),
+                .ends_with("archives & documents · ignored   2/2"),
             "{input:?}"
         );
     }
