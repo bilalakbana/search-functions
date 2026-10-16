@@ -1,0 +1,665 @@
+//! Drawing. Top to bottom: the tab bar, the preview, the list, the input line and the footer; the
+//! Config popup over them. Records where everything went in `app.layout` for the mouse.
+
+use ratatui::Frame;
+use ratatui::layout::{Constraint, Layout, Position, Rect};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::{Block, BorderType, Clear, Paragraph, Wrap};
+
+use crate::app::{App, ScreenLayout};
+use crate::model::{Opt, Tab};
+use crate::theme;
+
+const CONFIG: &str = "⚙ Config";
+
+pub fn draw(frame: &mut Frame, app: &mut App) {
+    let area = frame.area();
+    let body = area.height.saturating_sub(3);
+    let preview_h = if app.preview_visible {
+        body * 60 / 100
+    } else {
+        0
+    };
+    let [bar, preview, list, input, footer] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(preview_h),
+        Constraint::Length(body - preview_h),
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ])
+    .areas(area);
+    let mut layout = ScreenLayout::default();
+    draw_tab_bar(frame, app, bar, &mut layout);
+    let status = status_line(app);
+    if app.preview_visible {
+        layout.preview = draw_preview(frame, app, preview, status.clone());
+    }
+    layout.list = draw_list(
+        frame,
+        app,
+        list,
+        if app.preview_visible { None } else { status },
+    );
+    draw_input(frame, app, input);
+    draw_footer(frame, app.tab, footer);
+    if let Some(cursor) = app.popup {
+        draw_popup(frame, app, cursor, &mut layout);
+    }
+    app.layout = layout;
+}
+
+fn style(fg: ratatui::style::Color) -> Style {
+    Style::new().fg(fg)
+}
+
+fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect, layout: &mut ScreenLayout) {
+    let config_w = CONFIG.chars().count() as u16;
+    layout.config = Rect::new(
+        area.right().saturating_sub(config_w),
+        area.y,
+        config_w.min(area.width),
+        1,
+    );
+    let config_style = if app.popup.is_some() {
+        Style::new()
+            .fg(theme::BASE)
+            .bg(theme::MAUVE)
+            .add_modifier(Modifier::BOLD)
+    } else {
+        style(theme::SUB)
+    };
+    frame.render_widget(
+        Paragraph::new(Span::styled(CONFIG, config_style)),
+        layout.config,
+    );
+
+    let room = area.width.saturating_sub(config_w + 1);
+    let mut x = area.x;
+    for tab in Tab::ALL {
+        let label = format!(" {} ", tab.title());
+        let w = (label.chars().count() as u16).min((area.x + room).saturating_sub(x));
+        if w == 0 {
+            break;
+        }
+        let st = if tab == app.tab {
+            Style::new()
+                .fg(theme::BASE)
+                .bg(theme::MAUVE)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            style(theme::DIM)
+        };
+        let rect = Rect::new(x, area.y, w, 1);
+        frame.render_widget(Paragraph::new(Span::styled(label, st)), rect);
+        layout.tabs.push((tab, rect));
+        x += w + 1;
+    }
+}
+
+fn status_line(app: &App) -> Option<Line<'static>> {
+    let (text, error, _) = app.status.as_ref()?;
+    let st = if *error {
+        style(theme::RED).add_modifier(Modifier::BOLD)
+    } else {
+        style(theme::GREEN)
+    };
+    Some(Line::from(Span::styled(
+        format!(" {} ", crate::items::printable(text)),
+        st,
+    )))
+}
+
+fn bordered() -> Block<'static> {
+    Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(style(theme::FAINT))
+}
+
+/// The root, `~` for the home folder: its folder part dim, its name bright.
+fn root_title(app: &App) -> Line<'static> {
+    let mut path = app.root.display().to_string();
+    if let Some(home) = dirs::home_dir() {
+        if let Ok(rest) = app.root.strip_prefix(&home) {
+            path = if rest.as_os_str().is_empty() {
+                "~".into()
+            } else {
+                format!("~/{}", rest.display())
+            };
+        }
+    }
+    let path = crate::items::printable(&path);
+    let cut = path.rfind('/').map_or(0, |i| i + 1).min(path.len());
+    let (dir, name) = path.split_at(if path.len() > 1 { cut } else { 0 });
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(dir.to_string(), style(theme::DIM)),
+        Span::styled(name.to_string(), style(theme::TEXT)),
+        Span::raw(" "),
+    ])
+}
+
+fn draw_preview(frame: &mut Frame, app: &App, area: Rect, status: Option<Line<'static>>) -> Rect {
+    let mut block = bordered().title_top(root_title(app));
+    if let Some(status) = status {
+        block = block.title_bottom(status);
+    }
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    // Only the lines that can be on screen: a preview can have hundreds of thousands.
+    let from = (app.preview_scroll as usize).min(app.preview.lines.len());
+    let shown: Vec<Line> = app.preview.lines[from..]
+        .iter()
+        .take(inner.height as usize)
+        .cloned()
+        .collect();
+    frame.render_widget(
+        Paragraph::new(Text::from(shown)).wrap(Wrap { trim: false }),
+        inner,
+    );
+    inner
+}
+
+fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'static>>) -> Rect {
+    let mut block = bordered();
+    if let Some(status) = status {
+        block = block.title_bottom(status);
+    }
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+
+    let notes = app.notes.len().min(inner.height as usize);
+    let visible = inner.height as usize - notes;
+    if app.selected < app.offset {
+        app.offset = app.selected;
+    } else if visible > 0 && app.selected >= app.offset + visible {
+        app.offset = app.selected + 1 - visible;
+    }
+    let mut y = inner.y;
+    for note in &app.notes[..notes] {
+        let line = Line::from(
+            [Span::raw(" ")]
+                .into_iter()
+                .chain(note.display().spans)
+                .collect::<Vec<_>>(),
+        );
+        frame.render_widget(Paragraph::new(line), Rect::new(inner.x, y, inner.width, 1));
+        y += 1;
+    }
+    for i in app.offset..app.offset + visible {
+        let Some(item) = app.filter.get(i) else { break };
+        let rect = Rect::new(inner.x, y, inner.width, 1);
+        let selected = i == app.selected;
+        let marker = if selected {
+            Span::styled("▌", style(theme::MAUVE))
+        } else {
+            Span::raw(" ")
+        };
+        let mut spans: Vec<Span> = [marker].into_iter().chain(item.display().spans).collect();
+        if selected {
+            // the band under every span: coloured engine output carries its own (reset) background
+            frame
+                .buffer_mut()
+                .set_style(rect, Style::new().bg(theme::SURFACE));
+            for span in &mut spans {
+                span.style = span.style.bg(theme::SURFACE);
+            }
+        }
+        let line = Line::from(spans);
+        frame.render_widget(Paragraph::new(line), rect);
+        y += 1;
+    }
+    inner
+}
+
+fn short(opt: Opt) -> &'static str {
+    match opt {
+        Opt::Hidden => "hidden",
+        Opt::Ignored => "ignored",
+        Opt::MatchingLines => "matching lines",
+        Opt::Archives => "archives & documents",
+        Opt::AllBranches => "all branches",
+    }
+}
+
+fn placeholder(app: &App) -> &'static str {
+    match app.tab {
+        Tab::Files => "type to filter file names",
+        Tab::Search if app.options.search.matching_lines => {
+            "type a pattern · lists the lines that contain it"
+        }
+        Tab::Search => "type a pattern · lists the files that contain it",
+        Tab::Folders => "type to filter folders · Enter goes inside, .. goes up",
+        Tab::Git => "type to filter commits · Enter shows one",
+    }
+}
+
+fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
+    let active: Vec<&str> = app
+        .options
+        .list(app.tab)
+        .into_iter()
+        .filter(|(_, on)| *on)
+        .map(|(o, _)| short(o))
+        .collect();
+    let mut count = format!("{}/{}", app.filter.len(), app.filter.total());
+    if app.loading {
+        count.push_str(" …");
+    }
+    let right = Line::from(vec![
+        Span::styled(active.join(" · "), style(theme::SUB)),
+        Span::raw("   "),
+        Span::styled(count, style(theme::DIM)),
+        Span::raw(" "),
+    ]);
+    let right_w = (right.width() as u16).min(area.width / 2);
+    let [left_area, right_area] =
+        Layout::horizontal([Constraint::Min(0), Constraint::Length(right_w)]).areas(area);
+
+    let title = app.tab.title();
+    let query = crate::items::printable(&app.query);
+    let mut left = vec![
+        Span::raw(" "),
+        Span::styled(title, style(theme::MAUVE).add_modifier(Modifier::BOLD)),
+        Span::styled(" › ", style(theme::FAINT)),
+    ];
+    let cursor_x = left_area.x
+        + 1
+        + title.chars().count() as u16
+        + 3
+        + Line::raw(query.as_str()).width() as u16;
+    if query.is_empty() {
+        left.push(Span::styled(
+            placeholder(app),
+            style(theme::DIM).add_modifier(Modifier::ITALIC),
+        ));
+    } else {
+        left.push(Span::styled(query, style(theme::TEXT)));
+    }
+    frame.render_widget(Paragraph::new(Line::from(left)), left_area);
+    frame.render_widget(
+        Paragraph::new(right).alignment(ratatui::layout::Alignment::Right),
+        right_area,
+    );
+    if app.popup.is_none() {
+        frame.set_cursor_position(Position::new(
+            cursor_x.min(left_area.right().saturating_sub(1)),
+            area.y,
+        ));
+    }
+}
+
+fn footer_items(tab: Tab) -> &'static [&'static str] {
+    match tab {
+        Tab::Files | Tab::Search => &[
+            "Enter open",
+            "^O nvim",
+            "^T in file",
+            "^U/^G diff",
+            "Alt-U log",
+            "^E reveal",
+            "^C copy",
+            "Esc quit",
+        ],
+        Tab::Folders => &["Enter go inside", "^E reveal", "^C copy", "Esc quit"],
+        Tab::Git => &["Enter show commit", "^C copy hash", "Esc quit"],
+    }
+}
+
+/// The keys for the selected item; when narrow, items before "Esc quit" are left out, never cut.
+fn draw_footer(frame: &mut Frame, tab: Tab, area: Rect) {
+    let all = footer_items(tab);
+    let width = |items: &[&str]| {
+        1 + items.iter().map(|i| i.chars().count()).sum::<usize>()
+            + 3 * items.len().saturating_sub(1)
+    };
+    let mut items: Vec<&str> = all.to_vec();
+    while items.len() > 1 && width(&items) > area.width as usize {
+        items.remove(items.len() - 2);
+    }
+    let mut spans = vec![Span::raw(" ")];
+    for (i, item) in items.iter().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(" · ", style(theme::FAINT)));
+        }
+        let (key, what) = item.split_once(' ').unwrap_or((item, ""));
+        spans.push(Span::styled(key.to_string(), style(theme::SUB)));
+        spans.push(Span::styled(format!(" {what}"), style(theme::DIM)));
+    }
+    frame.render_widget(Paragraph::new(Line::from(spans)), area);
+}
+
+fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLayout) {
+    let opts = app.options.list(app.tab);
+    let rows: Vec<Line> = opts
+        .iter()
+        .map(|&(opt, on)| {
+            Line::from(vec![
+                Span::styled(
+                    if on { "[x]" } else { "[ ]" },
+                    style(if on { theme::MAUVE } else { theme::DIM }),
+                ),
+                Span::styled(format!(" {}", opt.label(app.tab)), style(theme::TEXT)),
+                Span::styled(format!("   {}", opt.hint()), style(theme::DIM)),
+            ])
+        })
+        .collect();
+    let help = "Space / click · Esc close";
+    let title = format!(" {} options ", app.tab.title());
+    let content_w = rows
+        .iter()
+        .map(Line::width)
+        .chain([help.chars().count(), title.chars().count()])
+        .max()
+        .unwrap_or(0);
+    let area = frame.area();
+    let w = (content_w as u16 + 4).min(area.width);
+    let h = (opts.len() as u16 + 4).min(area.height);
+    let popup = Rect::new(
+        area.x + (area.width - w) / 2,
+        area.y + (area.height - h) / 2,
+        w,
+        h,
+    );
+    frame.render_widget(Clear, popup);
+    let block = Block::bordered()
+        .border_type(BorderType::Rounded)
+        .border_style(style(theme::MAUVE))
+        .title_top(Span::styled(
+            title,
+            style(theme::MAUVE).add_modifier(Modifier::BOLD),
+        ));
+    let inner = block.inner(popup);
+    frame.render_widget(block, popup);
+    for (i, (line, &(opt, _))) in rows.into_iter().zip(&opts).enumerate() {
+        let y = inner.y + i as u16;
+        if y >= inner.bottom() {
+            break;
+        }
+        let rect = Rect::new(inner.x, y, inner.width, 1);
+        if i == cursor {
+            frame
+                .buffer_mut()
+                .set_style(rect, Style::new().bg(theme::SURFACE));
+        }
+        frame.render_widget(
+            Paragraph::new(line),
+            Rect::new(inner.x + 1, y, inner.width.saturating_sub(1), 1),
+        );
+        layout.popup_rows.push((opt, rect));
+    }
+    if inner.height > 0 {
+        let help_area = Rect::new(
+            inner.x,
+            inner.bottom() - 1,
+            inner.width.saturating_sub(1),
+            1,
+        );
+        frame.render_widget(
+            Paragraph::new(Span::styled(help, style(theme::FAINT)))
+                .alignment(ratatui::layout::Alignment::Right),
+            help_area,
+        );
+    }
+    layout.popup = popup;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::tests::{app, ctrl, feed, key};
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use ratatui::crossterm::event::KeyCode;
+    use std::time::Instant;
+
+    fn render(a: &mut App, w: u16, h: u16) -> Buffer {
+        let mut t = Terminal::new(TestBackend::new(w, h)).unwrap();
+        t.draw(|f| draw(f, a)).unwrap();
+        t.backend().buffer().clone()
+    }
+
+    fn row(buf: &Buffer, y: u16) -> String {
+        (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect()
+    }
+
+    fn find(buf: &Buffer, text: &str) -> Option<(u16, u16)> {
+        (0..buf.area.height).find_map(|y| {
+            let r = row(buf, y);
+            r.find(text).map(|i| (r[..i].chars().count() as u16, y))
+        })
+    }
+
+    #[test]
+    fn tab_bar_is_one_line_with_config_right() {
+        for w in [80, 160] {
+            let (mut a, _) = app(Tab::Files);
+            let buf = render(&mut a, w, 24);
+            let top = row(&buf, 0);
+            for t in ["Files", "Search", "Folders", "Git"] {
+                assert!(top.contains(t), "{w}: {top:?}");
+            }
+            assert!(top.trim_end().ends_with("⚙ Config"), "{w}: {top:?}");
+            assert_eq!(buf[(w - 1, 0)].symbol(), "g");
+            assert!(!row(&buf, 1).contains("Search"));
+        }
+    }
+
+    #[test]
+    fn current_tab_is_a_mauve_block() {
+        let (mut a, _) = app(Tab::Search);
+        let buf = render(&mut a, 80, 24);
+        let (x, _) = find(&buf, "Search").unwrap();
+        assert_eq!(buf[(x, 0)].bg, theme::MAUVE);
+        let (x, _) = find(&buf, "Files").unwrap();
+        assert_ne!(buf[(x, 0)].bg, theme::MAUVE);
+    }
+
+    #[test]
+    fn narrow_60_keeps_config_visible() {
+        let (mut a, _) = app(Tab::Files);
+        feed(&mut a, &["a"]);
+        let buf = render(&mut a, 60, 20);
+        let top = row(&buf, 0);
+        assert!(top.trim_end().ends_with("⚙ Config"), "{top:?}");
+        assert!(top.contains("Git"), "{top:?}");
+        let footer = row(&buf, 19);
+        assert!(
+            footer.trim_end().ends_with("quit") || !footer.contains("Esc"),
+            "cut mid-item: {footer:?}"
+        );
+        assert!(!footer.trim_end().ends_with('·'), "{footer:?}");
+    }
+
+    #[test]
+    fn popup_shows_search_options_with_boxes() {
+        let (mut a, now) = app(Tab::Search);
+        a.handle_key(ctrl('s'), now);
+        let buf = render(&mut a, 80, 24);
+        assert!(find(&buf, "Search options").is_some());
+        assert!(find(&buf, "[ ] Matching lines").is_some());
+        assert!(find(&buf, "[ ] Archives & documents").is_some());
+        assert!(find(&buf, "[x] Hidden files").is_some());
+        assert!(find(&buf, "[ ] Ignored files").is_some());
+        assert_eq!(a.layout.popup_rows.len(), 4);
+        assert_eq!(a.layout.popup_rows[0].0, Opt::MatchingLines);
+        let (_, y) = find(&buf, "[ ] Matching lines").unwrap();
+        assert_eq!(a.layout.popup_rows[0].1.y, y);
+    }
+
+    #[test]
+    fn placeholder_when_query_empty() {
+        let (mut a, now) = app(Tab::Search);
+        let buf = render(&mut a, 100, 24);
+        let input = row(&buf, 22);
+        assert!(
+            input.contains("Search › type a pattern · lists the files that contain it"),
+            "{input:?}"
+        );
+        a.handle_key(key(KeyCode::Char('n')), now);
+        let buf = render(&mut a, 100, 24);
+        let input = row(&buf, 22);
+        assert!(input.contains("Search › n"), "{input:?}");
+        assert!(!input.contains("type a pattern"));
+    }
+
+    #[test]
+    fn input_shows_active_options_and_count() {
+        let (mut a, _) = app(Tab::Search);
+        a.options.search.archives = true;
+        feed(&mut a, &["a", "b"]);
+        a.loading = false;
+        let buf = render(&mut a, 100, 24);
+        let input = row(&buf, 22);
+        assert!(
+            input
+                .trim_end()
+                .ends_with("archives & documents · hidden   2/2"),
+            "{input:?}"
+        );
+    }
+
+    #[test]
+    fn footer_matches_tab() {
+        let cases = [
+            (
+                Tab::Files,
+                "Enter open · ^O nvim · ^T in file · ^U/^G diff · Alt-U log · ^E reveal · ^C copy · Esc quit",
+            ),
+            (
+                Tab::Folders,
+                "Enter go inside · ^E reveal · ^C copy · Esc quit",
+            ),
+            (Tab::Git, "Enter show commit · ^C copy hash · Esc quit"),
+        ];
+        for (tab, want) in cases {
+            let (mut a, _) = app(tab);
+            let buf = render(&mut a, 120, 24);
+            assert_eq!(row(&buf, 23).trim(), want);
+        }
+    }
+
+    #[test]
+    fn selected_row_has_a_band() {
+        let (mut a, now) = app(Tab::Files);
+        feed(&mut a, &["src/a.rs", "src/b.rs"]);
+        a.handle_key(key(KeyCode::Down), now);
+        let buf = render(&mut a, 80, 24);
+        let (x, y) = find(&buf, "src/b.rs").unwrap();
+        assert_eq!(buf[(x, y)].bg, theme::SURFACE);
+        assert_eq!(buf[(x - 1, y)].symbol(), "▌");
+        assert_eq!(buf[(78, y)].bg, theme::SURFACE, "the band spans the row");
+        let (x, y) = find(&buf, "src/a.rs").unwrap();
+        assert_ne!(buf[(x, y)].bg, theme::SURFACE);
+    }
+
+    #[test]
+    fn band_covers_coloured_rows_too() {
+        let (mut a, _) = app(Tab::Git);
+        let rows = crate::app::tests::rows(
+            crate::commands::ParseKind::Git,
+            &["* \x1b[1;34mabc1234\x1b[m T\x1fabc1234"],
+        );
+        a.on_list(crate::runner::ListMsg::Items(a.list_gen, rows));
+        let buf = render(&mut a, 80, 24);
+        let (x, y) = find(&buf, "abc1234").unwrap();
+        assert_eq!(buf[(x, y)].bg, theme::SURFACE);
+        assert_eq!(buf[(x + 8, y)].bg, theme::SURFACE, "after the reset");
+    }
+
+    #[test]
+    fn list_scrolls_to_keep_the_selection_visible() {
+        let (mut a, now) = app(Tab::Files);
+        let names: Vec<String> = (0..100).map(|i| format!("f{i:03}")).collect();
+        feed(
+            &mut a,
+            &names.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
+        render(&mut a, 80, 24);
+        a.handle_key(key(KeyCode::End), now);
+        let buf = render(&mut a, 80, 24);
+        assert!(find(&buf, "f099").is_some());
+        assert!(find(&buf, "f000").is_none());
+    }
+
+    #[test]
+    fn notes_come_before_rows() {
+        let (mut a, _) = app(Tab::Files);
+        a.on_list(crate::runner::ListMsg::Error(a.list_gen, "fd: boom".into()));
+        feed(&mut a, &["a.txt"]);
+        let buf = render(&mut a, 80, 24);
+        let (_, note_y) = find(&buf, "fd: boom").unwrap();
+        let (_, row_y) = find(&buf, "a.txt").unwrap();
+        assert_eq!(row_y, note_y + 1);
+    }
+
+    #[test]
+    fn preview_border_has_root_and_status() {
+        let (mut a, now) = app(Tab::Files);
+        a.root = "/r/project".into();
+        a.set_status("Copied to the clipboard", false, now);
+        let buf = render(&mut a, 80, 24);
+        let (_, y) = find(&buf, "/r/project").unwrap();
+        assert_eq!(y, 1);
+        let (x, y) = find(&buf, "Copied to the clipboard").unwrap();
+        assert_eq!(buf[(x, y)].fg, theme::GREEN);
+        assert_eq!(y, a.layout.preview.y + a.layout.preview.height);
+    }
+
+    #[test]
+    fn hidden_preview_gives_the_list_the_room() {
+        let (mut a, now) = app(Tab::Files);
+        a.handle_key(ctrl('l'), now);
+        render(&mut a, 80, 24);
+        assert_eq!(a.layout.preview, Rect::default());
+        assert_eq!(a.layout.list.height, 24 - 1 - 2 - 2);
+    }
+
+    #[test]
+    fn layout_rects_recorded() {
+        let (mut a, _) = app(Tab::Files);
+        let buf = render(&mut a, 120, 30);
+        let l = &a.layout;
+        assert_eq!(l.tabs.len(), 4);
+        for (tab, r) in &l.tabs {
+            assert_eq!(r.y, 0);
+            let text: String = (r.x..r.x + r.width).map(|x| buf[(x, 0)].symbol()).collect();
+            assert_eq!(text.trim(), tab.title());
+        }
+        assert_eq!(l.config.x + l.config.width, 120);
+        assert!(l.preview.height > 0 && l.list.height > 0);
+        assert!(
+            l.preview.y + l.preview.height < l.list.y,
+            "preview above the list, borders between"
+        );
+        assert_eq!(l.list.x, 1);
+        assert_eq!(l.popup, Rect::default());
+        assert!(l.popup_rows.is_empty());
+    }
+
+    #[test]
+    fn tiny_terminals_do_not_panic() {
+        for (w, h) in [(1, 1), (5, 2), (10, 3), (20, 5), (30, 8)] {
+            let (mut a, now) = app(Tab::Search);
+            feed(&mut a, &["a", "b"]);
+            a.on_list(crate::runner::ListMsg::Error(a.list_gen, "e".into()));
+            render(&mut a, w, h);
+            a.handle_key(ctrl('s'), now);
+            render(&mut a, w, h);
+        }
+    }
+
+    #[test]
+    fn cursor_follows_the_query() {
+        let (mut a, now) = app(Tab::Files);
+        a.handle_key(key(KeyCode::Char('a')), now);
+        let mut t = Terminal::new(TestBackend::new(80, 24)).unwrap();
+        t.draw(|f| draw(f, &mut a)).unwrap();
+        let pos = t.get_cursor_position().unwrap();
+        let input = row(t.backend().buffer(), 22);
+        assert_eq!(pos.y, 22);
+        assert_eq!(input.chars().nth(pos.x as usize - 1), Some('a'));
+        let _ = Instant::now();
+    }
+}

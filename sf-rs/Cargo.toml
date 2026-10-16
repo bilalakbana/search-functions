@@ -1,0 +1,14 @@
+[package]
+name = "sf"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+ansi-to-tui = "8.0.1"
+anyhow = "1"
+dirs = "7"
+# killpg: ending a list also ends what its engine started (ugrep+ is a shell script running ug)
+libc = "0.2"
+ratatui = "0.30.2"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
