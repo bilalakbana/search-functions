@@ -1,0 +1,500 @@
+#!/usr/bin/env bash
+# sf: the search functions in one fzf window.
+#
+#   sf [files|content|lines|folders|git]          (default: files)
+#
+# Tab / Shift-Tab switch the mode, F2-F6 jump to one, F1 shows the help. F7 (+archives: also inside
+# archives, PDFs and Office documents) and F8 (+hidden: hidden and .gitignore'd files too) are toggles,
+# listed under the modes and shown in the prompt.
+# Enter, Ctrl-o, Ctrl-e, Ctrl-c, Ctrl-t, Ctrl-u, Ctrl-g, Alt-g and Alt-u do what they do in the
+# single-purpose functions (advancedsearch, ugrep-fzf, f, ugf, gfzf, ...).
+#
+# How it works: fzf calls this script back for everything (--source, --preview, --switch, --key, --run).
+# The mode and the toggles live in fzf's prompt ("Content +archives> ") and reach those calls as $FZF_PROMPT,
+# so there is no state file. Every list line is KEY<0x1f>LINE<0x1f>DISPLAY: fzf shows and searches
+# DISPLAY only (--with-nth 3..), the callbacks get KEY (a path, or a commit for Git) and LINE as {1} and
+# {2}. KEY and LINE come first, so a 0x1f inside the shown text (a file's own content in Lines mode)
+# cannot shift them. Values are only ever handed over through those placeholders, never spliced into an
+# fzf action string.
+# Colours: Catppuccin Macchiato (as the Ghostty theme, tmux and Obsidian) on the terminal's own background,
+# so sf follows the terminal's opacity. Needs fzf 0.58 or newer (--style, input/list labels).
+
+set -o pipefail
+
+SELF=$(realpath -- "${BASH_SOURCE[0]}") || exit 1
+SUB=${SELF%/*}/sub-functions
+MODES=(files content lines folders git)
+TITLES=(Files Content Lines Folders Git)
+FS=$'\037'
+FD=$(command -v fd || command -v fdfind)        # Debian/Ubuntu name the binaries fdfind and batcat
+BAT=$(command -v bat || command -v batcat)
+ARCHIVE='\.(zip|jar|war|apk|docx|xlsx|pptx|odt|ods|odp|epub|tar|tgz|gz|bz2|xz|zst|lz4|lzma|7z|cpio|pax|Z)\{'
+
+# Catppuccin Macchiato. Text: text, subtext0 (C_SUB), overlay1 (C_DIM), overlay0 (C_FAINT); accents as named.
+C_TEXT=$'\033[38;2;202;211;245m' C_SUB=$'\033[38;2;165;173;203m' C_DIM=$'\033[38;2;128;135;162m'
+C_FAINT=$'\033[38;2;110;115;141m' C_MAUVE=$'\033[38;2;198;160;246m' C_BLUE=$'\033[38;2;138;173;244m'
+C_GREEN=$'\033[38;2;166;218;149m' C_RED=$'\033[38;2;237;135;150m' C_PEACH=$'\033[38;2;245;169;127m'
+C_ON_MAUVE=$'\033[1;38;2;36;39;58;48;2;198;160;246m' C_ON_BLUE=$'\033[1;38;2;36;39;58;48;2;138;173;244m'
+C_BOLD=$'\033[1m' C_ITALIC=$'\033[3m' C_OFF=$'\033[0m'
+# catppuccin/fzf's Macchiato theme, with bg, gutter and preview-bg left to the terminal (-1)
+FZF_COLORS='bg:-1,gutter:-1,preview-bg:-1,preview-fg:-1,bg+:#363A4F,fg:#CAD3F5,fg+:#CAD3F5,query:#CAD3F5,hl:#ED8796,hl+:#ED8796,header:#A5ADCB,info:#C6A0F6,prompt:#C6A0F6,pointer:#F4DBD6,marker:#B7BDF8,spinner:#F4DBD6,selected-bg:#494D64,border:#6E738D,label:#CAD3F5'
+# ugrep's colours in the previews: matches red, line numbers and context dim, the matching lines as text
+GREP_PALETTE='ln=38;2;128;135;162:cx=38;2;128;135;162:sl=:mt=1;38;2;237;135;150:fn=38;2;138;173;244:se=38;2;110;115;141'
+# Syntax colours in bat and delta: bat's base16 theme takes the terminal's 16 colours, which the Ghostty theme
+# sets to Catppuccin, so no theme needs installing; BAT_THEME, when set, wins.
+SYNTAX_THEME=${BAT_THEME:-base16}
+# catppuccin/delta's Macchiato settings, as delta options (git's own delta settings are left alone)
+DELTA_OPTS=(--dark --syntax-theme="$SYNTAX_THEME" --file-style='#cad3f5' --file-decoration-style='#6e738d'
+    --hunk-header-decoration-style='#6e738d box ul' --hunk-header-file-style=bold
+    --hunk-header-line-number-style='bold #a5adcb' --hunk-header-style='file line-number syntax'
+    --line-numbers-left-style='#6e738d' --line-numbers-right-style='#6e738d' --line-numbers-zero-style='#6e738d'
+    --line-numbers-minus-style='bold #ed8796' --line-numbers-plus-style='bold #a6da95'
+    --minus-style='syntax #4c3a4c' --minus-emph-style='bold syntax #6a485a'
+    --plus-style='syntax #3e4b4c' --plus-emph-style='bold syntax #51655a' --commit-decoration-style='#6e738d bold box ul')
+
+# awk: "path" -> "key<0x1f><0x1f>coloured path" (folder part dim, name bright). With deep=1 an archive member "a.zip{m}" becomes the key
+# "a.zip" (shown once); flush=1 streams every line to fzf as soon as it is found; nohit is the line shown
+# when there was no input at all.
+COLOR_PATH='{
+    path = $0; key = $0
+    if (deep && match(key, archive)) key = substr(key, 1, RSTART + RLENGTH - 2)
+    if (seen[key]++) next
+    shown = deep ? key : path
+    match(shown, /[^\/]*\/?$/)
+    dir = substr(shown, 1, RSTART - 1); name = substr(shown, RSTART)
+    gsub(/\//, faint "/" dim, dir)
+    printf "%s\037\037%s%s%s%s%s\n", key, dim, dir, (name ~ /\/$/ ? folder : text), name, off
+    if (flush) fflush()
+}
+END { if (!NR && nohit != "") printf "\037\037%s%s%s\n", hintc, nohit, off }'
+
+# awk "$COLOR_PATH" with the palette; further awk options (-v flush=1 ...) are passed on
+color_paths() {
+    awk -v dim="$C_DIM" -v faint="$C_FAINT" -v text="$C_TEXT" -v folder="$C_BLUE" -v hintc="$C_DIM$C_ITALIC" \
+        -v off="$C_OFF" "$@" "$COLOR_PATH"
+}
+
+die() { printf 'sf: %s\n' "$*" >&2; exit 1; }
+q() { printf '%q' "$1"; }                                   # quote for bash -c (see --with-shell)
+hint() { printf '\037\037%s%s%s\n' "$C_DIM$C_ITALIC" "$*" "$C_OFF"; }   # a list line that selects nothing
+# stderr of a list command as red list lines. Used as 2> >(show_errors >&3): fd 3 is fzf's input (set up
+# by --source), so the messages bypass the pipeline that formats the results.
+show_errors() { awk -v c="$C_RED" -v off="$C_OFF" 'NF { printf "\037\037%s%s%s\n", c, $0, off; fflush() }'; }
+
+mode_index() {
+    local i
+    for i in "${!MODES[@]}"; do [[ ${MODES[i]} == "$1" ]] && { echo "$i"; return 0; }; done
+    return 1
+}
+
+# MODE, DEEP and ALL from a prompt such as "Content +archives +hidden> ".
+read_state() {
+    local p=$1
+    MODE=${p%%[ >]*}; MODE=${MODE,,}
+    mode_index "$MODE" >/dev/null || die "unknown mode in prompt: $p"
+    [[ $p == *' +archives'* ]] && DEEP=1 || DEEP=0
+    [[ $p == *' +hidden'* ]] && ALL=1 || ALL=0
+}
+
+prompt() {
+    local p=${TITLES[$(mode_index "$MODE")]}
+    ((DEEP)) && p+=' +archives'
+    ((ALL)) && p+=' +hidden'
+    printf '%s> ' "$p"
+}
+
+# Two lines, drawn like the tmux status bar: the modes (the current one a mauve block), then the toggles
+# (the ones that are on a blue block). Every key is written next to what it does.
+header() {
+    local i items=()   # each item " F<n> Name ": a block when on, so both lines line up
+    for i in "${!MODES[@]}"; do
+        if [[ ${MODES[i]} == "$MODE" ]]; then items+=("$C_ON_MAUVE F$((i + 2)) ${TITLES[i]} $C_OFF")
+        else items+=(" ${C_FAINT}F$((i + 2))$C_OFF $C_SUB${TITLES[i]}$C_OFF "); fi
+    done
+    local deep=" ${C_FAINT}F7$C_OFF ${C_SUB}archives & PDFs$C_OFF " all=" ${C_FAINT}F8$C_OFF ${C_SUB}hidden & ignored$C_OFF "
+    if ((DEEP)); then deep="$C_ON_BLUE F7 archives & PDFs $C_OFF"; fi
+    if ((ALL)); then all="$C_ON_BLUE F8 hidden & ignored $C_OFF"; fi
+    printf '%s ' "${items[@]}"
+    printf '  %sTab next mode · F1 help%s\n%s %s' "$C_FAINT" "$C_OFF" "$deep" "$all"
+}
+
+# What typing does in the current mode, shown on the input box (no parentheses: it goes inside an fzf action)
+mode_label() {
+    case $MODE in
+        files)   echo 'type to filter file names' ;;
+        content) echo 'type a pattern · lists the files that contain it · ugrep regex, smart case' ;;
+        lines)   echo 'type to filter every line of every file · path and text' ;;
+        folders) echo 'type to filter folders · Enter goes inside, .. goes up' ;;
+        git)     echo 'type to filter the commits of all branches · Enter shows one' ;;
+    esac
+}
+
+preview_window() {
+    if [[ $MODE == lines ]]; then echo 'up:60%:wrap:+{2}+3/3,~3'; else echo 'up:60%:wrap:+0,~0'; fi
+}
+
+# The fzf actions that put fzf into the current MODE/DEEP/ALL.
+switch_actions() {
+    local search='enable-search+unbind(change)'
+    [[ $MODE == content ]] && search='disable-search+rebind(change)'
+    printf 'change-prompt(%s)+change-header(%s)+change-input-label( %s )+%s+change-preview-window(%s)+change-preview-label()+reload(%s --source)' \
+        "$(prompt)" "$(header)" "$C_DIM$(mode_label)$C_OFF" "$search" "$(preview_window)" "$(q "$SELF")"
+}
+
+colored_pwd() { printf '%s\n' "$PWD" | color_paths -v flush=0 | cut -d "$FS" -f3-; }
+
+# ---------------------------------------------------------------- lists (stdout goes to fzf)
+
+list_files() {
+    [[ -n $FD ]] || { hint 'fd is not installed'; return; }
+    local opts=(); ((ALL)) && opts=(--hidden --no-ignore --exclude .git)
+    "$FD" --type f --color=never "${opts[@]}" 2> >(show_errors >&3) | LC_ALL=C sort | color_paths -v flush=0
+}
+
+list_content() {
+    local query=$FZF_QUERY cmd
+    if ((DEEP)); then
+        command -v ugrep+ >/dev/null || { hint 'ugrep+ is not installed (needed for F7)'; return; }
+        [[ -n $query ]] || { hint 'Type a pattern to search inside archives, PDFs and Office documents too'; return; }
+        cmd=(ugrep+ -rzl --sort=name --smart-case --exclude='*.rar')
+    else
+        cmd=(ugrep -rlU --sort=name --smart-case --ignore-binary)
+    fi
+    if ((ALL)); then cmd+=(--hidden --exclude-dir=.git); else cmd+=(--ignore-files); fi
+    # Nothing found: say so, and while archives and PDFs are left out, where else to look
+    local nohit='No match, not even inside archives, PDFs and Office documents'
+    if ((!DEEP)); then nohit='No match. F7 also searches inside archives, PDFs and Office documents'; fi
+    [[ -n $query ]] || nohit=''
+    # -s drops unreadable-file noise; what is left on stderr (e.g. a broken pattern) is shown in the list
+    "${cmd[@]}" -s -e "$query" . 2> >(show_errors >&3) | tr -d '\r' |
+        color_paths -v flush=1 -v deep="$DEEP" -v archive="$ARCHIVE" -v nohit="$nohit"
+}
+
+# Every non-empty line. ugrep writes the list lines itself (--format, about 3x faster than post-processing
+# millions of lines); fields are separated by 0x1f, so a ':' in a file name cannot shift them. With +archives an
+# archive member "a.zip{m}" needs the key "a.zip", which --format cannot express, so awk builds those lines.
+list_lines() {
+    local cmd
+    if ((DEEP)); then
+        command -v ugrep+ >/dev/null || { hint 'ugrep+ is not installed (needed for F7)'; return; }
+        cmd=(ugrep+ -rz --separator="$FS" --line-number --no-heading --color=never)
+    else
+        cmd=(ugrep -rU --ignore-binary --format="%f$FS%n$FS$C_BLUE%f$C_FAINT:$C_DIM%n$C_FAINT:$C_OFF%O%~")
+    fi
+    cmd+=(--sort=name -s)
+    if ((ALL)); then cmd+=(--hidden --exclude-dir=.git); else cmd+=(--ignore-files); fi
+    if ((DEEP)); then
+        "${cmd[@]}" -e . . 2> >(show_errors >&3) | tr -d '\r' | awk -F "$FS" -v archive="$ARCHIVE" \
+            -v blue="$C_BLUE" -v faint="$C_FAINT" -v dim="$C_DIM" -v off="$C_OFF" '{
+            file = $1; line = $2; text = $3
+            for (i = 4; i <= NF; i++) text = text " " $i
+            key = file
+            if (match(key, archive)) key = substr(key, 1, RSTART + RLENGTH - 2)
+            printf "%s\037%s\037%s%s%s:%s%s%s:%s%s\n", key, line, blue, file, faint, dim, line, faint, off, text
+        }'
+    else
+        "${cmd[@]}" -e '.+' . 2> >(show_errors >&3) | tr -d '\r'   # .+ = one match (one list line) per line
+    fi
+}
+
+list_folders() {
+    [[ -n $FD ]] || { hint 'fd is not installed'; return; }
+    local opts=(--no-ignore); ((ALL)) && opts+=(--hidden --exclude .git)
+    printf '..\037\037%s..%s  %sparent folder%s\n' "$C_BLUE" "$C_OFF" "$C_DIM$C_ITALIC" "$C_OFF"
+    "$FD" --type d --color=never "${opts[@]}" 2> >(show_errors >&3) |
+        awk '{ print gsub(/\//, "/") "\t" $0 }' | LC_ALL=C sort -n | cut -f2- | color_paths -v flush=0
+}
+
+list_git() {
+    git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { hint 'Not inside a Git repository'; return; }
+    local total
+    total=$(git rev-list --all --count) || { hint 'git rev-list failed'; return; }
+    git log --all --graph --color=always --abbrev=7 \
+        --format=format:'%C(bold blue)%h%C(reset) %C(dim white)%an%C(reset)%C(bold yellow)%d%C(reset) %C(white)%s%C(reset) %C(bold green)(%ar)%C(reset)%x1f%H' \
+        2> >(show_errors >&3) |
+    awk -F "$FS" -v total="$total" -v num="$C_DIM" -v off="$C_OFF" '
+        NF >= 2 {   # commit line: the full hash is the last field; anything before it is display text
+            display = $1
+            for (i = 2; i < NF; i++) display = display " " $i
+            printf "%s\037\037%s%d%s %s\n", $NF, num, total - n++, off, display
+            next
+        }
+        { printf "\037\037%s\n", $0 }   # graph-only line'
+}
+
+# ---------------------------------------------------------------- preview
+
+show_file() {
+    # fzf gives the preview's width; bat would guess (its output is no terminal) and stop the line band short
+    if [[ -n $BAT ]]; then "$BAT" --color=always --theme="$SYNTAX_THEME" --terminal-width="${FZF_PREVIEW_COLUMNS:-80}" "$@"
+    else cat -- "${@: -1}"; fi
+}
+
+is_text() { [[ $("$SUB/is_text_file" "$1" 2>/dev/null) == true ]]; }
+
+# A file as text, or for a binary its type (bat prints binaries raw when its output is not a terminal).
+show_any() {
+    if is_text "$1"; then show_file -- "$1"
+    else printf '%sNo text preview: %s%s\n' "$C_DIM$C_ITALIC" "$(file -b -- "$1" 2>/dev/null || echo 'binary file')" "$C_OFF"; fi
+}
+
+preview_content() {
+    local file=$1 query=$FZF_QUERY grep=ugrep text=1 count
+    printf '%sFile%s     %s\n' "$C_DIM" "$C_OFF" "$(printf '%s\n' "$file" | color_paths -v flush=0 | cut -d "$FS" -f3-)"
+    if [[ -z $query ]]; then echo; show_any "$file"; return; fi
+    ((DEEP)) && grep=ugrep+
+    is_text "$file" || text=0
+    if ((text)); then
+        count=$("$grep" -oU --smart-case -e "$query" -- "$file" 2>/dev/null | wc -l)
+    else
+        count=$("$grep" -zoa --smart-case -e "$query" -- "$file" 2>/dev/null | wc -l)
+    fi
+    printf '%sPattern%s  %s%s%s\n%sMatches%s  %s%s%s\n\n' "$C_DIM" "$C_OFF" "$C_RED" "$query" "$C_OFF" \
+        "$C_DIM" "$C_OFF" "$C_PEACH" "$count" "$C_OFF"
+    if ((text)); then
+        GREP_COLORS=$GREP_PALETTE "$grep" -nU --smart-case --color=always -C 8 -e "$query" -- "$file"
+    else   # binaries, archives, documents: the matches with some bytes around them
+        GREP_COLORS=$GREP_PALETTE "$grep" -znao --smart-case --color=always -B200 -A200 -e "$query" -- "$file"
+    fi | tr -d '\r'
+}
+
+preview_line() {
+    local file=$1 line=$2
+    if ((DEEP)) && ! is_text "$file"; then
+        ugrep+ -z -n --color=always -e '' -- "$file" | tr -d '\r'   # documents: the converted text
+    elif [[ $line =~ ^[0-9]+$ ]]; then
+        show_file --highlight-line "$line" -- "$file"
+    else
+        show_file -- "$file"
+    fi
+}
+
+preview_commit() {
+    local sha=$1
+    [[ $sha =~ ^[0-9a-f]{7,40}$ ]] || return 0
+    git show -s --color=always --date=format:'%Y-%m-%d %H:%M:%S' \
+        --pretty=format:'%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)' \
+        --end-of-options "$sha"
+    echo
+    if git diff-tree --no-commit-id --name-only -r --root --end-of-options "$sha" | grep -q .; then
+        printf '\n%sFiles%s\n' "$C_MAUVE$C_BOLD" "$C_OFF"
+        git show --color=always --format= --name-status --end-of-options "$sha"
+        printf '\n%sDiffs%s\n' "$C_MAUVE$C_BOLD" "$C_OFF"
+        if command -v delta >/dev/null; then
+            git show --color=always --format= --end-of-options "$sha" | delta --line-numbers "${DELTA_OPTS[@]}"
+        else
+            git show --color=always --format= --end-of-options "$sha"
+        fi
+    fi
+}
+
+preview() {
+    local key=$1 line=$2
+    read_state "$FZF_PROMPT"
+    [[ -n $key ]] || return 0
+    case $MODE in
+        files)   show_any "$key" ;;
+        content) preview_content "$key" ;;
+        lines)   preview_line "$key" "$line" ;;
+        folders) ls -A --color=always -- "$key" ;;
+        git)     preview_commit "$key" ;;
+    esac
+}
+
+help_text() {
+    local h=$C_MAUVE$C_BOLD k=$C_BLUE d=$C_DIM o=$C_OFF
+    keys() { printf '   %s%-9s%s %-34s %s%-11s%s %s\n' "$k" "$1" "$o" "$2" "$k" "$3" "$o" "$4"; }
+    cat <<EOF
+ ${h}sf${o} ${d}— all search functions in one window${o}
+
+ ${h}Modes${o}      ${d}Tab / Shift-Tab: next / previous mode${o}
+   ${k}F2${o}  Files       file names
+   ${k}F3${o}  Content     files whose content matches the query (a ugrep pattern)
+   ${k}F4${o}  Lines       every line of every file; the query filters path and text
+   ${k}F5${o}  Folders     sub-folders; Enter goes inside the selected one, .. goes up
+   ${k}F6${o}  Git         commit history of all branches; Enter shows the whole commit
+
+ ${h}Toggles${o}    ${d}listed under the modes and shown in the prompt${o}
+   ${k}F7${o}  +archives   Content and Lines also search inside archives, PDFs and Office documents
+   ${k}F8${o}  +hidden     hidden and .gitignore'd files are included too
+
+ ${h}Keys${o}
+EOF
+    keys Enter  'open with the default application' Ctrl-o      'open in nvim'
+    keys Ctrl-e 'show in the file manager'          Ctrl-c      'copy the path (Git: the commit hash)'
+    keys Ctrl-t 'search inside the file'            Ctrl-r      'reload the list'
+    keys Ctrl-u 'git diff, side by side'            Ctrl-g      'git diff (delta)'
+    keys Alt-g  'short git diff'                    Alt-u       'git log of the file'
+    keys Ctrl-l 'hide / show the preview'           Alt-Up/Down 'scroll the preview'
+    keys Esc    'quit'                              F1          'this help (move the cursor to close it)'
+}
+
+# ---------------------------------------------------------------- actions
+
+status() { printf 'change-preview-label:%s' "$*"; }                 # colon form: takes the rest verbatim
+status_ok() { status " $C_GREEN$*$C_OFF "; }
+status_err() { status " $C_RED$C_BOLD${*//$'\n'/ }$C_OFF "; }
+
+# open | reveal | copy-path | copy-text VALUE, on Linux or (with windows_action from the WSL edition) on WSL.
+# Runs inside fzf's transform, whose output fzf reads to the end: a program that outlives this call (the
+# opened application, the wl-copy clipboard daemon) must not inherit that pipe, so their output goes to
+# /dev/null and a failure is reported from the exit status.
+platform() {
+    if [[ -x $SUB/windows_action ]] && grep -qi microsoft /proc/version 2>/dev/null; then
+        "$SUB/windows_action" "$@"
+        return
+    fi
+    case $1 in
+        open)    nohup xdg-open "$2" </dev/null >/dev/null 2>&1 || { echo "xdg-open failed (exit $?): $2" >&2; return 1; } ;;
+        reveal)  "$SUB/open_in_file_manager" "$2" ;;   # detaches the file manager itself (stdio to /dev/null)
+        copy-*)  printf '%s' "$2" | wl-copy >/dev/null 2>&1 || { echo "wl-copy failed (exit $?)" >&2; return 1; } ;;
+    esac
+}
+
+run_now() {  # platform action, result shown in the preview label
+    local err
+    if err=$(platform "$@" 2>&1); then
+        case $1 in
+            copy-*) status_ok 'Copied to the clipboard' ;;
+            *)      status '' ;;
+        esac
+    else
+        status_err "${err:-$1 failed}"
+    fi
+}
+
+# Sets CMD (and WINDOW/TITLE for tmux) for the keys that need a terminal.
+terminal_cmd() {
+    local name=$1 path=$2 line=$3
+    case $name in
+        ctrl-o) WINDOW=nvim TITLE=editor CMD=(nvim -- "$path")
+                # LINE becomes nvim's +cmd: only ever a number (a "+!cmd" would run a shell command)
+                if [[ $MODE == lines && $line =~ ^[0-9]+$ ]]; then CMD=(nvim "+$line" -- "$path")
+                elif [[ $MODE == content && -n $FZF_QUERY ]]; then CMD=(nvim -c "/${FZF_QUERY//\//\\/}" -c 'set hlsearch' -- "$path"); fi ;;
+        ctrl-t) WINDOW=infile TITLE=file-content CMD=("$SUB/search_in_single_file" "$path")
+                if [[ $MODE == content ]]; then CMD+=("$FZF_QUERY"); fi ;;
+        ctrl-u) WINDOW=diff TITLE=git CMD=("$SUB/show_diffs" "$path") ;;
+        ctrl-g) WINDOW=diff TITLE=git CMD=("$SUB/git_diff" "$path") ;;
+        alt-g)  WINDOW=diff TITLE=git CMD=("$SUB/git_diff_short" "$path") ;;
+        alt-u)  WINDOW=logs TITLE=git CMD=("$SUB/show_logs" "$path") ;;
+        *)      return 1 ;;
+    esac
+}
+
+# A key was pressed on KEY/LINE: do it now, or print the fzf action that does it.
+key_action() {
+    local name=$1 key=$2 line=$3 err
+    read_state "$FZF_PROMPT"
+    [[ -n $key ]] || { status_err 'Nothing selected'; return; }
+    if [[ $MODE == git ]]; then
+        case $name in
+            enter)  printf 'execute:%s --run enter {1} {2}' "$(q "$SELF")" ;;
+            ctrl-c) run_now copy-text "$key" ;;
+            *)      status_err 'Not available in Git mode' ;;
+        esac
+        return
+    fi
+    case $name in
+        enter)
+            if [[ $MODE == folders ]]; then printf 'become:cd -- {1} && exec %s %s' "$(q "$SELF")" files
+            else run_now open "$PWD/$key"; fi ;;
+        ctrl-e) run_now reveal "$PWD/$key" ;;
+        ctrl-c) run_now copy-path "$key" ;;
+        *)
+            terminal_cmd "$name" "$PWD/$key" "$line" || { status_err "Unknown key: $name"; return; }
+            if [[ -n $TMUX ]]; then
+                if err=$(tmux new-window -n "$WINDOW" -c "$PWD" "${CMD[@]}" 2>&1) && tmux select-pane -T "$TITLE"; then status ''
+                else status_err "${err:-tmux new-window failed}"; fi
+            else
+                printf 'execute:%s --run %s {1} {2}' "$(q "$SELF")" "$name"   # in the foreground
+            fi ;;
+    esac
+}
+
+run_foreground() {
+    local name=$1 key=$2 line=$3
+    read_state "$FZF_PROMPT"
+    if [[ $MODE == git ]]; then
+        [[ $key =~ ^[0-9a-f]{7,40}$ ]] || exit 0
+        if command -v delta >/dev/null; then git show --color=always --end-of-options "$key" | delta --paging=always "${DELTA_OPTS[@]}"
+        else git show --end-of-options "$key"; fi
+        return
+    fi
+    terminal_cmd "$name" "$PWD/$key" "$line" || die "unknown key: $name"
+    "${CMD[@]}"
+}
+
+# ---------------------------------------------------------------- main
+
+case $1 in
+    # A list's exit status says nothing useful: ugrep exits 1 for "no match" and 2 as soon as one file is
+    # unreadable, which fzf would show as "Command failed". Whatever goes wrong is shown in the list
+    # instead (every stderr line through show_errors), so the source itself always succeeds.
+    --source)  exec 3>&1; read_state "${2:-$FZF_PROMPT}"; "list_$MODE" 2> >(show_errors >&3); exit 0 ;;
+    --preview) preview "$2" "$3"; exit ;;
+    --key)     key_action "$2" "$3" "$4"; exit ;;
+    --run)     run_foreground "$2" "$3" "$4"; exit ;;
+    --help-text) help_text; exit ;;
+    --switch)
+        read_state "$FZF_PROMPT"
+        case $2 in
+            next|prev)
+                i=$(mode_index "$MODE"); n=${#MODES[@]}
+                if [[ $2 == next ]]; then i=$(( (i + 1) % n )); else i=$(( (i + n - 1) % n )); fi
+                MODE=${MODES[i]} ;;
+            deep) DEEP=$(( 1 - DEEP )) ;;
+            all)  ALL=$(( 1 - ALL )) ;;
+            *)    mode_index "$2" >/dev/null || die "unknown mode: $2"; MODE=$2 ;;
+        esac
+        switch_actions; exit ;;
+    -h|--help) sed -n '2,10s/^# \{0,1\}//p' "$SELF"; exit ;;
+esac
+
+MODE=${1:-files} DEEP=0 ALL=0
+mode_index "$MODE" >/dev/null || die "unknown mode: $MODE (files, content, lines, folders or git)"
+command -v fzf >/dev/null || die 'fzf is not installed'
+command -v ugrep >/dev/null || die 'ugrep is not installed'
+fzf_version=$(fzf --version | cut -d ' ' -f1)
+printf '%s\n' 0.58.0 "$fzf_version" | sort -V -C || die "fzf 0.58 or newer is needed (found $fzf_version)"
+# fzf 0.66+ draws a bar in the gutter of every line; a blank keeps the list calm (older ones draw none)
+gutter=()
+if printf '%s\n' 0.66.0 "$fzf_version" | sort -V -C; then gutter=(--gutter ' '); fi
+
+self=$(q "$SELF")
+binds=(
+    "start:transform:$self --switch $MODE"
+    "change:reload($self --source)+refresh-preview"      # live search, bound only in Content mode
+    "tab:transform:$self --switch next"
+    "btab:transform:$self --switch prev"
+    "f7:transform:$self --switch deep"
+    "f8:transform:$self --switch all"
+    "f1:preview:$self --help-text"
+    "ctrl-r:reload($self --source)"
+    'focus:change-preview-label()'
+    'ctrl-l:toggle-preview'
+    'home:last,end:first'
+    'alt-up:preview-page-up'
+    'alt-down:preview-page-down'
+    'ctrl-alt-h:unix-line-discard'
+    'alt-bs:unix-word-rubout'
+    'ctrl-h:backward-kill-word'
+)
+for i in "${!MODES[@]}"; do binds+=("f$((i + 2)):transform:$self --switch ${MODES[i]}"); done
+for k in enter ctrl-e ctrl-c ctrl-o ctrl-t ctrl-u ctrl-g alt-g alt-u; do binds+=("$k:transform:$self --key $k {1} {2}"); done
+
+if [[ -n $TMUX ]]; then
+    export SF_TMUX_WINDOW_NAME=${SF_TMUX_WINDOW_NAME:-$(tmux display-message -p '#W')}   # survives "become"
+    tmux rename-window search
+fi
+
+fzf --with-shell 'bash -c' --ansi -i --exact --no-sort --wrap --style full "${gutter[@]}" \
+    --delimiter "$FS" --with-nth '3..' \
+    --prompt "$(prompt)" --header "$(header)" --input-label " $C_DIM$(mode_label)$C_OFF " \
+    --border top --border-label " $(colored_pwd) " \
+    --color "$FZF_COLORS" \
+    --preview "$self --preview {1} {2}" --preview-window 'up:60%:wrap' \
+    "${binds[@]/#/--bind=}" </dev/null
+rc=$?
+
+[[ -n $TMUX ]] && tmux rename-window "$SF_TMUX_WINDOW_NAME"
+exit "$rc"

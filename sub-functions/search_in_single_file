@@ -8,25 +8,43 @@ QUERY="$2"
 # fzf runs the preview, bind and reload commands through $SHELL -c; FILE and QUERY reach them via the
 # environment, so their contents are never spliced into a command string.
 export FILE QUERY
-export GREP_COLORS="ms=01;31:mc=01;31:sl=:cx=35:fn=35:ln=32:bn=32:se=36"
+
+# Look: Catppuccin Macchiato on the terminal's own background, as in sf. The list's matches red, its line
+# numbers dim; the preview is bat with the base16 theme (the terminal's Catppuccin colours, the selected
+# line in a band; BAT_THEME wins when set).
+export GREP_COLORS='ms=1;38;2;237;135;150:mc=1;38;2;237;135;150:sl=:cx=38;2;128;135;162:fn=38;2;138;173;244:ln=38;2;128;135;162:bn=38;2;128;135;162:se=38;2;110;115;141'
+export BAT SYNTAX_THEME=${BAT_THEME:-base16}
+BAT=$(command -v bat || command -v batcat)
+FZF_COLORS='bg:-1,gutter:-1,preview-bg:-1,preview-fg:-1,bg+:#363A4F,fg:#CAD3F5,fg+:#CAD3F5,query:#CAD3F5,hl:#ED8796,hl+:#ED8796,header:#A5ADCB,info:#C6A0F6,prompt:#C6A0F6,pointer:#F4DBD6,marker:#B7BDF8,spinner:#F4DBD6,selected-bg:#494D64,border:#6E738D,label:#CAD3F5'
+dim=$'\033[38;2;128;135;162m' faint=$'\033[38;2;110;115;141m' text=$'\033[38;2;202;211;245m' off=$'\033[0m'
+dir=${FILE%/*}/ name=${FILE##*/}
+label=" $dim${dir//\//$faint/$dim}$text$name$off "
+# fzf 0.66+ draws a bar in the gutter of every line; a blank keeps the list calm (older ones draw none)
+gutter=()
+if printf '%s\n' 0.66.0 "$(fzf --version | cut -d ' ' -f1)" | sort -V -C; then gutter=(--gutter ' '); fi
 
 FZF_DEFAULT_COMMAND='ugrep -Un --color=always --smart-case -e "$QUERY" -- "$FILE" | tr -d "\r"' \
-fzf -i --ansi \
+fzf -i --ansi "${gutter[@]}" \
+    --with-shell 'bash -c' \
     --no-sort \
     --exact \
     --style full \
     --wrap \
     --border rounded \
     --query "$QUERY" \
-    --border-label " $(printf '%s\n' "$FILE" | sed "s/^[^/]\\+$/\x1b[32m&/" | sed "s/\\(.*\\/\\)\\(.*\\)/\x1b[34m\\1\x1b[32m\\2/" | sed "s/\//\x1b[33m\/\x1b[34m/g") " \
+    --border-label "$label" \
+    --input-label " ${dim}type to search this file · with several words, lines with any of them$off " \
     --delimiter : \
     --preview '
-        ugrep -Un -e "" -- "$FILE" | tr -d "\r" | awk -v line={1} '"'"'
-            BEGIN {FS=":"}
-            $1 == line {printf "\033[32m%4d\033[0m:\033[33m%s\033[0m\n", $1, substr($0,length($1)+2); next}
-            {printf "\033[32m%4d\033[0m:%s\n", $1, substr($0,length($1)+2)}
-        '"'" \
-    --color 'preview-fg:bright-magenta,fg:green,fg+:green,bg:234,bg+:235,hl:red,hl+:red,info:144,border:240,prompt:161,pointer:161,marker:118,spinner:118,header:168' \
+        line={1}; case $line in ""|*[!0-9]*) line=0 ;; esac   # the list line number, nothing else
+        if [ -n "$BAT" ]; then
+            if [ "$line" -gt 0 ]; then mark=(--highlight-line "$line"); else mark=(); fi
+            "$BAT" --color=always --theme="$SYNTAX_THEME" --style=numbers --terminal-width="${FZF_PREVIEW_COLUMNS:-80}" \
+                "${mark[@]}" -- "$FILE"
+        else
+            ugrep -Un -e "" -- "$FILE" | tr -d "\r"
+        fi' \
+    --color "$FZF_COLORS" \
     --layout reverse \
     --preview-window "down:75%:wrap:+{1}-5" \
     --bind "alt-up:preview-page-up" \
