@@ -43,21 +43,23 @@ use crate::model::{Options, Tab};
 use crate::preview::Previewer;
 use crate::runner::Runner;
 
-const USAGE: &str = "usage: sf [files|content|folders|git] [QUERY...] [--print] [-- ENGINE-OPTIONS...]
+const USAGE: &str = "usage: sf [files|content|deep|folders|git] [QUERY...] [--print] [-- ENGINE-OPTIONS...]
        sf open|reveal|copy-path PATH
        sf copy-text TEXT
        sf doctor
 
-The search functions in one window: Files, Content (search inside files), Folders and Git. Tab / Shift-Tab or
+The search functions in one window: Files, Content (search inside text files), Deep (inside every file:
+binaries, archives, with Documents PDF and Office files), Folders and Git. Tab / Shift-Tab or
 a click switch the tab; ⚙ Config (or Ctrl-S) holds the tab's options; Esc quits. The keys for the
 selected item are listed at the bottom. Options are kept in $XDG_CONFIG_HOME/sf/config.toml
 (~/.config/sf/config.toml).
 
-QUERY starts the tab with it: what filters the list in Files, Folders and Git, the pattern in Content.
-Options after -- go to the starting tab's engine: fd in Files and Folders, ugrep in Content, git log in Git
-(sf files -- -e rs, sf content TODO -- -t py); those that change what the engine prints are refused.
+QUERY starts the tab with it: what filters the list in Files, Folders and Git, the pattern in Content and
+Deep. Options after -- go to the starting tab's engine: fd in Files and Folders, ugrep in Content and Deep,
+git log in Git (sf files -- -e rs, sf content TODO -- -t py, sf deep needle -- -i); those that change what
+the engine prints are refused.
 With --print, or when the output goes to a pipe or a file, sf prints the list instead of opening the
-window: on a terminal as the window shows it, into a pipe the real paths (Content: ugrep's own
+window: on a terminal as the window shows it, into a pipe the real paths (Content and Deep: ugrep's own
 path:line:text); exit status 0 when something was listed, 1 when nothing, 2 on an error.
 
 The other forms do one action as the window does, on Linux and on WSL alike: open PATH with its default

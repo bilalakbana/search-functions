@@ -115,6 +115,50 @@ pub enum ListPlan {
     Hint(String),
 }
 
+/// How Content or Deep searches for a pattern.
+struct Search {
+    matching_lines: bool,
+    each_match: bool,
+    /// Inside zip, tar, 7z... (`-z`).
+    archives: bool,
+    /// PDF and Office files as text: ugrep+ instead of ugrep.
+    documents: bool,
+    /// Binary files are searched too (no `--ignore-binary`).
+    binaries: bool,
+}
+
+impl Search {
+    fn of(tab: Tab, opts: &Options, query: &str) -> Search {
+        // While the pattern is empty every file is listed (as ugrep-fzf does), always as a plain file
+        // list: every line of every file, or every PDF converted, would be far too much. Content lists
+        // the text files, Deep every file.
+        let pattern = !query.is_empty();
+        if tab == Tab::Deep {
+            return Search {
+                matching_lines: false,
+                each_match: pattern && opts.deep.each_match,
+                archives: pattern,
+                documents: pattern && opts.deep.documents,
+                binaries: true,
+            };
+        }
+        let c = &opts.content;
+        let (matching_lines, each_match, archives) = if pattern {
+            (c.matching_lines, c.each_match, c.archives)
+        } else {
+            (false, false, false)
+        };
+        Search {
+            matching_lines,
+            each_match,
+            archives,
+            documents: archives,
+            // with Archives & documents the file list has binaries too, the lists of matches not
+            binaries: archives && !matching_lines && !each_match,
+        }
+    }
+}
+
 /// Ctrl-T: the lines of one file (`key`, as listed) that `pattern` matches, every line while it is
 /// empty, read as Matching lines are.
 pub fn in_file_plan(key: &std::ffi::OsStr, pattern: &str, e: &Engines) -> ListPlan {
@@ -179,18 +223,25 @@ pub fn list_plan_with(
                 kind,
             }
         }
-        Tab::Content => {
-            // While the pattern is empty every file is listed (as ugrep-fzf does), always as a plain file
-            // list: every line of every file, or every PDF converted, would be far too much.
-            let (matching_lines, each_match, archives) = if query.is_empty() {
-                (false, false, false)
-            } else {
-                let c = &opts.content;
-                (c.matching_lines, c.each_match, c.archives)
-            };
-            let program = if archives {
+        Tab::Content | Tab::Deep => {
+            let Search {
+                matching_lines,
+                each_match,
+                archives,
+                documents,
+                binaries,
+            } = Search::of(tab, opts, query);
+            let program = if documents {
                 let Some(p) = &e.ugrep_plus else {
-                    return hint("ugrep+ is not installed (needed for Archives & documents)");
+                    let option = if tab == Tab::Deep {
+                        Opt::Documents
+                    } else {
+                        Opt::Archives
+                    };
+                    return hint(&format!(
+                        "ugrep+ is not installed (needed for {})",
+                        option.label(tab)
+                    ));
                 };
                 p
             } else {
@@ -213,8 +264,10 @@ pub fn list_plan_with(
                 (false, _, true) => "-rzl",
             };
             let mut cmd = Cmd::new(program).args([first, "--sort=name", "--smart-case"]);
-            if !archives || matching_lines || each_match {
+            if !binaries {
                 cmd = cmd.arg("--ignore-binary");
+            } else if each_match {
+                cmd = cmd.arg("-a"); // a binary's matches as text, as detailedsearch
             }
             cmd = cmd.arg("-s");
             let around = ["-B50", "-A50"];
@@ -384,10 +437,10 @@ pub fn preview_plan_with(
             header: None,
             path,
         },
-        Tab::Content => {
-            let s = &opts.content;
-            let grep = if s.archives { &e.ugrep_plus } else { &e.ugrep };
-            let count = |g: &PathBuf, opts: &[&str]| {
+        Tab::Content | Tab::Deep => {
+            let s = Search::of(tab, opts, query);
+            let grep = if s.documents { &e.ugrep_plus } else { &e.ugrep };
+            let with_pattern = |g: &PathBuf, opts: &[&str]| {
                 Cmd::new(g)
                     .args(opts)
                     .args(extra)
@@ -405,14 +458,24 @@ pub fn preview_plan_with(
                     .filter(|_| !query.is_empty())
                     .map(|g| Matches {
                         pattern: query.to_string(),
-                        text: count(g, &["-c", "-o", "-U", "--smart-case"]),
-                        binary: count(g, &["-z", "-c", "-o", "-a", "--smart-case"]),
+                        text: with_pattern(g, &["-c", "-o", "-U", "--smart-case"]),
+                        binary: with_pattern(g, &["-z", "-c", "-o", "-a", "--smart-case"]),
                     }),
             };
+            // binaries, archives, documents: each match with some bytes around it
+            let matches = |g: &PathBuf| {
+                with_pattern(
+                    g,
+                    &["-znao", "--smart-case", "--color=always", "-B200", "-A200"],
+                )
+                .env("GREP_COLORS", GREP_PALETTE)
+            };
             if s.matching_lines || s.each_match {
-                // documents and archives: their text as ugrep+ converts it
-                let binary = match &e.ugrep_plus {
-                    Some(plus) if s.archives => Binary::Show(
+                let binary = match (tab, grep) {
+                    // Deep's matches in a binary are what its row shows
+                    (Tab::Deep, Some(g)) => Binary::Show(matches(g)),
+                    // documents and archives: their text as ugrep+ converts it
+                    (Tab::Content, Some(plus)) if s.documents => Binary::Show(
                         Cmd::new(plus)
                             .args(["-z", "-n", "--color=always", "-e", "", "--"])
                             .arg(&path)
@@ -435,28 +498,20 @@ pub fn preview_plan_with(
                     path,
                 };
             };
-            let matches = |opts: &[&str]| {
-                Cmd::new(grep)
-                    .args(opts)
-                    .args(extra)
-                    .arg("-e")
-                    .arg(query)
-                    .arg("--")
-                    .arg(&path)
-            };
             PreviewPlan::Numbered {
                 // a text file's matching lines as the list reads them; the preview adds the lines around
-                lines: matches(&[
-                    "-nHU",
-                    "--smart-case",
-                    "--null",
-                    "--separator=\x1f",
-                    "--color=never",
-                    "--replace=\x01%o\x02",
-                ]),
-                // binaries, archives, documents: each match with some bytes around it
-                binary: matches(&["-znao", "--smart-case", "--color=always", "-B200", "-A200"])
-                    .env("GREP_COLORS", GREP_PALETTE),
+                lines: with_pattern(
+                    grep,
+                    &[
+                        "-nHU",
+                        "--smart-case",
+                        "--null",
+                        "--separator=\x1f",
+                        "--color=never",
+                        "--replace=\x01%o\x02",
+                    ],
+                ),
+                binary: matches(grep),
                 header,
                 path,
             }
@@ -690,6 +745,121 @@ mod tests {
         let (cmd, _) = run(list_plan(Tab::Content, &o, "x", &engines()));
         assert!(!cmd.args.contains(&"--ignore-files".into()));
         assert!(!cmd.args.contains(&"--hidden".into()));
+    }
+
+    #[test]
+    fn deep_searches_binaries_and_archives() {
+        // advancedsearch: no --ignore-binary, -z for archives, .rar left out
+        let (cmd, kind) = run(list_plan(
+            Tab::Deep,
+            &Options::default(),
+            "needle",
+            &engines(),
+        ));
+        assert_eq!(cmd.program, PathBuf::from("/bin/ugrep"));
+        assert_eq!(
+            cmd.args,
+            os(&[
+                "-rzl",
+                "--sort=name",
+                "--smart-case",
+                "-s",
+                "--null",
+                "--exclude=*.rar",
+                "--exclude-dir=.git",
+                "-e",
+                "needle",
+                "."
+            ])
+        );
+        assert_eq!(kind, ParseKind::SearchFiles { archives: true });
+    }
+
+    #[test]
+    fn deep_documents_uses_ugrep_plus() {
+        let mut o = Options::default();
+        o.toggle(Tab::Deep, Opt::Documents);
+        let (cmd, _) = run(list_plan(Tab::Deep, &o, "needle", &engines()));
+        assert_eq!(cmd.program, PathBuf::from("/bin/ugrep+"));
+        assert_eq!(cmd.args[0], "-rzl");
+        let e = Engines {
+            ugrep_plus: None,
+            ..engines()
+        };
+        let ListPlan::Hint(h) = list_plan(Tab::Deep, &o, "needle", &e) else {
+            panic!("expected a hint")
+        };
+        assert!(h.contains("needed for Documents"), "{h}");
+    }
+
+    #[test]
+    fn deep_each_match_reads_binaries_as_text() {
+        // detailedsearch: every match, in binaries too (-a), with 50 columns around it
+        let mut o = Options::default();
+        o.toggle(Tab::Deep, Opt::EachMatch);
+        let (cmd, kind) = run(list_plan(Tab::Deep, &o, "needle", &engines()));
+        assert_eq!(
+            cmd.args,
+            os(&[
+                "-rzno",
+                "--sort=name",
+                "--smart-case",
+                "-a",
+                "-s",
+                "--null",
+                "--separator=\x1f",
+                "--color=always",
+                "-B50",
+                "-A50",
+                "--exclude=*.rar",
+                "--exclude-dir=.git",
+                "-e",
+                "needle",
+                "."
+            ])
+        );
+        assert_eq!(
+            cmd.env,
+            vec![("GREP_COLORS".to_string(), EACH_MATCH_COLORS.to_string())]
+        );
+        assert_eq!(kind, ParseKind::SearchMatches);
+    }
+
+    #[test]
+    fn deep_empty_query_lists_every_file() {
+        // binaries too, but no archive members: those are what a pattern finds
+        let mut o = Options::default();
+        o.toggle(Tab::Deep, Opt::EachMatch);
+        o.toggle(Tab::Deep, Opt::Documents);
+        let (cmd, kind) = run(list_plan(Tab::Deep, &o, "", &engines()));
+        assert_eq!(cmd.program, PathBuf::from("/bin/ugrep"));
+        assert_eq!(
+            cmd.args,
+            os(&[
+                "-rlU",
+                "--sort=name",
+                "--smart-case",
+                "-s",
+                "--null",
+                "--exclude-dir=.git",
+                "-e",
+                "",
+                "."
+            ])
+        );
+        assert_eq!(kind, ParseKind::SearchFiles { archives: false });
+    }
+
+    #[test]
+    fn deep_hidden_and_ignored_are_its_own() {
+        let mut o = Options::default();
+        (o.deep.hidden, o.deep.ignored) = (true, false);
+        let (cmd, _) = run(list_plan(Tab::Deep, &o, "x", &engines()));
+        assert!(cmd.args.contains(&"--hidden".into()));
+        assert!(cmd.args.contains(&"--ignore-files".into()));
+        let (cmd, _) = run(list_plan(Tab::Content, &o, "x", &engines()));
+        assert!(!cmd.args.contains(&"--hidden".into()));
+        assert!(!cmd.args.contains(&"--ignore-files".into()));
     }
 
     #[test]
@@ -1282,6 +1452,91 @@ mod tests {
             panic!("{plan:?}")
         };
         assert!(text.unwrap().args.contains(&"--highlight-line".into()));
+    }
+
+    #[test]
+    fn deep_preview_numbers_the_matches() {
+        let deep = |o: &Options, key: &str, line: Option<u32>, query: &str| {
+            preview_plan(
+                Tab::Deep,
+                o,
+                query,
+                &item(key, line),
+                72,
+                &engines(),
+                Path::new("/r"),
+            )
+        };
+        let mut o = Options::default();
+        let plan = deep(&o, "a.dll", None, "ne");
+        let PreviewPlan::Numbered {
+            lines,
+            binary,
+            header,
+            ..
+        } = plan
+        else {
+            panic!("{plan:?}")
+        };
+        assert_eq!(lines.program, PathBuf::from("/bin/ugrep"));
+        assert_eq!(binary.program, PathBuf::from("/bin/ugrep"));
+        assert_eq!(binary.args[0], "-znao");
+        assert!(header.matches.is_some());
+        o.toggle(Tab::Deep, Opt::Documents);
+        let plan = deep(&o, "a.pdf", None, "ne");
+        let PreviewPlan::Numbered { binary, .. } = plan else {
+            panic!("{plan:?}")
+        };
+        assert_eq!(binary.program, PathBuf::from("/bin/ugrep+"));
+    }
+
+    #[test]
+    fn deep_preview_of_a_match_is_its_line_or_the_binary_matches() {
+        let mut o = Options::default();
+        o.toggle(Tab::Deep, Opt::EachMatch);
+        let plan = preview_plan(
+            Tab::Deep,
+            &o,
+            "ne",
+            &item("a.dll", Some(7)),
+            72,
+            &engines(),
+            Path::new("/r"),
+        );
+        let PreviewPlan::Sniff {
+            text,
+            binary: Binary::Show(binary),
+            ..
+        } = plan
+        else {
+            panic!("{plan:?}")
+        };
+        assert!(text.unwrap().args.contains(&"--highlight-line".into()));
+        assert_eq!(binary.program, PathBuf::from("/bin/ugrep"));
+        assert_eq!(binary.args[0], "-znao");
+    }
+
+    #[test]
+    fn deep_preview_without_a_pattern_is_the_file() {
+        let plan = preview_plan(
+            Tab::Deep,
+            &Options::default(),
+            "",
+            &item("a.dll", None),
+            72,
+            &engines(),
+            Path::new("/r"),
+        );
+        let PreviewPlan::Sniff {
+            binary: Binary::Describe(Some(file)),
+            header: Some(header),
+            ..
+        } = plan
+        else {
+            panic!("{plan:?}")
+        };
+        assert_eq!(file.program, PathBuf::from("/bin/file"));
+        assert_eq!(header.matches, None);
     }
 
     #[test]

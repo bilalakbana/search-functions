@@ -19,7 +19,7 @@ A collection of efficient and flexible search tools to search inside file conten
 
 | Function          | Description                                                                 |
 |-------------------|-----------------------------------------------------------------------------|
-| `sf`              | All of it in one window (a compiled app): tabs Files · Content · Folders · Git, options under ⚙ Config, mouse and keys |
+| `sf`              | All of it in one window (a compiled app): tabs Files · Content · Deep · Folders · Git, options under ⚙ Config, mouse and keys |
 | `advancedsearch`  | Search in text, binary, and most file types                                 |
 | `advancedsearch_plus` | Like `advancedsearch` + support for PDF, Word, DOCX                     |
 | `detailedsearch`  | Like `advancedsearch` + displays matching lines for filtering               |
@@ -41,12 +41,13 @@ A collection of efficient and flexible search tools to search inside file conten
 ```bash
 sf                         # starts in Files
 sf content needle          # Content searching for "needle"; files, folders and git take a filter
+sf deep needle -- -i       # Deep: binaries and archives too, as advancedsearch (-i: ignore case)
 sf files -- -e rs -d 3     # options after -- go to the tab's engine: fd, ugrep or git log
 sf content TODO | wc -l    # into a pipe or a file (or with --print) sf prints the list, no window
 ```
 
 Options that change what the engine prints (`-l`, `--color`, `-c`, `--json`, `-C 3`, `--oneline`, …) are
-refused with the reason. Into a pipe or a file the real paths go (Content: ugrep's own `path` or
+refused with the reason. Into a pipe or a file the real paths go (Content and Deep: ugrep's own `path` or
 `path:line:text` lines); on a terminal, with `--print`, the rows as the window shows them, never a raw control
 character. The exit status is 0 when something was listed, 1 when nothing, 2 on an error.
 
@@ -54,6 +55,7 @@ character. The exit status is 0 when something was listed, 1 when nothing, 2 on 
 |-----|-------|--------|------------------------------|
 | Files | every file below the folder | filters the names | Hidden files ✗, Ignored files ✓ |
 | Content | the files that contain the pattern (ugrep); every text file while it is empty | the pattern, searched 150 ms after the last key; the preview shows the file, the pattern, how often it occurs and each match numbered ("Match #1", …) with two lines around it | Matching lines ✗ (list the lines instead), Each match ✗ (a row for every match with the text around it, as `detailedsearch`), Archives & documents ✗ (zip, tar, 7z, PDF, Office via `ugrep+`), Hidden files ✗, Ignored files ✓ |
+| Deep | as Content, in every file: binaries (dll, exe, …) and archives (zip, tar, 7z, gz) too; every file while the pattern is empty. Together `advancedsearch`, `advancedsearch_plus` and `detailedsearch` | the pattern, as in Content; the preview numbers the matches, in a binary each with the bytes around it | Each match ✗ (`detailedsearch`: every match with the text around it, in binaries too), Documents ✗ (PDF, Office, e-books as text via `ugrep+`, as `advancedsearch_plus`; slower), Hidden files ✗, Ignored files ✓ |
 | Folders | every folder, `..` first | filters the names; `Enter` goes inside | Hidden folders ✗, Ignored folders ✓ |
 | Git | the commit graph, numbered | filters the commits; `Enter` shows one | All branches ✓ |
 
@@ -151,7 +153,7 @@ uses them. If `sf` is not found, `~/.local/bin` is not in your `PATH` yet: log i
 once it exists) or add `export PATH="$HOME/.local/bin:$PATH"` to your shell's rc file. Taken from the system when
 wanted: git (Git tab, diffs), tmux (actions in windows of their own), an editor for `Ctrl-o` (nvim, else
 `$VISUAL`, `$EDITOR`, vim or vi), and for PDF and Office files
-in Content `sudo apt install poppler-utils antiword pandoc`. Each release names the package's sha256 (also in
+in Content and Deep `sudo apt install poppler-utils antiword pandoc`. Each release names the package's sha256 (also in
 `sf-linux-x86_64.tar.gz.sha256`); what is inside and the licenses: `~/.local/share/doc/sf/`. To update, run the
 line again.
 

@@ -13,7 +13,8 @@ fast tool he can ship and use on the Linux PC and on WSL.
 
 ## Goals
 
-1. One window. A single-line tab bar at the top: **Files · Search · Folders · Git**, and at its right end
+1. One window. A single-line tab bar at the top: **Files · Content · Deep · Folders · Git** (first Files · Search ·
+   Folders · Git), and at its right end
    **⚙ Config**. Tabs are clicked with the mouse; Tab / Shift-Tab cycle forward / backward. No F-key labels.
 2. **Config** opens a popup with the current tab's options as checkboxes (click or Space toggles, Esc closes).
    Changes apply at once and are remembered (`~/.config/sf/config.toml`).
@@ -21,7 +22,8 @@ fast tool he can ship and use on the Linux PC and on WSL.
    is a ugrep pattern; by default the list shows the files that contain it; the option **Matching lines** shows the
    matching lines instead (file, line number, text), **Each match** a row for every match with the text around
    it (`detailedsearch`); the option **Archives & documents** also searches inside zip/tar/7z/gz/... archives and
-   PDF/Office documents (`ugrep+ -z`).
+   PDF/Office documents (`ugrep+ -z`). The tab **Deep** (2026-10-17) is the same search in every file, binaries and
+   archives included: `advancedsearch`, `advancedsearch_plus` and `detailedsearch` under one Config.
 4. The actions keep their keys and work on the selected item: **Enter** open with the default application,
    **Ctrl-O** nvim (at the line in Matching lines), **Ctrl-T** search inside the file, **Ctrl-U / Ctrl-G / Alt-G**
    git history / diff / short diff, **Alt-U** git log of the file, **Ctrl-E** show in the file manager,
@@ -92,6 +94,7 @@ Config popup (Search):
 |---|---|---|---|
 | Files | `fd --type f`, sorted | filters the list (fuzzy) | Hidden files ✗, Ignored files ✓ (Bilal) |
 | Search | `ugrep -rl` (files), matching lines (`ugrep -rn`) or each match (`ugrep -rno -B50 -A50`); `ugrep+ -z` with archives | the ugrep pattern; runs after a short pause (150 ms) | Matching lines ✗ (Bilal), Each match ✗, Archives & documents ✗, Hidden files ✗, Ignored files ✓ (Bilal) |
+| Deep | `ugrep -rzl` (files, binaries and archives included) or each match (`ugrep -rznoa -B50 -A50`); `ugrep+` with Documents | as Search | Each match ✗, Documents ✗, Hidden files ✗, Ignored files ✓ |
 | Folders | `fd --type d`, sorted by depth, `..` first | filters the list | Hidden folders ✗, Ignored folders ✓ (Bilal) |
 | Git | `git log --graph`, numbered | filters the list | All branches ✓ |
 
@@ -260,7 +263,7 @@ Release package (Step 2 of `docs/sf-next-steps.md`, 2026-10-17):
 
 Command line (v0.2.0, 2026-10-17; Bilal asked for engine flags and a print mode):
 
-- `sf [files|content|folders|git] [QUERY...] [--print] [-- ENGINE-OPTIONS...]` (`cli.rs`). QUERY (words joined
+- `sf [files|content|deep|folders|git] [QUERY...] [--print] [-- ENGINE-OPTIONS...]` (`cli.rs`). QUERY (words joined
   by spaces) starts the tab with it: the filter in Files, Folders and Git, the pattern in Content. A word with a
   leading `-` before `--` is an error that points to `--` (a pattern starting with `-` is typed in the window).
   Kept as words (`sf files`), not `--files`: after `--` every option is the engine's.
@@ -325,3 +328,21 @@ Step 4, advancedsearch and detailedsearch inside sf (2026-10-17):
   spaces and a CRLF file without its `\r`. At most 300 blocks, then "… and N more matching lines". A binary file,
   an archive or a document shows each match on its own line with some bytes around it (`-znao -B200 -A200`),
   numbered the same way.
+
+The Deep tab (2026-10-17; Bilal: a tab of its own, "Deep", because advancedsearch and detailedsearch also search
+binaries such as dll and exe, which Content leaves out; in a repository full of binaries one Tab key switches
+between the two instead of an option in the popup):
+
+- Deep is `advancedsearch`, `advancedsearch_plus` and `detailedsearch` under one Config: the file list is
+  `ugrep -rzl` without `--ignore-binary` (binaries, and archive members as `a.zip{m}` read as `a.zip`), `*.rar`
+  left out as the scripts did; **Documents** runs `ugrep+` (PDF, Office, e-books through its filters:
+  `advancedsearch_plus`); **Each match** is `-rzno -a -B50 -A50` (`detailedsearch`: `-a` shows a binary's
+  matches as text, with the bytes around them). Hidden ✗, Ignored ✓ as in Content. While the pattern is empty it
+  lists every file (`-rlU`, no `-z`: archive members are what a pattern finds).
+- Everything else is Content's: one shared query (Tab from Content keeps the pattern), the 150 ms pause, rows not
+  filtered by the pattern, the numbered preview (a binary's matches through `-znao -B200 -A200`; in Each match a
+  binary row shows those, a text row bat at the line), the header with the count, Ctrl-T, Ctrl-O with the pattern,
+  `sf deep PATTERN -- OPTIONS` with Content's refusals, `--print` and pipes. Content keeps its own Each match and
+  Archives & documents (Bilal: keep them there too). The code shares Content's: `commands::Search` says how a
+  tab searches, `Tab::searches()` which tabs take a pattern.
+- Case: smart case as in the rest of sf (the scripts always passed `-i`); `sf deep P -- -i` for that.

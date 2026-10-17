@@ -27,7 +27,7 @@ pub fn print(
     root: &Path,
 ) -> u8 {
     let terminal = io::stdout().is_terminal();
-    if tab != Tab::Content || terminal {
+    if !tab.searches() || terminal {
         let plan = list_plan_with(tab, options, query, engines, extra, false);
         let mut out = io::BufWriter::new(io::stdout().lock());
         return rows(
@@ -85,8 +85,8 @@ fn rows(
     let mut runner = Runner::new(tx);
     runner.start(1, cmd, kind, root);
     let mut filter = Filter::new();
-    // as in the window: in Content the query is ugrep's pattern, not a filter of the rows
-    filter.set_query(if tab == Tab::Content { "" } else { query });
+    // as in the window: in Content and Deep the query is ugrep's pattern, not a filter of the rows
+    filter.set_query(if tab.searches() { "" } else { query });
     let mut failed = false;
     for msg in rx {
         match msg {
@@ -104,7 +104,7 @@ fn rows(
     // Folders' first row, "..", is for going up in the window, not a folder of the list
     for item in rows.filter(|i| i.selectable && **i != parent) {
         // the drawn row has no control character: names through `printable`, Git through `ansi_text`
-        let written = if terminal || matches!(tab, Tab::Git | Tab::Content) {
+        let written = if terminal || tab == Tab::Git || tab.searches() {
             let line: String = item
                 .display()
                 .spans
@@ -199,6 +199,18 @@ mod tests {
             out.contains(":3:x needle") && !out.contains('\x1b'),
             "{out:?}"
         );
+    }
+
+    #[test]
+    fn deep_rows_are_not_filtered_by_the_pattern() {
+        let bin = temp_dir("print_deep");
+        executable(&bin.join("ugrep"), "#!/bin/sh\nprintf 'lib/a.dll\\000'\n");
+        let e = Engines {
+            ugrep: Some(bin.join("ugrep")),
+            ..Engines::default()
+        };
+        let (code, out, err) = print_rows(Tab::Deep, "needle", &e);
+        assert_eq!((code, out.as_str()), (0, "lib/a.dll\n"), "{err:?}");
     }
 
     /// Engines whose fd prints `listing` (NUL-separated, as with `-0`) and `message` on stderr.

@@ -296,7 +296,7 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
         frame.render_widget(Paragraph::new(line), Rect::new(inner.x, y, inner.width, 1));
     }
     // the filter's words, drawn red in the rows (Search's query is a pattern for the contents)
-    let words: Vec<String> = if app.tab == Tab::Content {
+    let words: Vec<String> = if app.tab.searches() {
         Vec::new()
     } else {
         app.query
@@ -403,6 +403,7 @@ fn short(opt: Opt) -> &'static str {
         Opt::MatchingLines => "matching lines",
         Opt::EachMatch => "each match",
         Opt::Archives => "archives & documents",
+        Opt::Documents => "documents",
         Opt::AllBranches => "all branches",
     }
 }
@@ -420,6 +421,10 @@ fn placeholder(app: &App) -> &'static str {
             "type a pattern · lists every match with the text around it"
         }
         Tab::Content => "type a pattern · lists the files that contain it",
+        Tab::Deep if app.options.deep.each_match => {
+            "type a pattern · every match with the text around it, in binaries too"
+        }
+        Tab::Deep => "type a pattern · the files that contain it, binaries and archives too",
         Tab::Folders => "type to filter folders · Enter goes inside, .. goes up",
         Tab::Git => "type to filter commits · Enter shows one",
     }
@@ -498,7 +503,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 
 fn footer_items(tab: Tab, editor: &str) -> Vec<String> {
     let items: &[&str] = match tab {
-        Tab::Files | Tab::Content => &[
+        Tab::Files | Tab::Content | Tab::Deep => &[
             "Enter open",
             "^O",
             "^T in file",
@@ -735,6 +740,34 @@ mod tests {
         assert!(
             input.contains("type a pattern · lists every match with the text around it"),
             "{input:?}"
+        );
+    }
+
+    #[test]
+    fn deep_says_what_it_searches() {
+        let (mut a, _) = app(Tab::Deep);
+        let input = row(&render(&mut a, 120, 24), 23);
+        assert!(
+            input.contains(
+                "Deep › type a pattern · the files that contain it, binaries and archives too"
+            ),
+            "{input:?}"
+        );
+        a.options.deep.each_match = true;
+        a.options.deep.documents = true;
+        let input = row(&render(&mut a, 120, 24), 23);
+        assert!(
+            input.contains("type a pattern · every match with the text around it, in binaries too"),
+            "{input:?}"
+        );
+        assert!(
+            input.contains("each match · documents · ignored"),
+            "{input:?}"
+        );
+        let top = row(&render(&mut a, 160, 24), 0);
+        assert!(
+            top.contains("Deep") && top.contains("^T in file") && top.contains("^U/^G diff"),
+            "{top:?}"
         );
     }
 
@@ -986,12 +1019,14 @@ mod tests {
 
     #[test]
     fn search_pattern_is_not_drawn_into_file_names() {
-        let (mut a, now) = app(Tab::Content);
-        a.handle_key(key(KeyCode::Char('m')), now);
-        a.tick(now + std::time::Duration::from_secs(1));
-        feed(&mut a, &["main.c"]);
-        let buf = render(&mut a, 80, 24);
-        assert_ne!(fg_at(&buf, "main.c", 0), theme::RED);
+        for tab in [Tab::Content, Tab::Deep] {
+            let (mut a, now) = app(tab);
+            a.handle_key(key(KeyCode::Char('m')), now);
+            a.tick(now + std::time::Duration::from_secs(1));
+            feed(&mut a, &["main.c"]);
+            let buf = render(&mut a, 80, 24);
+            assert_ne!(fg_at(&buf, "main.c", 0), theme::RED, "{tab:?}");
+        }
     }
 
     #[test]
@@ -1083,7 +1118,7 @@ mod tests {
         let (mut a, _) = app(Tab::Files);
         let buf = render(&mut a, 120, 30);
         let l = &a.layout;
-        assert_eq!(l.tabs.len(), 4);
+        assert_eq!(l.tabs.len(), 5);
         for (tab, r) in &l.tabs {
             assert_eq!(r.y, 0);
             let text: String = (r.x..r.x + r.width).map(|x| buf[(x, 0)].symbol()).collect();

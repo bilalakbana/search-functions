@@ -30,6 +30,7 @@ How Bilal starts the next session (paste):
   - v0.2.0 (command line, `--print`, Ctrl-O's editor): `cargo test` 261; `tests/e2e.sh` 98/98.
   - Step 4 (Each match, numbered preview): `cargo test` 290; `tests/e2e.sh` 121/121; platform_action 20/20;
     sub_functions 7/7.
+  - Deep tab: `cargo test` 306; `tests/e2e.sh` 131/131; platform_action 20/20; sub_functions 7/7.
   - Step 2 (same day): `cargo test` 243; `tests/e2e.sh` 86/86 (with a release package's layout);
     `tests/sub_functions.sh NEW_EMPTY_DIR` 7/7 (`-L sfrs-sub-functions`); `python3 -I packaging/test_build.py` 7;
     `packaging/test_package.sh PACKAGE NEW_EMPTY_DIR` all passed on Ubuntu 22.04, Debian 12, Ubuntu 24.04.
@@ -57,10 +58,10 @@ How Bilal starts the next session (paste):
 
 | File | What |
 |---|---|
-| `model.rs` | `Tab` {Files, Content, Folders, Git} (`from_name("search")` still → Content), `Opt`, `Options` (serde; field `content` has `alias = "search"`), defaults |
+| `model.rs` | `Tab` {Files, Content, Deep, Folders, Git} (`from_name("search")` still → Content; `searches()`: Content and Deep), `Opt`, `Options` (serde; field `content` has `alias = "search"`), defaults |
 | `config.rs` | load/save `$XDG_CONFIG_HOME/sf/config.toml`; an invalid file is reported and never overwritten |
 | `engines.rs` | finds fd/fdfind, bat/batcat, ugrep, ugrep+, git, delta, file, ls in PATH; `$BAT_THEME`; `bundle_dir` / `with_bundle` (a release package's `lib/sf`, first in PATH) |
-| `commands.rs` | pure: `list_plan` (engine command per tab/options/query) and `preview_plan` (Sniff/Numbered/Run/Pipe, Content `Header` with `ugrep -c -o` counts) |
+| `commands.rs` | pure: `list_plan` (engine command per tab/options/query; `Search` says how Content or Deep searches) and `preview_plan` (Sniff/Numbered/Run/Pipe, Content/Deep `Header` with `ugrep -c -o` counts) |
 | `items.rs` | compact rows (`Look::{Path, Match, Styled}`, ~160 B/row), parsers, `path_spans` (folders blue, `/` yellow, name green), `printable`, `ansi_text` (no escape gets through) |
 | `filter.rs` | fzf `-i -e --no-sort` semantics, parallel from 50 000 rows |
 | `runner.rs` | list child in its own process group (kill on cancel), bounded records (64 KiB), batches, sorting/numbering |
@@ -157,6 +158,15 @@ red, a rule between the blocks. advancedsearch's file list was already Content (
 `sf content P -- -i --exclude=x` for its case-insensitivity and excludes).
 
 Released as v0.4.0 (Bilal's OK). Still open: the Step 1 WSL checklist.
+
+### The Deep tab — done 2026-10-17 (not committed yet)
+
+Bilal wanted advancedsearch/detailedsearch as a tab of their own, because they search binaries (dll, exe) that
+Content leaves out. What and why: `docs/sf-tui-design.md` → "The Deep tab". Files · Content · **Deep** · Folders ·
+Git; Deep = advancedsearch + `_plus` (option Documents) + detailedsearch (option Each match) under one Config,
+preview as Content's (numbered, with context; Bilal's choice); Content keeps its own Each match and Archives &
+documents (Bilal). Offered and not answered yet: "^S options" in the tab bar; a filter of the results after a
+fixed pattern (the old scripts' fzf typing).
 
 ## Deferred minors (known, not fixed)
 

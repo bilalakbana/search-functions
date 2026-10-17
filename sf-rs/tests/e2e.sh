@@ -85,7 +85,7 @@ tm rename-window -t e2e shell
 # the defaults: hidden files off, ignored files on
 n_files=$(cd "$T" && fd --type f --no-ignore --exclude .git . | wc -l)
 keys "'$SF'" Enter
-expect 'start: tab bar with Config'        'Files +Content +Folders +Git .*⚙ Config'
+expect 'start: tab bar with Config'        'Files +Content +Deep +Folders +Git .*⚙ Config'
 expect "start: $n_files files listed"      "$n_files/$n_files"
 expect 'start: bat preview with numbers'   '│ *1 needle ignored'
 expect 'start: footer'                     'Enter open · \^O nvim'
@@ -160,6 +160,21 @@ keys C-s Space Down Down Space Escape
 expect 'archives off, lines off'           '5/5'
 
 keys Tab
+expect 'tab: Deep keeps the pattern'       'Deep › needle'
+expect 'deep: binaries and archives too'   'Deep › needle .* 7/7'
+expect 'deep: a binary file'               'src/blob\.bin'
+expect 'deep: an archive'                  'docs/arch\.zip'
+expect 'deep: the matches numbered'        'Match #1'
+shot deep
+keys C-s
+expect 'deep: its options'                 '\[ \] Documents'
+keys Space Escape
+expect 'deep: each match in a binary'      'src/blob\.bin:1:'
+expect 'deep: each match in an archive'    'docs/arch\.zip\{inzip\.txt\}:1:needle inside zip'
+keys C-s Space Escape
+expect 'deep: files again'                 'Deep › needle .* 7/7'
+
+keys Tab
 expect 'tab: Folders'                      'Folders › '
 clear_query
 expect 'folders: parent row'               '\.\.  parent folder'
@@ -193,7 +208,7 @@ type_ 'needle'
 expect 'no tmux: results'                  '5/5'
 keys C-o
 expect_log 'no tmux: Ctrl-O runs nvim'     "NVIM [-c] [let @/ = \$SF_QUERY]"
-expect 'no tmux: sf comes back'            'Files +Content +Folders +Git .*⚙ Config'
+expect 'no tmux: sf comes back'            'Files +Content +Deep +Folders +Git .*⚙ Config'
 expect 'no tmux: results again'            '5/5'
 keys Escape
 expect 'no tmux: quit'                     '^READY>\s*$'
@@ -258,6 +273,8 @@ keys "clear; '$SF' content needle | wc -l; '$SF' folders deep | cat; '$SF' files
 expect 'piped: content prints its files'   '^5\s*$'
 expect 'piped: folders'                    '^src/deep dir\s*$'
 expect 'print: nothing found exits 1'      '^rc-none=1'
+keys "clear; '$SF' deep needle | grep -F 'arch.zip{'" Enter
+expect "piped: deep prints ugrep's members" '^docs/arch\.zip\{inzip\.txt\}\s*$'
 keys "clear; '$SF' files -- -l; echo rc-refused=\$?" Enter
 expect 'refused: the reason'               'sf files: -l is refused'
 expect 'refused: exit 2'                   '^rc-refused=2'

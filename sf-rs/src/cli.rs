@@ -199,7 +199,7 @@ const GIT: Engine = Engine {
 pub fn check_extra(tab: Tab, extra: &[OsString]) -> Result<(), String> {
     let engine = match tab {
         Tab::Files | Tab::Folders => &FD,
-        Tab::Content => &UGREP,
+        Tab::Content | Tab::Deep => &UGREP,
         Tab::Git => &GIT,
     };
     let sf = format!("sf {}", tab.title().to_lowercase());
@@ -275,6 +275,10 @@ mod tests {
             parse(&args(&["content", "foo", "bar"])),
             Ok(run(Tab::Content, "foo bar", false, &[])),
             "query words are joined"
+        );
+        assert_eq!(
+            parse(&args(&["deep", "needle", "--", "-i"])),
+            Ok(run(Tab::Deep, "needle", false, &["-i"]))
         );
         assert_eq!(
             parse(&args(&["files", "--print", "main"])),
@@ -367,6 +371,8 @@ mod tests {
             (Tab::Content, vec!["--json"], "--json"),
             (Tab::Content, vec!["-wC3"], "-C"),
             (Tab::Content, vec!["--colour=always"], "--colour"),
+            (Tab::Deep, vec!["-l"], "-l"),
+            (Tab::Deep, vec!["--format=%f"], "--format"),
             (Tab::Git, vec!["--oneline"], "--oneline"),
             (Tab::Git, vec!["-p"], "-p"),
         ] {
@@ -389,6 +395,7 @@ mod tests {
                 vec!["-t", "rust", "-w", "-i", "--max-depth=3", "-g", "*.c"],
             ),
             (Tab::Content, vec!["-ec"]), // a second pattern "c"
+            (Tab::Deep, vec!["-i", "--exclude=*.dll", "-t", "rust"]),
             (
                 Tab::Git,
                 vec!["--author=bilal", "-n", "5", "--since=2.weeks", "src"],

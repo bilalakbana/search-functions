@@ -466,26 +466,31 @@ impl App {
                 if self.filter.len() == 0 {
                     self.preview = Text::default();
                 }
-                if self.tab == Tab::Content
-                    && self.filter.total() == 0
-                    && self.notes.is_empty()
-                    && self.query.is_empty()
-                {
-                    self.notes.push(items::hint("No text files here"));
-                } else if self.tab == Tab::Content
-                    && self.filter.total() == 0
-                    && self.notes.is_empty()
-                {
-                    let mut hint = "No match".to_string();
-                    if !self.options.content.archives {
-                        hint += ". Archives & documents (⚙ Config) also searches inside zip, PDF and Office files";
-                    }
-                    self.notes.push(items::hint(&hint));
+                if self.tab.searches() && self.filter.total() == 0 && self.notes.is_empty() {
+                    let hint = match self.tab {
+                        _ if !self.query.is_empty() => self.no_match(),
+                        Tab::Deep => "No files here",
+                        _ => "No text files here",
+                    };
+                    self.notes.push(items::hint(hint));
                 }
             }
             _ => {}
         }
         Vec::new()
+    }
+
+    /// What a search that found nothing says: the option that searches further, while it is off.
+    fn no_match(&self) -> &'static str {
+        match self.tab {
+            Tab::Content if !self.options.content.archives => {
+                "No match. Archives & documents (⚙ Config) also searches inside zip, PDF and Office files"
+            }
+            Tab::Deep if !self.options.deep.documents => {
+                "No match. Documents (⚙ Config) also searches inside PDF and Office files"
+            }
+            _ => "No match",
+        }
     }
 
     pub fn on_preview(&mut self, msg: PreviewMsg) {
@@ -506,11 +511,8 @@ impl App {
     fn run_list(&mut self) -> Effect {
         self.list_gen += 1;
         self.filter.clear();
-        self.filter.set_query(if self.tab == Tab::Content {
-            ""
-        } else {
-            &self.query
-        });
+        self.filter
+            .set_query(if self.tab.searches() { "" } else { &self.query });
         self.notes.clear();
         self.selected = 0;
         self.offset = 0;
@@ -529,7 +531,7 @@ impl App {
 
     fn edit(&mut self, f: impl FnOnce(&mut String), now: Instant) -> Vec<Effect> {
         f(&mut self.query);
-        if self.tab == Tab::Content {
+        if self.tab.searches() {
             self.search_due = Some(now + SEARCH_DELAY);
             return Vec::new();
         }
@@ -611,7 +613,7 @@ impl App {
             self.set_status("Nothing selected", true, now);
             return Vec::new();
         };
-        if kind == ActionKind::InFile && matches!(self.tab, Tab::Files | Tab::Content) {
+        if kind == ActionKind::InFile && matches!(self.tab, Tab::Files | Tab::Content | Tab::Deep) {
             let key = item.key.clone();
             return self.enter_scope(key);
         }
@@ -635,7 +637,7 @@ impl App {
             key,
             back: (self.tab, self.query.clone()),
         });
-        if self.tab != Tab::Content {
+        if !self.tab.searches() {
             self.query.clear(); // a filter of names is no pattern for the lines
         }
         self.tab = Tab::Content;
@@ -997,6 +999,7 @@ pub(crate) mod tests {
         let kind = match a.tab {
             Tab::Folders => ParseKind::Folders,
             Tab::Content => ParseKind::SearchFiles { archives: false },
+            Tab::Deep => ParseKind::SearchFiles { archives: true },
             _ => ParseKind::Files,
         };
         a.on_list(ListMsg::Items(a.list_gen, rows(kind, names)))
@@ -1605,6 +1608,60 @@ pub(crate) mod tests {
             (Tab::Files, "a.c", true)
         );
         assert_eq!(a.handle_key(key(KeyCode::Esc), now), [Effect::Quit]);
+    }
+
+    #[test]
+    fn deep_is_searched_as_content_is() {
+        let (mut a, now) = app(Tab::Deep);
+        assert!(!typed(&mut a, "need", now).contains(&Effect::RunList));
+        assert_eq!(a.tick(now + Duration::from_millis(260)), [Effect::RunList]);
+        assert_eq!(
+            a.list_plan(),
+            commands::list_plan(Tab::Deep, &a.options, "need", &a.engines)
+        );
+        feed(&mut a, &["a.dll"]);
+        assert_eq!(
+            a.filter.len(),
+            1,
+            "the rows are not filtered by the pattern"
+        );
+    }
+
+    #[test]
+    fn deep_without_a_match_points_to_documents() {
+        let note = |a: &App| -> String {
+            a.notes[0]
+                .display()
+                .spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect()
+        };
+        let (mut a, now) = app(Tab::Deep);
+        typed(&mut a, "zzz", now);
+        a.tick(now + Duration::from_secs(1));
+        a.on_list(ListMsg::Done(a.list_gen));
+        assert!(
+            note(&a).starts_with("No match. Documents (⚙ Config)"),
+            "{}",
+            note(&a)
+        );
+        a.options.deep.documents = true;
+        a.handle_key(ctrl('r'), now);
+        a.on_list(ListMsg::Done(a.list_gen));
+        assert_eq!(note(&a), "No match");
+    }
+
+    #[test]
+    fn ctrl_t_in_deep_keeps_the_pattern_and_goes_back_to_deep() {
+        let (mut a, now) = app(Tab::Deep);
+        a.query = "needle".into();
+        feed(&mut a, &["src/a.c"]);
+        a.handle_key(ctrl('t'), now);
+        assert!(a.scope.is_some());
+        assert_eq!(a.query, "needle");
+        a.handle_key(key(KeyCode::Esc), now);
+        assert_eq!((a.tab, a.scope.is_none()), (Tab::Deep, true));
     }
 
     #[test]

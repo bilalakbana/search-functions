@@ -210,13 +210,13 @@ fn editor_window(
     done(result.map(|()| None))
 }
 
-/// The editor at the matching line, or (vi and vim) searching for the Search pattern. The pattern goes
+/// The editor at the matching line, or (vi and vim) searching for Content's or Deep's pattern. The pattern goes
 /// in $SF_QUERY and vim reads it with `let @/ = $SF_QUERY`: as an Ex command (`-c "/pattern"`) a pattern
 /// with `/|` would run whatever follows. Very magic (`\v`) is closest to ugrep's syntax; `\c` gives
 /// smart case. Another editor gets only `+LINE` and the path, which is absolute and so never an option.
 fn editor(e: &Editor, tab: Tab, item: &Item, query: &str, path: &Path) -> Cmd {
     let mut cmd = Cmd::new(&e.program).args(&e.args);
-    if tab == Tab::Content {
+    if tab.searches() {
         if let Some(line) = item.line {
             cmd = cmd.arg(format!("+{line}"));
         } else if !query.is_empty() && e.vim {
@@ -519,6 +519,15 @@ mod tests {
             cmds[0].env,
             vec![("SF_QUERY".to_string(), "\\vUpper".to_string())],
             "smart case"
+        );
+        let out = act(&f, ActionKind::Editor, Tab::Deep, &file("a.txt"), "needle");
+        let Outcome::Foreground(cmds) = out else {
+            panic!()
+        };
+        assert_eq!(
+            cmds[0].env,
+            vec![("SF_QUERY".to_string(), "\\c\\vneedle".to_string())],
+            "Deep's pattern too"
         );
     }
 

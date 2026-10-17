@@ -48,12 +48,13 @@ mod tests {
         let o = Options::default();
         let on = |tab, opt| o.get(tab, opt);
         // Bilal, 2026-10-17: hidden off, ignored on, in every tab that has them
-        for tab in [Tab::Files, Tab::Content, Tab::Folders] {
+        for tab in [Tab::Files, Tab::Content, Tab::Deep, Tab::Folders] {
             assert!(!on(tab, Opt::Hidden), "{tab:?} hidden");
             assert!(on(tab, Opt::Ignored), "{tab:?} ignored");
         }
         assert!(!on(Tab::Content, Opt::MatchingLines));
         assert!(!on(Tab::Content, Opt::Archives));
+        assert!(!on(Tab::Deep, Opt::EachMatch) && !on(Tab::Deep, Opt::Documents));
         assert!(on(Tab::Git, Opt::AllBranches));
     }
 

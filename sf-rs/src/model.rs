@@ -6,20 +6,29 @@ use serde::{Deserialize, Serialize};
 pub enum Tab {
     Files,
     Content,
+    /// Content's search through everything: binaries, archives, with Documents PDF and Office files
+    /// (advancedsearch, advancedsearch_plus, detailedsearch).
+    Deep,
     Folders,
     Git,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 4] = [Tab::Files, Tab::Content, Tab::Folders, Tab::Git];
+    pub const ALL: [Tab; 5] = [Tab::Files, Tab::Content, Tab::Deep, Tab::Folders, Tab::Git];
 
     pub fn title(self) -> &'static str {
         match self {
             Tab::Files => "Files",
             Tab::Content => "Content",
+            Tab::Deep => "Deep",
             Tab::Folders => "Folders",
             Tab::Git => "Git",
         }
+    }
+
+    /// The tabs whose query is a ugrep pattern.
+    pub fn searches(self) -> bool {
+        matches!(self, Tab::Content | Tab::Deep)
     }
 
     fn index(self) -> usize {
@@ -53,6 +62,8 @@ pub enum Opt {
     /// Content: every match with the text around it (detailedsearch).
     EachMatch,
     Archives,
+    /// Deep: PDF, Office and e-book files as text (ugrep+).
+    Documents,
     AllBranches,
 }
 
@@ -68,6 +79,7 @@ impl Opt {
             Opt::MatchingLines => "Matching lines",
             Opt::EachMatch => "Each match",
             Opt::Archives => "Archives & documents",
+            Opt::Documents => "Documents",
             Opt::AllBranches => "All branches",
         }
     }
@@ -80,6 +92,7 @@ impl Opt {
             Opt::MatchingLines => "list lines, not files",
             Opt::EachMatch => "every match, the text around it",
             Opt::Archives => "zip, tar, 7z, PDF, Office…",
+            Opt::Documents => "PDF, Office, e-books as text (slower)",
             Opt::AllBranches => "not only the current one",
         }
     }
@@ -99,6 +112,15 @@ pub struct ContentOpts {
     /// Each match with ~50 characters around it; never on together with `matching_lines`.
     pub each_match: bool,
     pub archives: bool,
+    pub hidden: bool,
+    pub ignored: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DeepOpts {
+    pub each_match: bool,
+    pub documents: bool,
     pub hidden: bool,
     pub ignored: bool,
 }
@@ -137,6 +159,17 @@ impl Default for ContentOpts {
     }
 }
 
+impl Default for DeepOpts {
+    fn default() -> Self {
+        DeepOpts {
+            each_match: false,
+            documents: false,
+            hidden: false,
+            ignored: true,
+        }
+    }
+}
+
 impl Default for FoldersOpts {
     fn default() -> Self {
         FoldersOpts {
@@ -160,6 +193,7 @@ pub struct Options {
     /// `[search]` in files from when the tab was called Search
     #[serde(alias = "search")]
     pub content: ContentOpts,
+    pub deep: DeepOpts,
     pub folders: FoldersOpts,
     pub git: GitOpts,
 }
@@ -176,6 +210,7 @@ impl Options {
                 Opt::Hidden,
                 Opt::Ignored,
             ],
+            Tab::Deep => &[Opt::EachMatch, Opt::Documents, Opt::Hidden, Opt::Ignored],
             Tab::Git => &[Opt::AllBranches],
         };
         order.iter().map(|&o| (o, self.get(tab, o))).collect()
@@ -193,7 +228,7 @@ impl Options {
             return;
         };
         *v = !*v;
-        if *v {
+        if *v && tab == Tab::Content {
             match opt {
                 Opt::MatchingLines => self.content.each_match = false,
                 Opt::EachMatch => self.content.matching_lines = false,
@@ -211,6 +246,10 @@ impl Options {
             (Tab::Content, Opt::Archives) => Some(&mut self.content.archives),
             (Tab::Content, Opt::Hidden) => Some(&mut self.content.hidden),
             (Tab::Content, Opt::Ignored) => Some(&mut self.content.ignored),
+            (Tab::Deep, Opt::EachMatch) => Some(&mut self.deep.each_match),
+            (Tab::Deep, Opt::Documents) => Some(&mut self.deep.documents),
+            (Tab::Deep, Opt::Hidden) => Some(&mut self.deep.hidden),
+            (Tab::Deep, Opt::Ignored) => Some(&mut self.deep.ignored),
             (Tab::Folders, Opt::Hidden) => Some(&mut self.folders.hidden),
             (Tab::Folders, Opt::Ignored) => Some(&mut self.folders.ignored),
             (Tab::Git, Opt::AllBranches) => Some(&mut self.git.all_branches),
@@ -279,6 +318,48 @@ mod tests {
         );
         let old: Options = toml::from_str("[content]\nmatching_lines = true\n").unwrap();
         assert!(!old.content.each_match, "a config from before has it off");
+    }
+
+    #[test]
+    fn deep_sits_between_content_and_folders() {
+        assert_eq!(Tab::Content.next(), Tab::Deep);
+        assert_eq!(Tab::Deep.next(), Tab::Folders);
+        assert_eq!(Tab::Folders.prev(), Tab::Deep);
+        assert_eq!(Tab::from_name("deep"), Some(Tab::Deep));
+        assert_eq!(Tab::Deep.title(), "Deep");
+        assert!(Tab::Content.searches() && Tab::Deep.searches());
+        assert!(!Tab::Files.searches() && !Tab::Folders.searches() && !Tab::Git.searches());
+    }
+
+    #[test]
+    fn deep_options_and_defaults() {
+        assert_eq!(
+            Options::default().list(Tab::Deep),
+            [
+                (Opt::EachMatch, false),
+                (Opt::Documents, false),
+                (Opt::Hidden, false),
+                (Opt::Ignored, true)
+            ]
+        );
+        assert_eq!(Opt::Documents.label(Tab::Deep), "Documents");
+        let old: Options = toml::from_str("[content]\nmatching_lines = true\n").unwrap();
+        assert_eq!(
+            old.deep,
+            DeepOpts::default(),
+            "a config from before has Deep's defaults"
+        );
+    }
+
+    #[test]
+    fn deep_each_match_leaves_content_alone() {
+        let mut o = Options::default();
+        o.toggle(Tab::Content, Opt::MatchingLines);
+        o.toggle(Tab::Deep, Opt::EachMatch);
+        assert!(o.deep.each_match);
+        assert!(o.content.matching_lines && !o.content.each_match);
+        o.toggle(Tab::Deep, Opt::Documents);
+        assert!(o.deep.documents && !o.content.archives);
     }
 
     #[test]
