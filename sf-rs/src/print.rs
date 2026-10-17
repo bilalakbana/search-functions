@@ -1,8 +1,11 @@
 //! `sf --print`, also when the output is not a terminal: the list the window would show, a row a line,
-//! instead of the window. Exit status as grep's: 0 something was listed, 1 nothing, 2 an error.
+//! instead of the window. On a terminal every row is drawn as in the window: no control character
+//! reaches it (a file name holding escape sequences could otherwise drive the terminal). Into a pipe or
+//! a file the real bytes go, for scripts: the paths, and in Content ugrep's own output. Exit status as
+//! grep's: 0 something was listed, 1 nothing, 2 an error.
 
 use std::ffi::OsString;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::process::Command;
@@ -23,12 +26,21 @@ pub fn print(
     extra: &[OsString],
     root: &Path,
 ) -> u8 {
-    if tab != Tab::Content {
+    let terminal = io::stdout().is_terminal();
+    if tab != Tab::Content || terminal {
         let plan = list_plan_with(tab, options, query, engines, extra, false);
         let mut out = io::BufWriter::new(io::stdout().lock());
-        return rows(tab, plan, query, root, &mut out, &mut io::stderr());
+        return rows(
+            tab,
+            plan,
+            query,
+            root,
+            terminal,
+            &mut out,
+            &mut io::stderr(),
+        );
     }
-    // ugrep's own output, as grep's: path, or path:line:text; coloured on a terminal
+    // into a pipe: ugrep's own output, as grep's: path, or path:line:text
     match list_plan_with(tab, options, query, engines, extra, true) {
         ListPlan::Hint(hint) => {
             eprintln!("sf: {hint}");
@@ -51,13 +63,14 @@ pub fn print(
     }
 }
 
-/// Files, Folders, Git: the window's rows of `plan` (sorted, numbered, filtered by `query`) to `out`,
-/// the engine's messages to `err`.
+/// The window's rows of `plan` (sorted, numbered, filtered by `query`) to `out`, the engine's messages
+/// to `err`: for a `terminal` as drawn in the window, else Files' and Folders' paths as they are.
 fn rows(
     tab: Tab,
     plan: ListPlan,
     query: &str,
     root: &Path,
+    terminal: bool,
     out: &mut impl Write,
     err: &mut impl Write,
 ) -> u8 {
@@ -72,7 +85,8 @@ fn rows(
     let mut runner = Runner::new(tx);
     runner.start(1, cmd, kind, root);
     let mut filter = Filter::new();
-    filter.set_query(query);
+    // as in the window: in Content the query is ugrep's pattern, not a filter of the rows
+    filter.set_query(if tab == Tab::Content { "" } else { query });
     let mut failed = false;
     for msg in rx {
         match msg {
@@ -89,7 +103,8 @@ fn rows(
     let rows = (0..filter.len()).filter_map(|i| filter.get(i));
     // Folders' first row, "..", is for going up in the window, not a folder of the list
     for item in rows.filter(|i| i.selectable && **i != parent) {
-        let written = if tab == Tab::Git {
+        // the drawn row has no control character: names through `printable`, Git through `ansi_text`
+        let written = if terminal || matches!(tab, Tab::Git | Tab::Content) {
             let line: String = item
                 .display()
                 .spans
@@ -130,15 +145,60 @@ mod tests {
     use crate::testutil::{executable, temp_dir};
 
     fn print_rows(tab: Tab, query: &str, engines: &Engines) -> (u8, String, String) {
+        let (code, out, err) = printed(tab, query, engines, false);
+        (code, String::from_utf8(out).unwrap(), err)
+    }
+
+    fn printed(tab: Tab, query: &str, engines: &Engines, terminal: bool) -> (u8, Vec<u8>, String) {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let root = temp_dir("print_root");
         let plan = list_plan_with(tab, &Options::default(), query, engines, &[], false);
-        let code = rows(tab, plan, query, &root, &mut out, &mut err);
-        (
-            code,
-            String::from_utf8(out).unwrap(),
-            String::from_utf8(err).unwrap(),
-        )
+        let code = rows(tab, plan, query, &root, terminal, &mut out, &mut err);
+        (code, out, String::from_utf8(err).unwrap())
+    }
+
+    #[test]
+    fn a_terminal_never_gets_a_control_character_a_pipe_gets_the_name() {
+        let name = "./a\x1b]0;owned\x07\x1b[2Jb.txt\0";
+        let (_, out, _) = printed(Tab::Files, "", &fd(name, ""), true);
+        assert!(!out.iter().any(|&b| b < 0x20 && b != b'\n'), "{out:?}");
+        let (_, out, _) = printed(Tab::Files, "", &fd(name, ""), false);
+        assert_eq!(
+            out, b"a\x1b]0;owned\x07\x1b[2Jb.txt\n",
+            "scripts get the real bytes"
+        );
+    }
+
+    #[test]
+    fn content_on_a_terminal_is_the_window_rows() {
+        let bin = temp_dir("print_ugrep");
+        // what sf's own ugrep command prints for Matching lines: path NUL line 0x1f text with marks
+        let script =
+            "#!/bin/sh\nprintf 'a\\033[2J.c\\0003\\037x \\001needle\\002\\033]0;t\\007 y\\n'\n";
+        executable(&bin.join("ugrep"), script);
+        let e = Engines {
+            ugrep: Some(bin.join("ugrep")),
+            ..Engines::default()
+        };
+        let mut o = Options::default();
+        o.content.matching_lines = true;
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let plan = list_plan_with(Tab::Content, &o, "needle", &e, &[], false);
+        let code = rows(
+            Tab::Content,
+            plan,
+            "needle",
+            &temp_dir("print_c"),
+            true,
+            &mut out,
+            &mut err,
+        );
+        let out = String::from_utf8(out).unwrap();
+        assert_eq!(code, 0, "{err:?}");
+        assert!(
+            out.contains(":3:x needle") && !out.contains('\x1b'),
+            "{out:?}"
+        );
     }
 
     /// Engines whose fd prints `listing` (NUL-separated, as with `-0`) and `message` on stderr.

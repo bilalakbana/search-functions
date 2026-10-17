@@ -46,8 +46,9 @@ sf content TODO | wc -l    # into a pipe or a file (or with --print) sf prints t
 ```
 
 Options that change what the engine prints (`-l`, `--color`, `-c`, `--json`, `-C 3`, `--oneline`, …) are
-refused with the reason. Printed, Content gives ugrep's own `path` or `path:line:text` lines; the exit status
-is 0 when something was listed, 1 when nothing, 2 on an error.
+refused with the reason. Into a pipe or a file the real paths go (Content: ugrep's own `path` or
+`path:line:text` lines); on a terminal, with `--print`, the rows as the window shows them, never a raw control
+character. The exit status is 0 when something was listed, 1 when nothing, 2 on an error.
 
 | Tab | Lists | Typing | Options (⚙ Config, defaults) |
 |-----|-------|--------|------------------------------|

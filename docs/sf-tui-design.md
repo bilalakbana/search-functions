@@ -270,11 +270,13 @@ Command line (v0.2.0, 2026-10-17; Bilal asked for engine flags and a print mode)
   -q`, ugrep `-c -l -L -h -A -B -C -y -b -k -T -Q --json --format --replace --color …`, git `--oneline --pretty
   --format -p --stat …`; tables in `cli.rs`). None of the three takes abbreviated long options (checked);
   short clusters are read letter by letter until a letter that takes a value.
-- `--print`, or stdout not a terminal (a pipe or a file): the list instead of the window. Files, Folders, Git:
-  the window's rows (sorted, numbered, filtered by QUERY; `..` left out; Git rows as plain text). Content:
-  ugrep's own `path` / `path:line:text` output, `--color=auto` (coloured on a terminal), untruncated. Exit 0
-  when something was listed, 1 when nothing, 2 on an error (an engine message, a missing engine); a closed
-  pipe (`| head`) ends quietly. A wrong word prints the usage; a refused option only its one line.
+- `--print`, or stdout not a terminal (a pipe or a file): the list instead of the window, the window's rows
+  (sorted, numbered, filtered by QUERY; `..` left out). On a terminal every row as drawn in the window, so no
+  control character reaches it (the commit review found that a file name with escape sequences printed raw
+  could drive the terminal). Into a pipe the real bytes for scripts: Files' and Folders' paths, Git rows as
+  plain text, Content as ugrep's own untruncated `path` / `path:line:text` output. Exit 0 when something was
+  listed, 1 when nothing, 2 on an error (an engine message, a missing engine); a closed pipe (`| head`) ends
+  quietly. A wrong word prints the usage; a refused option only its one line.
 - Ctrl-O: nvim, else `$VISUAL`, `$EDITOR` (with its words, as "code --wait"), vim, vi; vi and vim get `+LINE`,
   the pattern through `$SF_QUERY` and `--`, any other editor only `+LINE` and the absolute path. The tab bar
   names it (`^O nvim`, `^O nano`), the tmux window is named after it, `sf doctor` shows it.

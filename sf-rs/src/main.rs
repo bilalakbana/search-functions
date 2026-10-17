@@ -56,8 +56,8 @@ QUERY starts the tab with it: what filters the list in Files, Folders and Git, t
 Options after -- go to the starting tab's engine: fd in Files and Folders, ugrep in Content, git log in Git
 (sf files -- -e rs, sf content TODO -- -t py); those that change what the engine prints are refused.
 With --print, or when the output goes to a pipe or a file, sf prints the list instead of opening the
-window (Content: ugrep's own path:line:text); exit status 0 when something was listed, 1 when nothing,
-2 on an error.
+window: on a terminal as the window shows it, into a pipe the real paths (Content: ugrep's own
+path:line:text); exit status 0 when something was listed, 1 when nothing, 2 on an error.
 
 The other forms do one action as the window does, on Linux and on WSL alike: open PATH with its default
 application, reveal it in the file manager, copy PATH (on WSL its Windows form) or TEXT to the
