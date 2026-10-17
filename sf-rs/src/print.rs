@@ -14,7 +14,7 @@ use std::sync::mpsc::channel;
 use crate::commands::{ListPlan, list_plan_with};
 use crate::engines::Engines;
 use crate::filter::Filter;
-use crate::model::{Options, Tab};
+use crate::model::{Opt, Options, Tab};
 use crate::runner::{ListMsg, Runner};
 
 /// Prints the list of `tab`; returns the exit status.
@@ -34,6 +34,7 @@ pub fn print(
             tab,
             plan,
             query,
+            options.get(tab, Opt::MatchCase),
             root,
             terminal,
             &mut out,
@@ -65,10 +66,12 @@ pub fn print(
 
 /// The window's rows of `plan` (sorted, numbered, filtered by `query`) to `out`, the engine's messages
 /// to `err`: for a `terminal` as drawn in the window, else Files' and Folders' paths as they are.
+#[allow(clippy::too_many_arguments)]
 fn rows(
     tab: Tab,
     plan: ListPlan,
     query: &str,
+    match_case: bool,
     root: &Path,
     terminal: bool,
     out: &mut impl Write,
@@ -85,6 +88,7 @@ fn rows(
     let mut runner = Runner::new(tx);
     runner.start(1, cmd, kind, root);
     let mut filter = Filter::new();
+    filter.set_match_case(match_case);
     // as in the window: in Content and Deep the query is ugrep's pattern, not a filter of the rows
     filter.set_query(if tab.searches() { "" } else { query });
     let mut failed = false;
@@ -153,7 +157,7 @@ mod tests {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let root = temp_dir("print_root");
         let plan = list_plan_with(tab, &Options::default(), query, engines, &[], false);
-        let code = rows(tab, plan, query, &root, terminal, &mut out, &mut err);
+        let code = rows(tab, plan, query, false, &root, terminal, &mut out, &mut err);
         (code, out, String::from_utf8(err).unwrap())
     }
 
@@ -188,6 +192,7 @@ mod tests {
             Tab::Content,
             plan,
             "needle",
+            false,
             &temp_dir("print_c"),
             true,
             &mut out,
@@ -239,6 +244,28 @@ mod tests {
             (0, "src/b.rs\nsrc/main.rs\n".into(), "".into())
         );
         assert_eq!(print_rows(Tab::Files, "zzz", &e).0, 1, "nothing listed");
+    }
+
+    #[test]
+    fn match_case_filters_the_printed_rows_too() {
+        let e = fd("./src/Main.rs\0./src/main.c\0", "");
+        let (mut out, mut err) = (Vec::new(), Vec::new());
+        let plan = list_plan_with(Tab::Files, &Options::default(), "", &e, &[], false);
+        let root = temp_dir("print_case");
+        let code = rows(
+            Tab::Files,
+            plan,
+            "Main",
+            true,
+            &root,
+            false,
+            &mut out,
+            &mut err,
+        );
+        assert_eq!(
+            (code, String::from_utf8(out).unwrap()),
+            (0, "src/Main.rs\n".into())
+        );
     }
 
     #[test]

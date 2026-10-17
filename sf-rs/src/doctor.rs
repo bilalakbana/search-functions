@@ -299,6 +299,8 @@ mod tests {
             env: Env {
                 editor: crate::actions::find_editor(&path, None, None),
                 platform: Platform { path, ..platform },
+                sf: None,
+                window_env: Vec::new(),
             },
             engines,
             config: base.join("config.toml"),

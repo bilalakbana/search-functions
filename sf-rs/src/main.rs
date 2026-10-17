@@ -8,6 +8,7 @@ mod config;
 mod doctor;
 mod engines;
 mod filter;
+mod help;
 mod items;
 mod model;
 mod platform;
@@ -35,7 +36,7 @@ use ratatui::crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, E
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{EnterAlternateScreen, enable_raw_mode};
 
-use crate::actions::{Env, Outcome, perform};
+use crate::actions::{ActionKind, Env, Outcome, perform};
 use crate::app::{App, Effect};
 use crate::cli::Cli;
 use crate::commands::{Cmd, ListPlan};
@@ -43,25 +44,30 @@ use crate::model::{Options, Tab};
 use crate::preview::Previewer;
 use crate::runner::Runner;
 
-const USAGE: &str = "usage: sf [files|content|deep|folders|git] [QUERY...] [--print] [-- ENGINE-OPTIONS...]
+const USAGE: &str = "usage: sf [files|content|deep|folders|git|help] [QUERY...] [--print] [-- ENGINE-OPTIONS...]
+       sf in FILE [WORDS...]
        sf open|reveal|copy-path PATH
        sf copy-text TEXT
        sf doctor
 
 The search functions in one window: Files, Content (search inside text files), Deep (inside every file:
-binaries, archives, with Documents PDF and Office files), Folders and Git. Tab / Shift-Tab or a click
-switch the tab; ⚙ Config (or Ctrl-S) holds the tab's options and, in Files, Content and Deep, the file
-types of the list to turn off and on; Esc quits. The keys for the selected item are named in the middle
-of the tab bar. Options are kept in $XDG_CONFIG_HOME/sf/config.toml (~/.config/sf/config.toml).
+binaries, archives, with Documents PDF and Office files), Folders, Git and Help (the manual, with
+examples). Tab / Shift-Tab or a click switch the tab; ⚙ Config (or Ctrl-S) holds the tab's options and,
+in Files, Content and Deep, the file types of the list to turn off and on; Esc quits. The keys for the
+selected item are named in the middle of the tab bar. Options are kept in $XDG_CONFIG_HOME/sf/config.toml
+(~/.config/sf/config.toml).
 
 QUERY starts the tab with it: what filters the list in Files, Folders and Git, the pattern in Content and
 Deep, where typing then filters the files found by their names (Ctrl-F; Esc edits the pattern, as Ctrl-F
-does at any time). Options after -- go to the starting tab's engine: fd in Files and Folders, ugrep in Content and Deep,
-git log in Git (sf files -- -e rs, sf content TODO -- -t py, sf deep needle -- -i); those that change what
-the engine prints are refused.
-With --print, or when the output goes to a pipe or a file, sf prints the list instead of opening the
-window: on a terminal as the window shows it, into a pipe the real paths (Content and Deep: ugrep's own
-path:line:text); exit status 0 when something was listed, 1 when nothing, 2 on an error.
+does at any time). Options after -- go to the starting tab's engine: fd in Files and Folders, ugrep in
+Content and Deep, git log in Git (sf files -- -e rs, sf content TODO -- -t py, sf deep needle -- -i);
+those that change what the engine prints are refused. With --print, or when the output goes to a pipe or
+a file, sf prints the list instead of opening the window: on a terminal as the window shows it, into a
+pipe the real paths (Content and Deep: ugrep's own path:line:text); exit status 0 when something was
+listed, 1 when nothing, 2 on an error.
+
+sf in FILE [WORDS...] opens the window inside FILE, as Ctrl-T does (in tmux Ctrl-T opens it in a window
+of its own); the words are read as its options say (all on a line by default), Esc quits.
 
 The other forms do one action as the window does, on Linux and on WSL alike: open PATH with its default
 application, reveal it in the file manager, copy PATH (on WSL its Windows form) or TEXT to the
@@ -77,6 +83,9 @@ fn main() -> ExitCode {
     use_bundle();
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     let (tab, query, print, extra) = match cli::parse(&args) {
+        Ok(Cli::InFile { file, query }) => {
+            return report(run(Tab::Content, query, Vec::new(), Some(file)));
+        }
         Ok(Cli::Help) => {
             print!("{USAGE}");
             return ExitCode::SUCCESS;
@@ -102,7 +111,12 @@ fn main() -> ExitCode {
     if print || !std::io::stdout().is_terminal() {
         return print_list(tab, &query, &extra);
     }
-    match run(tab, query, extra) {
+    report(run(tab, query, extra, None))
+}
+
+/// The window's end as sf's exit status; an error is said on stderr.
+fn report(result: anyhow::Result<()>) -> ExitCode {
+    match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("sf: {e:#}");
@@ -187,14 +201,25 @@ fn use_bundle() {
     unsafe { std::env::set_var("PATH", path) };
 }
 
-fn run(tab: Tab, query: String, extra: Vec<OsString>) -> anyhow::Result<()> {
+/// The window; with `in_file`, inside that file from the start (`sf in FILE`).
+fn run(
+    tab: Tab,
+    query: String,
+    extra: Vec<OsString>,
+    in_file: Option<OsString>,
+) -> anyhow::Result<()> {
     let root = std::env::current_dir().context("reading the current folder")?;
     let env = Env::detect();
     let engines = engines::discover(&env.platform.path);
     let config_path = config::default_path();
     let (options, config_error) = load_options();
     let mut app = App::new(root, tab, options, engines, config_error, Instant::now());
-    app.start_query(query);
+    app.tmux = env.platform.tmux;
+    let started_in_file = in_file.is_some();
+    match in_file {
+        Some(file) => app.start_in_file(file, query),
+        None => app.start_query(query),
+    }
     if !extra.is_empty() {
         app.extra = Some((tab, extra));
     }
@@ -204,7 +229,12 @@ fn run(tab: Tab, query: String, extra: Vec<OsString>) -> anyhow::Result<()> {
             .unwrap_or(&editor.program);
         app.editor = name.to_string_lossy().into_owned();
     }
-    let window = TmuxWindow::rename(&env);
+    // Ctrl-T's window keeps its name, "infile"
+    let window = if started_in_file {
+        None
+    } else {
+        TmuxWindow::rename(&env)
+    };
 
     let mut terminal = ratatui::try_init().context("starting the terminal")?;
     // ratatui's hook leaves raw mode and the alternate screen; this one also ends the mouse capture
@@ -271,7 +301,12 @@ fn event_loop(
                         continue;
                     };
                     // the editor searches for what the list shows: in a file, any of the words
-                    match perform(kind, app.tab, &item, &app.pattern(), &app.root, env) {
+                    let query = if kind == ActionKind::InFile {
+                        app.in_file_query().to_string()
+                    } else {
+                        app.editor_pattern()
+                    };
+                    match perform(kind, app.tab, &item, &query, &app.root, env) {
                         Outcome::Done(Some(message)) => app.set_status(&message, false, now),
                         Outcome::Done(None) => {}
                         Outcome::Failed(e) => app.set_status(&e, true, now),

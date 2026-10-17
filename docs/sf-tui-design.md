@@ -263,7 +263,7 @@ Release package (Step 2 of `docs/sf-next-steps.md`, 2026-10-17):
 
 Command line (v0.2.0, 2026-10-17; Bilal asked for engine flags and a print mode):
 
-- `sf [files|content|deep|folders|git] [QUERY...] [--print] [-- ENGINE-OPTIONS...]` (`cli.rs`). QUERY (words joined
+- `sf [files|content|deep|folders|git|help] [QUERY...] [--print] [-- ENGINE-OPTIONS...]` (`cli.rs`). QUERY (words joined
   by spaces) starts the tab with it: the filter in Files, Folders and Git, the pattern in Content. A word with a
   leading `-` before `--` is an error that points to `--` (a pattern starting with `-` is typed in the window).
   Kept as words (`sf files`), not `--files`: after `--` every option is the engine's.
@@ -390,4 +390,30 @@ chose to put them into the Ctrl-S popup instead of a key of their own):
   type on again (Bilal). The input line says "1 type off" / "N types off". The types are those of the rows
   (Bilal: with a pattern, the files found; without one, every file listed), counted again only when the list
   changed (`App::types_seen`).
+
+Ctrl-T in tmux, words, Match case and Help (2026-10-17, Bilal's four requests with his choices):
+
+- Ctrl-T in tmux opens a window of its own, named "infile" as the fzf functions' was: `tmux new-window` runs
+  `sf in KEY QUERY` (the query one argument, as typed) in the root through the fixed `sh -c` script; outside
+  tmux sf narrows itself as before. `sf in FILE [WORDS...]` is also a command (`Cli::InFile`): sf starts
+  inside the file, keeps the window's name and quits on Esc (`Scope::back` is None). tmux gives a new window
+  its server's environment, not sf's, so sf passes the variables it reads (`actions::WINDOW_ENV`: config
+  folder, bat's theme, editor, desktop session) with `-e`; not the whole environment, which `ps` would show
+  on the command line with whatever secrets it holds. The e2e caught it: without them the window's sf would
+  have read and written the real `~/.config/sf/config.toml`.
+- Words: the fzf window ran ugrep with `a|b` and its fzf then kept the lines with every word, so in effect
+  "all on a line"; sf had made it "any". Now ugrep's Boolean query: All words on a line (`--bool`) and All
+  words in the file (`--bool --files`: files with every word, the lines with any of them), one or the other,
+  in Content, Deep and inside a file (its own options, Ctrl-S inside it, saved as `[in_file]`). Default: on a
+  line inside a file (as before in the fzf window), off in Content and Deep (Bilal: a space and parentheses
+  mean something else in a Boolean query, which would surprise a regex). Both off: the pattern as it is,
+  inside a file any of the words. Ctrl-O's vim gets the words as any of them (`App::editor_pattern`).
+- Match case in every tab, off by default (Bilal: as before): off, a pattern has smart case and a filter
+  none; on, ugrep loses `--smart-case` and the filter (`Filter::set_match_case`, also `--print` and Ctrl-F)
+  compares as typed after its lower-case pass, the red marks too.
+- Help, the last tab: the manual (`help.rs`) in columns: the tabs and their engines, the keys, the options,
+  patterns and Boolean words, command lines from simple to advanced (each checked against the installed fd,
+  ugrep and git, and a test parses every one as sf would), the engines. Typing finds in it (its own search,
+  not the tabs' query), Enter the next, Esc clears then quits; ↑↓ PgUp PgDn and the wheel scroll. A test
+  fails when an option is missing from it. `sf help` starts there.
 

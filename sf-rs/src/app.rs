@@ -51,13 +51,14 @@ pub enum Effect {
     Quit,
 }
 
-/// Ctrl-T: Content narrowed to one file, the lines with any of the typed words; Esc goes back.
+/// Ctrl-T: Content narrowed to one file, the lines with the typed words as its options read them;
+/// Esc goes back (or, started so with `sf in FILE`, quits).
 #[derive(Clone, Debug)]
 pub struct Scope {
     /// The file, as its row named it (relative to the root).
     pub key: OsString,
-    /// The tab and the query to go back to.
-    back: (Tab, String),
+    /// The tab and the query to go back to; none when sf started in the file (`sf in`): Esc quits.
+    back: Option<(Tab, String)>,
 }
 
 /// A full-screen view (a diff, a history, a log, a commit) over the tabs; Esc goes back.
@@ -120,6 +121,43 @@ pub struct ScreenLayout {
     pub view: Rect,
     /// The popup's rows on screen: their index in `App::popup_rows` and where they are.
     pub popup_rows: Vec<(usize, Rect)>,
+    /// The text area of the Help tab.
+    pub help: Rect,
+}
+
+/// The Help tab: the manual, how far it is scrolled, what is looked for in it.
+pub struct Help {
+    pub text: Text<'static>,
+    /// The first line shown.
+    pub scroll: usize,
+    /// What typing looks for (the tabs' query is left alone).
+    pub search: String,
+    /// The line it was found on; None when it is nowhere.
+    pub found: Option<usize>,
+}
+
+impl Help {
+    /// The first line from `from` on, round to the start again, that holds the search; scrolled to.
+    fn find(&mut self, from: usize) {
+        let needle = self.search.to_lowercase();
+        let n = self.text.lines.len();
+        let holds = |i: usize| {
+            let line: String = self.text.lines[i]
+                .spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect();
+            line.to_lowercase().contains(&needle)
+        };
+        self.found = if needle.is_empty() || n == 0 {
+            None
+        } else {
+            (0..n).map(|k| (from + k) % n).find(|&i| holds(i))
+        };
+        if let Some(i) = self.found {
+            self.scroll = i.saturating_sub(2); // with two lines above it
+        }
+    }
 }
 
 /// A row of the Ctrl-S popup.
@@ -152,6 +190,9 @@ pub struct App {
     /// Ctrl-F in Content and Deep: the pattern stays as it is and these words filter the rows found
     /// (as advancedsearch's fzf did).
     pub result_filter: Option<String>,
+    /// sf runs inside tmux: Ctrl-T opens a window of its own.
+    pub tmux: bool,
+    pub help: Help,
     /// Engine options from the command line (`sf TAB -- OPTIONS`), for that tab only.
     pub extra: Option<(Tab, Vec<OsString>)>,
     /// The editor's name for the Ctrl-O key in the tab bar.
@@ -212,6 +253,13 @@ impl App {
             root,
             query: String::new(),
             result_filter: None,
+            tmux: false,
+            help: Help {
+                text: crate::help::text(),
+                scroll: 0,
+                search: String::new(),
+                found: None,
+            },
             extra: None,
             editor: "nvim".into(),
             view: None,
@@ -251,17 +299,54 @@ impl App {
         self.filter.get(self.selected)
     }
 
-    /// What ugrep searches for: the query, or in a file (Ctrl-T) any of its words.
+    /// What the editor highlights (Ctrl-O, vim's search): words read as a Boolean query become any of
+    /// them (a phrase in quotes as one, a `-word` left out); a pattern goes as it is.
+    pub fn editor_pattern(&self) -> String {
+        let words = match self.scope {
+            Some(_) => {
+                let f = &self.options.in_file;
+                f.words_on_a_line || f.words_in_the_file
+            }
+            None => {
+                self.options.get(self.tab, Opt::WordsOnALine)
+                    || self.options.get(self.tab, Opt::WordsInTheFile)
+            }
+        };
+        if !words {
+            return self.pattern();
+        }
+        let mut terms = Vec::new();
+        let mut rest = self.query.trim_start();
+        while !rest.is_empty() {
+            let (term, after) = match rest.strip_prefix('"') {
+                Some(quoted) => quoted.split_once('"').unwrap_or((quoted, "")),
+                None => rest.split_once(char::is_whitespace).unwrap_or((rest, "")),
+            };
+            let term = term.trim_matches(|c| c == '(' || c == ')');
+            if !term.is_empty() && !term.starts_with('-') {
+                terms.push(term);
+            }
+            rest = after.trim_start();
+        }
+        terms.join("|")
+    }
+
+    /// What ugrep searches for: the query, in a file (Ctrl-T) as its options read the words.
     pub fn pattern(&self) -> String {
         match self.scope {
-            Some(_) => self.query.split_whitespace().collect::<Vec<_>>().join("|"),
+            Some(_) => commands::in_file_pattern(&self.query, &self.options.in_file),
             None => self.query.clone(),
         }
     }
 
     pub fn list_plan(&self) -> ListPlan {
         if let Some(scope) = &self.scope {
-            return commands::in_file_plan(&scope.key, &self.pattern(), &self.engines);
+            return commands::in_file_plan(
+                &scope.key,
+                &self.query,
+                &self.options.in_file,
+                &self.engines,
+            );
         }
         let mut extra = self.extra_options().to_vec();
         if self.tab.searches() {
@@ -296,8 +381,12 @@ impl App {
         // in a file (Ctrl-T) the rows are always lines: bat at the line, whatever the options say
         let mut options = self.options.clone();
         if self.scope.is_some() {
-            options.content.matching_lines = true;
-            options.content.archives = false;
+            let f = &self.options.in_file;
+            let c = &mut options.content;
+            c.matching_lines = true;
+            c.archives = false;
+            (c.words_on_a_line, c.words_in_the_file, c.match_case) =
+                (f.words_on_a_line, f.words_in_the_file, f.match_case);
         }
         match self.current() {
             Some(item) => commands::preview_plan_with(
@@ -340,19 +429,23 @@ impl App {
         if self.view.is_some() {
             return self.view_key(key);
         }
+        if self.popup.is_some() {
+            return self.popup_key(key, now);
+        }
         if self.scope.is_some() {
             let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
             match key.code {
                 KeyCode::Esc | KeyCode::Tab | KeyCode::BackTab => return self.leave_scope(),
-                // no options in a file; already in it
-                KeyCode::Char('s' | 't') if ctrl => return Vec::new(),
+                KeyCode::Char('t') if ctrl => return Vec::new(), // already in it
                 _ => {}
             }
         }
-        if self.popup.is_some() {
-            return self.popup_key(key, now);
-        }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if self.tab == Tab::Help
+            && let Some(effects) = self.help_key(key)
+        {
+            return effects;
+        }
         if self.result_filter.is_some() {
             match key.code {
                 KeyCode::Esc => return self.leave_result_filter(),
@@ -472,7 +565,17 @@ impl App {
             }
             MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
                 let down = m.kind == MouseEventKind::ScrollDown;
-                if self.layout.preview.contains(at) {
+                if self.tab == Tab::Help && self.layout.help.contains(at) {
+                    let h = &mut self.help;
+                    let page = (self.layout.help.height as usize).max(1);
+                    let last = h.text.lines.len().saturating_sub(page);
+                    h.scroll = if down {
+                        (h.scroll + WHEEL).min(last)
+                    } else {
+                        h.scroll.saturating_sub(WHEEL)
+                    };
+                    Vec::new()
+                } else if self.layout.preview.contains(at) {
                     self.scroll_preview(if down { WHEEL as i32 } else { -(WHEEL as i32) })
                 } else if self.layout.list.contains(at) {
                     // the rows run upwards: the wheel up goes to later rows
@@ -512,6 +615,42 @@ impl App {
             effects.push(self.run_list());
         }
         effects
+    }
+
+    /// The Help tab's keys: scroll, type to find, Enter the next one, Esc clears then quits; None for
+    /// the keys every tab has (Tab, Shift-Tab).
+    fn help_key(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
+        let page = (self.layout.help.height as usize).max(1);
+        let h = &mut self.help;
+        let last = h.text.lines.len().saturating_sub(page);
+        let ctrl = key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT);
+        match key.code {
+            KeyCode::Tab | KeyCode::BackTab => return None,
+            KeyCode::Esc if h.search.is_empty() => return Some(vec![Effect::Quit]),
+            KeyCode::Esc => {
+                h.search.clear();
+                h.found = None;
+            }
+            KeyCode::Up => h.scroll = h.scroll.saturating_sub(1),
+            KeyCode::Down => h.scroll = (h.scroll + 1).min(last),
+            KeyCode::PageUp => h.scroll = h.scroll.saturating_sub(page),
+            KeyCode::PageDown => h.scroll = (h.scroll + page).min(last),
+            KeyCode::Home => h.scroll = 0,
+            KeyCode::End => h.scroll = last,
+            KeyCode::Enter => h.find(h.found.map_or(0, |f| f + 1)),
+            KeyCode::Backspace => {
+                h.search.pop();
+                h.find(0);
+            }
+            KeyCode::Char(c) if !ctrl => {
+                h.search.push(c);
+                h.find(0);
+            }
+            _ => {}
+        }
+        Some(Vec::new())
     }
 
     /// Starts Deep's preview once the cursor rests; a preview slow to come says so.
@@ -604,6 +743,8 @@ impl App {
     fn run_list(&mut self) -> Effect {
         self.list_gen += 1;
         self.filter.clear();
+        self.filter
+            .set_match_case(self.options.get(self.tab, Opt::MatchCase));
         self.filter.set_query(match &self.result_filter {
             Some(words) => words,
             None if self.tab.searches() => "",
@@ -623,6 +764,9 @@ impl App {
     fn switch_tab(&mut self, tab: Tab) -> Vec<Effect> {
         self.tab = tab;
         self.result_filter = None;
+        if tab == Tab::Help {
+            return Vec::new(); // the manual: no list, no preview
+        }
         self.preview = Text::default();
         self.preview_scroll = 0;
         vec![self.run_list()]
@@ -741,6 +885,9 @@ impl App {
             return Vec::new();
         };
         if kind == ActionKind::InFile && matches!(self.tab, Tab::Files | Tab::Content | Tab::Deep) {
+            if self.tmux {
+                return vec![Effect::Act(kind)]; // a window of its own (Bilal)
+            }
             let key = item.key.clone();
             return self.enter_scope(key);
         }
@@ -763,7 +910,7 @@ impl App {
         self.result_filter = None;
         self.scope = Some(Scope {
             key,
-            back: (self.tab, self.query.clone()),
+            back: Some((self.tab, self.query.clone())),
         });
         if !self.tab.searches() {
             self.query.clear(); // a filter of names is no pattern for the lines
@@ -772,6 +919,22 @@ impl App {
         self.preview = Text::default();
         self.preview_scroll = 0;
         vec![self.run_list()]
+    }
+
+    /// `sf in FILE WORDS`: inside the file from the start; Esc quits.
+    pub fn start_in_file(&mut self, file: OsString, query: String) {
+        self.tab = Tab::Content;
+        self.query = query;
+        self.scope = Some(Scope {
+            key: file,
+            back: None,
+        });
+    }
+
+    /// What Ctrl-T's window searches the file for: Content's or Deep's pattern; a filter of names
+    /// is none.
+    pub fn in_file_query(&self) -> &str {
+        if self.tab.searches() { &self.query } else { "" }
     }
 
     /// The query a start from the command line gives: a pattern for Content or Deep is kept and what
@@ -803,7 +966,10 @@ impl App {
         let Some(scope) = self.scope.take() else {
             return Vec::new();
         };
-        (self.tab, self.query) = scope.back;
+        let Some(back) = scope.back else {
+            return vec![Effect::Quit]; // `sf in FILE`, Ctrl-T's tmux window
+        };
+        (self.tab, self.query) = back;
         self.preview = Text::default();
         self.preview_scroll = 0;
         vec![self.run_list()]
@@ -925,9 +1091,11 @@ impl App {
     /// The popup's rows: the tab's options, then (Files, Content, Deep) every file type of the rows,
     /// the most first, and those turned off.
     pub fn popup_rows(&self) -> Vec<PopupRow> {
-        let mut rows: Vec<PopupRow> = self
-            .options
-            .list(self.tab)
+        let options = match self.scope {
+            Some(_) => self.options.in_file_list(),
+            None => self.options.list(self.tab),
+        };
+        let mut rows: Vec<PopupRow> = options
             .into_iter()
             .map(|(opt, on)| PopupRow::Opt(opt, on))
             .collect();
@@ -1019,10 +1187,17 @@ impl App {
 
     /// Toggles the current tab's option at `index` (popup order).
     pub fn toggle_option(&mut self, index: usize, now: Instant) -> Vec<Effect> {
-        let Some(&(opt, _)) = self.options.list(self.tab).get(index) else {
-            return Vec::new();
-        };
-        self.options.toggle(self.tab, opt);
+        if self.scope.is_some() {
+            let Some(&(opt, _)) = self.options.in_file_list().get(index) else {
+                return Vec::new();
+            };
+            self.options.toggle_in_file(opt);
+        } else {
+            let Some(&(opt, _)) = self.options.list(self.tab).get(index) else {
+                return Vec::new();
+            };
+            self.options.toggle(self.tab, opt);
+        }
         let mut fx = vec![self.run_list()];
         if self.save_allowed {
             fx.push(Effect::SaveConfig);
@@ -1298,7 +1473,7 @@ pub(crate) mod tests {
         assert_eq!(a.tab, Tab::Content);
         a.handle_key(key(KeyCode::BackTab), now);
         a.handle_key(key(KeyCode::BackTab), now);
-        assert_eq!(a.tab, Tab::Git);
+        assert_eq!(a.tab, Tab::Help);
         a.handle_key(key(KeyCode::Tab), now);
         assert_eq!(a.tab, Tab::Files);
     }
@@ -1449,9 +1624,9 @@ pub(crate) mod tests {
         for _ in 0..3 {
             a.handle_key(key(KeyCode::Up), now);
         }
-        assert_eq!(a.popup, Some(4), "the cursor wraps");
+        assert_eq!(a.popup, Some(7), "the cursor wraps");
         a.handle_key(key(KeyCode::Enter), now);
-        assert!(!a.options.content.ignored, "on by default, so off now");
+        assert!(a.options.content.match_case, "Match case, the last row");
     }
 
     #[test]
@@ -1800,6 +1975,7 @@ pub(crate) mod tests {
             [
                 PopupRow::Opt(Opt::Hidden, false),
                 PopupRow::Opt(Opt::Ignored, true),
+                PopupRow::Opt(Opt::MatchCase, false),
                 PopupRow::AllTypes(true),
                 ty(Some("rs"), 2, true),
                 ty(Some("dll"), 1, true),
@@ -1809,7 +1985,7 @@ pub(crate) mod tests {
             "the most first; no extension last among equals"
         );
         let (a, _) = app(Tab::Folders);
-        assert_eq!(a.popup_rows().len(), 2, "Folders: its options only");
+        assert_eq!(a.popup_rows().len(), 3, "Folders: its options only");
     }
 
     #[test]
@@ -1817,23 +1993,23 @@ pub(crate) mod tests {
         let (mut a, now) = app(Tab::Files);
         feed(&mut a, &["a.rs", "b.rs", "c.dll", "Makefile"]);
         a.handle_key(ctrl('s'), now);
-        for _ in 0..4 {
+        for _ in 0..5 {
             a.handle_key(key(KeyCode::Down), now);
         }
-        assert_eq!(a.popup_rows()[4], ty(Some("dll"), 1, true));
+        assert_eq!(a.popup_rows()[5], ty(Some("dll"), 1, true));
         assert_eq!(
             a.handle_key(key(KeyCode::Char(' ')), now),
             [],
             "Files: no new run, nothing saved"
         );
         assert_eq!(a.filter.len(), 3);
-        assert_eq!(a.popup_rows()[4], ty(Some("dll"), 1, false));
-        assert_eq!(a.popup_rows()[2], PopupRow::AllTypes(false));
+        assert_eq!(a.popup_rows()[5], ty(Some("dll"), 1, false));
+        assert_eq!(a.popup_rows()[3], PopupRow::AllTypes(false));
         a.handle_key(key(KeyCode::Char('a')), now);
         assert_eq!(a.filter.len(), 4, "a: all on");
         a.handle_key(key(KeyCode::Char('a')), now);
         assert_eq!(a.filter.len(), 0, "a again: all off");
-        a.popup = Some(2);
+        a.popup = Some(3);
         a.handle_key(key(KeyCode::Enter), now);
         assert_eq!(a.filter.len(), 4, "All types toggles them too");
     }
@@ -1875,8 +2051,8 @@ pub(crate) mod tests {
         let (mut a, now) = app(Tab::Files);
         feed(&mut a, &["a.rs", "c.dll"]);
         a.handle_key(ctrl('s'), now);
-        a.popup = Some(3); // .dll: one each, so by name
-        assert_eq!(a.popup_rows()[3], ty(Some("dll"), 1, true));
+        a.popup = Some(4); // .dll: one each, so by name
+        assert_eq!(a.popup_rows()[4], ty(Some("dll"), 1, true));
         a.handle_key(key(KeyCode::Char(' ')), now);
         a.handle_key(key(KeyCode::Esc), now);
         a.handle_key(key(KeyCode::Tab), now);
@@ -2097,7 +2273,142 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn ctrl_t_searches_inside_the_file_with_any_of_the_words() {
+    fn match_case_filters_by_the_case_typed() {
+        let (mut a, now) = app(Tab::Files);
+        a.popup = Some(2);
+        assert_eq!(a.popup_rows()[2], PopupRow::Opt(Opt::MatchCase, false));
+        assert_eq!(
+            a.handle_key(key(KeyCode::Char(' ')), now)[0],
+            Effect::RunList
+        );
+        a.handle_key(key(KeyCode::Esc), now);
+        feed(&mut a, &["README.md", "readme.txt"]);
+        typed(&mut a, "README", now);
+        assert_eq!(a.filter.len(), 1);
+        assert_eq!(a.current().unwrap().key, "README.md");
+    }
+
+    #[test]
+    fn the_help_tab_scrolls_and_finds() {
+        let (mut a, now) = app(Tab::Git);
+        assert_eq!(a.handle_key(key(KeyCode::Tab), now), [], "no list to run");
+        assert_eq!(a.tab, Tab::Help);
+        a.layout.help = Rect::new(1, 2, 80, 10);
+        a.handle_key(key(KeyCode::Down), now);
+        assert_eq!(a.help.scroll, 1);
+        let lines_with = |a: &App, needle: &str| -> Vec<usize> {
+            (0..a.help.text.lines.len())
+                .filter(|&i| {
+                    let line: String = a.help.text.lines[i]
+                        .spans
+                        .iter()
+                        .map(|s| s.content.as_ref())
+                        .collect();
+                    line.to_lowercase().contains(needle)
+                })
+                .collect()
+        };
+        let matches = lines_with(&a, "match");
+        assert!(matches.len() > 2);
+        typed(&mut a, "MATCH", now);
+        assert_eq!(a.query, "", "the manual's search is its own");
+        assert_eq!(a.help.found, Some(matches[0]));
+        a.handle_key(key(KeyCode::Enter), now);
+        assert_eq!(a.help.found, Some(matches[1]), "Enter: the next one");
+        assert_eq!(a.handle_key(key(KeyCode::Esc), now), []);
+        assert_eq!((a.help.search.as_str(), a.help.found), ("", None));
+        assert_eq!(a.handle_key(key(KeyCode::Esc), now), [Effect::Quit]);
+        assert_eq!(a.handle_key(key(KeyCode::Tab), now), [Effect::RunList]);
+        assert_eq!(a.tab, Tab::Files);
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_manual() {
+        let (mut a, now) = app(Tab::Help);
+        a.layout.help = Rect::new(1, 2, 80, 10);
+        a.handle_mouse(mouse(MouseEventKind::ScrollDown, a.layout.help), now);
+        assert_eq!(a.help.scroll, WHEEL);
+        a.handle_mouse(mouse(MouseEventKind::ScrollUp, a.layout.help), now);
+        assert_eq!(a.help.scroll, 0);
+    }
+
+    #[test]
+    fn in_tmux_ctrl_t_is_a_window_of_its_own() {
+        for tab in [Tab::Files, Tab::Content, Tab::Deep] {
+            let (mut a, now) = app(tab);
+            a.tmux = true;
+            feed(&mut a, &["src/a.c"]);
+            assert_eq!(
+                a.handle_key(ctrl('t'), now),
+                [Effect::Act(ActionKind::InFile)],
+                "{tab:?}"
+            );
+            assert!(a.scope.is_none());
+        }
+        let (mut a, now) = found(Tab::Content);
+        assert_eq!(a.in_file_query(), "needle", "Content passes its pattern");
+        a.handle_key(key(KeyCode::BackTab), now);
+        assert_eq!(a.in_file_query(), "", "a Files filter is no pattern");
+    }
+
+    #[test]
+    fn sf_in_a_file_starts_inside_it_and_esc_quits() {
+        let (mut a, now) = app(Tab::Files);
+        a.start_in_file("src/a b.c".into(), "ankara izmir".into());
+        assert_eq!((a.tab, a.query.as_str()), (Tab::Content, "ankara izmir"));
+        let ListPlan::Run { cmd, kind } = a.list_plan() else {
+            panic!()
+        };
+        assert_eq!(kind, ParseKind::SearchLines);
+        assert_eq!(cmd.args.last(), Some(&OsString::from("src/a b.c")));
+        assert_eq!(a.handle_key(key(KeyCode::Esc), now), [Effect::Quit]);
+    }
+
+    #[test]
+    fn ctrl_s_in_a_file_holds_its_own_options() {
+        let (mut a, now) = found(Tab::Content);
+        a.handle_key(ctrl('t'), now);
+        a.handle_key(ctrl('s'), now);
+        assert_eq!(a.popup, Some(0));
+        assert_eq!(
+            a.popup_rows(),
+            [
+                PopupRow::Opt(Opt::WordsOnALine, true),
+                PopupRow::Opt(Opt::WordsInTheFile, false),
+                PopupRow::Opt(Opt::MatchCase, false)
+            ]
+        );
+        a.handle_key(key(KeyCode::Down), now);
+        assert_eq!(
+            a.handle_key(key(KeyCode::Char(' ')), now),
+            [Effect::RunList, Effect::SaveConfig]
+        );
+        assert!(a.options.in_file.words_in_the_file && !a.options.in_file.words_on_a_line);
+        assert!(
+            !a.options.content.words_in_the_file,
+            "Content's stay as they are"
+        );
+        let ListPlan::Run { cmd, .. } = a.list_plan() else {
+            panic!()
+        };
+        assert!(cmd.args.contains(&"--files".into()), "{:?}", cmd.args);
+    }
+
+    #[test]
+    fn the_editor_highlights_any_of_the_words() {
+        let (mut a, _) = app(Tab::Content);
+        a.query = "ankara -izmir \"x y\"".into();
+        assert_eq!(a.editor_pattern(), a.query, "a pattern goes as it is");
+        a.options.toggle(Tab::Content, Opt::WordsOnALine);
+        assert_eq!(
+            a.editor_pattern(),
+            "ankara|x y",
+            "words: any of them, not the excluded one"
+        );
+    }
+
+    #[test]
+    fn ctrl_t_searches_inside_the_file_for_the_words() {
         let (mut a, now) = app(Tab::Files);
         a.query = "a.c".into();
         feed(&mut a, &["src/a.c"]);
@@ -2115,6 +2426,13 @@ pub(crate) mod tests {
         for c in "foo  bar".chars() {
             a.handle_key(key(KeyCode::Char(c)), now);
         }
+        // all of them on a line (Bilal: as the fzf window); turned off, any of them
+        assert_eq!(a.pattern(), "foo  bar");
+        let ListPlan::Run { cmd, .. } = a.list_plan() else {
+            panic!()
+        };
+        assert!(cmd.args.contains(&"--bool".into()), "{:?}", cmd.args);
+        a.options.toggle_in_file(Opt::WordsOnALine);
         assert_eq!(a.pattern(), "foo|bar");
         let ListPlan::Run { cmd, .. } = a.list_plan() else {
             panic!()

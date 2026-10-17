@@ -19,7 +19,7 @@ A collection of efficient and flexible search tools to search inside file conten
 
 | Function          | Description                                                                 |
 |-------------------|-----------------------------------------------------------------------------|
-| `sf`              | All of it in one window (a compiled app): tabs Files · Content · Deep · Folders · Git, options under ⚙ Config, mouse and keys |
+| `sf`              | All of it in one window (a compiled app): tabs Files · Content · Deep · Folders · Git · Help (the manual), options under ⚙ Config, mouse and keys |
 | `advancedsearch`  | Search in text, binary, and most file types                                 |
 | `advancedsearch_plus` | Like `advancedsearch` + support for PDF, Word, DOCX                     |
 | `detailedsearch`  | Like `advancedsearch` + displays matching lines for filtering               |
@@ -42,6 +42,8 @@ A collection of efficient and flexible search tools to search inside file conten
 sf                         # starts in Files
 sf content needle          # Content searching for "needle", typing then filters the files found (Ctrl-F)
 sf deep needle -- -i       # Deep: binaries and archives too, as advancedsearch (-i: ignore case)
+sf in src/main.rs 'ankara izmir'   # inside one file, as Ctrl-T (the lines with both words)
+sf help                    # the manual: tabs, keys, options, patterns, commands with examples
 sf files -- -e rs -d 3     # options after -- go to the tab's engine: fd, ugrep or git log
 sf content TODO | wc -l    # into a pipe or a file (or with --print) sf prints the list, no window
 ```
@@ -53,11 +55,12 @@ character. The exit status is 0 when something was listed, 1 when nothing, 2 on 
 
 | Tab | Lists | Typing | Options (⚙ Config, defaults) |
 |-----|-------|--------|------------------------------|
-| Files | every file below the folder | filters the names | Hidden files ✗, Ignored files ✓ |
-| Content | the files that contain the pattern (ugrep); every text file while it is empty | the pattern, searched 150 ms after the last key; the preview shows the file, the pattern, how often it occurs and each match numbered ("Match #1", …) with two lines around it | Matching lines ✗ (list the lines instead), Each match ✗ (a row for every match with the text around it, as `detailedsearch`), Archives & documents ✗ (zip, tar, 7z, PDF, Office via `ugrep+`), Hidden files ✗, Ignored files ✓ |
-| Deep | as Content, in every file: binaries (dll, exe, …) and archives (zip, tar, 7z, gz) too; every file while the pattern is empty. Together `advancedsearch`, `advancedsearch_plus` and `detailedsearch` | the pattern, as in Content; the preview numbers the matches, in a binary the first 300 each with the bytes around it, and starts once the cursor rests | Each match ✗ (`detailedsearch`: every match with the text around it, in binaries too), Documents ✗ (PDF, Office, e-books as text via `ugrep+`, as `advancedsearch_plus`; slower), Hidden files ✗, Ignored files ✓ |
-| Folders | every folder, `..` first | filters the names; `Enter` goes inside | Hidden folders ✗, Ignored folders ✓ |
-| Git | the commit graph, numbered | filters the commits; `Enter` shows one | All branches ✓ |
+| Files | every file below the folder | filters the names | Hidden files ✗, Ignored files ✓, Match case ✗ |
+| Content | the files that contain the pattern (ugrep); every text file while it is empty | the pattern, searched 150 ms after the last key; the preview shows the file, the pattern, how often it occurs and each match numbered ("Match #1", …) with two lines around it | Matching lines ✗ (list the lines instead), Each match ✗ (a row for every match with the text around it, as `detailedsearch`), Archives & documents ✗ (zip, tar, 7z, PDF, Office via `ugrep+`), Hidden files ✗, Ignored files ✓, All words on a line ✗ / All words in the file ✗ (`ankara izmir`: both on one line / both in the file), Match case ✗ (else smart case) |
+| Deep | as Content, in every file: binaries (dll, exe, …) and archives (zip, tar, 7z, gz) too; every file while the pattern is empty. Together `advancedsearch`, `advancedsearch_plus` and `detailedsearch` | the pattern, as in Content; the preview numbers the matches, in a binary the first 300 each with the bytes around it, and starts once the cursor rests | Each match ✗ (`detailedsearch`: every match with the text around it, in binaries too), Documents ✗ (PDF, Office, e-books as text via `ugrep+`, as `advancedsearch_plus`; slower), Hidden files ✗, Ignored files ✓, All words on a line ✗ / All words in the file ✗ (`ankara izmir`: both on one line / both in the file), Match case ✗ (else smart case) |
+| Folders | every folder, `..` first | filters the names; `Enter` goes inside | Hidden folders ✗, Ignored folders ✓, Match case ✗ |
+| Git | the commit graph, numbered | filters the commits; `Enter` shows one | All branches ✓, Match case ✗ |
+| Help | the manual: tabs, keys, options, patterns, commands with examples | finds in it, `Enter` the next one | — |
 
 As in fzf, the list fills from the bottom: the first row sits right above the input line, `Up` goes to the next
 one, `Home` to the top. Click a tab or use `Tab` / `Shift-Tab`; click **⚙ Config** (or `Ctrl-S`) for the tab's options, `Space` or a click
@@ -130,7 +133,7 @@ These shortcuts apply when using the interactive search tools (`fzf`, `ugrep-fzf
 | `Ctrl-e` | Open file location in file manager       |
 | `Ctrl-c` | Copy relative path of selected file (on WSL its Windows path; use `Esc` to quit) |
 | `Ctrl-o` | Open the file in nvim in a new tmux window (`sf`: at the matching line, with nvim or else `$VISUAL`, `$EDITOR`, vim, vi; outside tmux in the same terminal) |
-| `Ctrl-t` | Search inside the selected file in a new tmux window (`sf`: inside its window, the lines with any of the typed words; `Esc` back) |
+| `Ctrl-t` | Search inside the selected file in a new tmux window (`sf`: in tmux a window of its own, else inside sf; the lines with all the typed words, `Ctrl-s` for all in the file or any of them, Match case; `Esc` back) |
 | `Ctrl-u` / `Ctrl-g` / `Alt-g` / `Alt-u` | git diff / diff (delta) / short diff / log of the file (`sf`: history with changes / changes against HEAD / short / log, shown inside its window; `/` searches, `Esc` back; `Enter` in Git shows a commit so) |
 | `Alt-j` / `Ctrl-j` | Folder list / file list in a new tmux window |
 | `Ctrl-l` | Toggle the preview                       |

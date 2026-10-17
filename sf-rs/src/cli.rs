@@ -1,5 +1,5 @@
-//! sf's command line: `sf [TAB] [QUERY...] [--print] [-- ENGINE-OPTIONS...]`, the one-action commands and
-//! `sf doctor`. Engine options go to the starting tab's engine (fd, ugrep, git); those that change what
+//! sf's command line: `sf [TAB] [QUERY...] [--print] [-- ENGINE-OPTIONS...]`, `sf in FILE [WORDS...]`,
+//! the one-action commands and `sf doctor`. Engine options go to the starting tab's engine (fd, ugrep, git); those that change what
 //! the engine prints, which sf reads, are refused.
 
 use std::ffi::OsString;
@@ -15,6 +15,11 @@ pub enum Cli {
     Command {
         name: String,
         value: OsString,
+    },
+    /// `sf in FILE [WORDS...]`: the window inside one file (Ctrl-T); Esc quits it.
+    InFile {
+        file: OsString,
+        query: String,
     },
     /// The window, or with `print` the list it would show.
     Run {
@@ -44,6 +49,23 @@ pub fn parse(args: &[OsString]) -> Result<Cli, String> {
             }),
             _ => Err(format!("sf {name}: one {what} expected")),
         };
+    }
+    if first == Some("in") {
+        // the words go to the search as they are, a leading dash too (`-word`: not that word)
+        let Some(file) = args.get(1) else {
+            return Err("sf in: a FILE expected".into());
+        };
+        let mut words = Vec::new();
+        for word in &args[2..] {
+            let Some(word) = word.to_str() else {
+                return Err("the query must be valid UTF-8".into());
+            };
+            words.push(word);
+        }
+        return Ok(Cli::InFile {
+            file: file.clone(),
+            query: words.join(" "),
+        });
     }
     let split = args.iter().position(|a| a == "--");
     let (own, extra) = match split {
@@ -201,6 +223,8 @@ pub fn check_extra(tab: Tab, extra: &[OsString]) -> Result<(), String> {
         Tab::Files | Tab::Folders => &FD,
         Tab::Content | Tab::Deep => &UGREP,
         Tab::Git => &GIT,
+        Tab::Help if extra.is_empty() => return Ok(()),
+        Tab::Help => return Err("sf help: the manual takes no engine options".into()),
     };
     let sf = format!("sf {}", tab.title().to_lowercase());
     let refuse = |option: &str| {
@@ -262,6 +286,26 @@ mod tests {
             print,
             extra: args(extra),
         }
+    }
+
+    #[test]
+    fn in_takes_a_file_and_the_words_as_they_are() {
+        assert_eq!(
+            parse(&args(&["in", "src/a b.c", "ankara izmir"])),
+            Ok(Cli::InFile {
+                file: "src/a b.c".into(),
+                query: "ankara izmir".into()
+            })
+        );
+        assert_eq!(
+            parse(&args(&["in", "a.c", "ankara", "-izmir"])),
+            Ok(Cli::InFile {
+                file: "a.c".into(),
+                query: "ankara -izmir".into()
+            }),
+            "a word with a dash is a word here"
+        );
+        assert_eq!(parse(&args(&["in"])), Err("sf in: a FILE expected".into()));
     }
 
     #[test]

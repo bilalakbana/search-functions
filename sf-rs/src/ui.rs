@@ -40,6 +40,13 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     .areas(area);
     let mut layout = ScreenLayout::default();
     draw_tab_bar(frame, app, bar, &mut layout);
+    if app.tab == Tab::Help {
+        let body = Rect::new(area.x, preview.y, area.width, preview.height + list.height);
+        layout.help = draw_help(frame, app, body);
+        draw_input(frame, app, input);
+        app.layout = layout;
+        return;
+    }
     let status = status_line(app);
     if app.preview_visible() {
         layout.preview = draw_preview(frame, app, preview, status.clone());
@@ -240,6 +247,39 @@ fn draw_view(frame: &mut Frame, app: &App) -> Rect {
     inner
 }
 
+/// The Help tab's manual in `area`, scrolled, the found line in a band; returns its text area.
+fn draw_help(frame: &mut Frame, app: &App, area: Rect) -> Rect {
+    let h = &app.help;
+    let block = bordered().title_top(Span::styled(" Manual ", style(theme::TEXT)));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let total = h.text.lines.len();
+    let from = h.scroll.min(total.saturating_sub(inner.height as usize));
+    let mut shown: Vec<Line> = h.text.lines[from..]
+        .iter()
+        .take(inner.height as usize)
+        .cloned()
+        .collect();
+    if let Some(i) = h
+        .found
+        .and_then(|f| f.checked_sub(from))
+        .filter(|&i| i < shown.len())
+    {
+        shown[i] = shown[i]
+            .clone()
+            .patch_style(Style::new().bg(theme::SURFACE));
+    }
+    let text_area = Rect::new(
+        inner.x + 1,
+        inner.y,
+        inner.width.saturating_sub(1),
+        inner.height,
+    );
+    frame.render_widget(Paragraph::new(Text::from(shown)), text_area);
+    draw_scrollbar(frame, area, total, from, inner.height as usize);
+    inner
+}
+
 fn draw_preview(frame: &mut Frame, app: &App, area: Rect, status: Option<Line<'static>>) -> Rect {
     let mut block = bordered().title_top(root_title(app));
     if let Some(status) = status {
@@ -299,15 +339,22 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
         frame.render_widget(Paragraph::new(line), Rect::new(inner.x, y, inner.width, 1));
     }
     // the filter's words, drawn red in the rows (Search's query is a pattern for the contents)
-    let words: Vec<String> = match &app.result_filter {
-        Some(words) => words.split_whitespace().map(str::to_lowercase).collect(),
-        None if app.tab.searches() => Vec::new(),
-        None => app
-            .query
-            .split_whitespace()
-            .map(str::to_lowercase)
-            .collect(),
+    let match_case = app.options.get(app.tab, Opt::MatchCase);
+    let typed = match &app.result_filter {
+        Some(words) => words.as_str(),
+        None if app.tab.searches() => "",
+        None => &app.query,
     };
+    let words: Vec<String> = typed
+        .split_whitespace()
+        .map(|w| {
+            if match_case {
+                w.to_string()
+            } else {
+                w.to_lowercase()
+            }
+        })
+        .collect();
     for i in app.offset..app.offset + visible {
         let Some(item) = app.filter.get(i) else { break };
         y -= 1;
@@ -320,7 +367,7 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
         };
         let mut spans: Vec<Span> = [marker]
             .into_iter()
-            .chain(highlight(item.display(), &words).spans)
+            .chain(highlight(item.display(), &words, match_case).spans)
             .collect();
         if selected {
             // the band under every span: coloured engine output carries its own (reset) background
@@ -342,7 +389,8 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
 }
 
 /// Every occurrence of every word (lower case) in `line`, case-insensitive, drawn red and bold.
-fn highlight(line: Line<'static>, words: &[String]) -> Line<'static> {
+/// `line` with every occurrence of `words` red: in any case, or (`match_case`) as typed.
+fn highlight(line: Line<'static>, words: &[String], match_case: bool) -> Line<'static> {
     if words.is_empty() {
         return line;
     }
@@ -355,6 +403,11 @@ fn highlight(line: Line<'static>, words: &[String]) -> Line<'static> {
     // the line in lower case, each lower-case char pointing back at the char it came from
     let (mut lower, mut from) = (Vec::new(), Vec::new());
     for (k, &(_, c)) in chars.iter().enumerate() {
+        if match_case {
+            lower.push(c);
+            from.push(k);
+            continue;
+        }
         for l in c.to_lowercase() {
             lower.push(l);
             from.push(k);
@@ -408,13 +461,23 @@ fn short(opt: Opt) -> &'static str {
         Opt::EachMatch => "each match",
         Opt::Archives => "archives & documents",
         Opt::Documents => "documents",
+        Opt::WordsOnALine => "words on a line",
+        Opt::WordsInTheFile => "words in the file",
+        Opt::MatchCase => "match case",
         Opt::AllBranches => "all branches",
     }
 }
 
 fn placeholder(app: &App) -> &'static str {
     if app.scope.is_some() {
-        return "type words · the lines with any of them";
+        let f = &app.options.in_file;
+        return if f.words_on_a_line {
+            "type words · the lines with all of them"
+        } else if f.words_in_the_file {
+            "type words · all of them in the file, the lines with any"
+        } else {
+            "type words · the lines with any of them"
+        };
     }
     match app.tab {
         Tab::Files => "type to filter file names",
@@ -431,15 +494,18 @@ fn placeholder(app: &App) -> &'static str {
         Tab::Deep => "type a pattern · the files that contain it, binaries and archives too",
         Tab::Folders => "type to filter folders · Enter goes inside, .. goes up",
         Tab::Git => "type to filter commits · Enter shows one",
+        Tab::Help => "type to find in the manual · Enter the next one",
     }
 }
 
 fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
-    let mut active: Vec<String> = app
-        .options
-        .list(app.tab)
+    let options = match app.scope {
+        Some(_) => app.options.in_file_list(), // inside one file, its own
+        None => app.options.list(app.tab),
+    };
+    let mut active: Vec<String> = options
         .into_iter()
-        .filter(|(_, on)| *on && app.scope.is_none()) // none applies inside one file
+        .filter(|(_, on)| *on)
         .map(|(o, _)| short(o).to_string())
         .collect();
     match app.types_off_count() {
@@ -456,10 +522,20 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     if app.loading {
         count.push_str(" …");
     }
+    let mut count_style = style(theme::DIM);
+    if app.tab == Tab::Help {
+        // the manual: where it is, or that the search is nowhere in it
+        let h = &app.help;
+        if !h.search.is_empty() && h.found.is_none() {
+            (count, count_style) = ("not found".into(), style(theme::RED));
+        } else {
+            count = format!("{}/{}", h.scroll + 1, h.text.lines.len());
+        }
+    }
     let right = Line::from(vec![
         Span::styled(active.join(" · "), style(theme::SUB)),
         Span::raw("   "),
-        Span::styled(count, style(theme::DIM)),
+        Span::styled(count, count_style),
         Span::raw(" "),
     ]);
     let right_w = (right.width() as u16).min(area.width / 2);
@@ -475,7 +551,12 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         }
         None => app.tab.title().to_string(),
     };
-    let query = crate::items::printable(&app.query);
+    let typed = if app.tab == Tab::Help {
+        &app.help.search
+    } else {
+        &app.query
+    };
+    let query = crate::items::printable(typed);
     let mut left = vec![
         Span::raw(" "),
         Span::styled(
@@ -558,6 +639,7 @@ fn footer_items(tab: Tab, editor: &str) -> Vec<String> {
             "^C copy hash",
             "Esc quit",
         ],
+        Tab::Help => &["↑↓ PgUp PgDn scroll", "Enter next found", "Esc quit"],
     };
     items
         .iter()
@@ -654,7 +736,10 @@ fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLa
     } else {
         "Space / click · Esc close"
     };
-    let title = format!(" {} options ", app.tab.title());
+    let title = match app.scope {
+        Some(_) => " In file options ".to_string(),
+        None => format!(" {} options ", app.tab.title()),
+    };
     let content_w = lines
         .iter()
         .map(|(_, l)| l.width())
@@ -778,8 +863,8 @@ mod tests {
         let buf = render(&mut a, 60, 20);
         let top = row(&buf, 0);
         assert!(top.trim_end().ends_with("⚙ Config"), "{top:?}");
-        assert!(top.contains("Git"), "{top:?}");
-        let keys = top[top.find("Git").unwrap() + 3..top.find("⚙").unwrap()]
+        assert!(top.contains("Help"), "{top:?}");
+        let keys = top[top.find("Help").unwrap() + 4..top.find("⚙").unwrap()]
             .trim()
             .to_string();
         assert!(
@@ -800,7 +885,7 @@ mod tests {
         assert!(find(&buf, "[ ] Archives & documents").is_some());
         assert!(find(&buf, "[ ] Hidden files").is_some());
         assert!(find(&buf, "[x] Ignored files").is_some());
-        assert_eq!(a.layout.popup_rows.len(), 5);
+        assert_eq!(a.layout.popup_rows.len(), 8);
         assert_eq!(
             a.layout.popup_rows[0].0, 0,
             "Matching lines, the popup's first row"
@@ -834,7 +919,7 @@ mod tests {
         let (mut a, now) = app(Tab::Files);
         feed(&mut a, &["a.rs", "b.md", "c.dll"]);
         a.handle_key(ctrl('s'), now);
-        a.popup = Some(3);
+        a.popup = Some(4);
         a.handle_key(key(KeyCode::Char(' ')), now);
         a.handle_key(key(KeyCode::Esc), now);
         a.loading = false;
@@ -844,7 +929,7 @@ mod tests {
             "{input:?}"
         );
         a.handle_key(ctrl('s'), now);
-        a.popup = Some(4);
+        a.popup = Some(5);
         a.handle_key(key(KeyCode::Char(' ')), now);
         let input = row(&render(&mut a, 100, 24), 23);
         assert!(input.contains("2 types off"), "{input:?}");
@@ -1236,6 +1321,49 @@ mod tests {
     }
 
     #[test]
+    fn with_match_case_only_the_case_typed_is_red() {
+        let (mut a, now) = app(Tab::Files);
+        a.options.toggle(Tab::Files, Opt::MatchCase);
+        a.handle_key(ctrl('r'), now);
+        feed(&mut a, &["src/Main.rs", "src/MAIN.md"]);
+        for c in "Main".chars() {
+            a.handle_key(key(KeyCode::Char(c)), now);
+        }
+        let buf = render(&mut a, 80, 24);
+        assert_eq!(fg_at(&buf, "src/Main.rs", 4), theme::RED);
+        assert!(
+            find(&buf, "src/MAIN.md").is_none(),
+            "filtered out by its case"
+        );
+    }
+
+    #[test]
+    fn in_a_file_the_popup_and_the_input_line_name_its_options() {
+        let (mut a, now) = app(Tab::Content);
+        feed(&mut a, &["src/a.c"]);
+        a.handle_key(ctrl('t'), now);
+        let input = row(&render(&mut a, 100, 24), 23);
+        assert!(input.contains("words on a line"), "{input:?}");
+        a.handle_key(ctrl('s'), now);
+        let buf = render(&mut a, 100, 24);
+        assert!(find(&buf, "In file options").is_some());
+        assert!(find(&buf, "[x] All words on a line").is_some());
+    }
+
+    #[test]
+    fn in_a_file_the_placeholder_says_how_the_words_are_read() {
+        let (mut a, now) = app(Tab::Content);
+        feed(&mut a, &["src/a.c"]);
+        a.handle_key(ctrl('t'), now);
+        let says = |a: &mut App| row(&render(a, 120, 24), 23);
+        assert!(says(&mut a).contains("type words · the lines with all of them"));
+        a.options.toggle_in_file(Opt::WordsInTheFile);
+        assert!(says(&mut a).contains("type words · all of them in the file, the lines with any"));
+        a.options.toggle_in_file(Opt::WordsInTheFile);
+        assert!(says(&mut a).contains("type words · the lines with any of them"));
+    }
+
+    #[test]
     fn search_pattern_is_not_drawn_into_file_names() {
         for tab in [Tab::Content, Tab::Deep] {
             let (mut a, now) = app(tab);
@@ -1340,11 +1468,40 @@ mod tests {
     }
 
     #[test]
+    fn the_help_tab_shows_the_manual() {
+        let (mut a, now) = app(Tab::Help);
+        let buf = render(&mut a, 120, 30);
+        assert!(find(&buf, "sf — the search functions in one window").is_some());
+        assert!(
+            row(&buf, 29).contains("Help › type to find in the manual"),
+            "{:?}",
+            row(&buf, 29)
+        );
+        assert!(a.layout.help.height > 0);
+        for c in "ctrl-f".chars() {
+            a.handle_key(key(KeyCode::Char(c)), now);
+        }
+        let buf = render(&mut a, 120, 30);
+        assert!(
+            row(&buf, 29).contains("Help › ctrl-f"),
+            "{:?}",
+            row(&buf, 29)
+        );
+        let (x, y) = find(&buf, "Ctrl-F").unwrap();
+        assert_eq!(buf[(x, y)].bg, theme::SURFACE, "the found line in a band");
+        for c in "zzz".chars() {
+            a.handle_key(key(KeyCode::Char(c)), now);
+        }
+        let buf = render(&mut a, 120, 30);
+        assert!(row(&buf, 29).contains("not found"), "{:?}", row(&buf, 29));
+    }
+
+    #[test]
     fn layout_rects_recorded() {
         let (mut a, _) = app_with_preview(Tab::Files);
         let buf = render(&mut a, 120, 30);
         let l = &a.layout;
-        assert_eq!(l.tabs.len(), 5);
+        assert_eq!(l.tabs.len(), 6);
         for (tab, r) in &l.tabs {
             assert_eq!(r.y, 0);
             let text: String = (r.x..r.x + r.width).map(|x| buf[(x, 0)].symbol()).collect();

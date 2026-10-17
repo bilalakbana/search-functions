@@ -234,7 +234,7 @@ def third_party(bundle: dict, crates: int, rustc: str) -> str:
 def readme(version: str, commit: str) -> str:
     return f"""# sf {version}
 
-The search functions in one terminal window: Files, Content, Deep, Folders and Git, with previews. Built from
+The search functions in one terminal window: Files, Content, Deep, Folders, Git and Help, with previews. Built from
 https://github.com/bilalakbana/search-functions at commit {commit} (the source of sf, GPL-3.0: see
 `licenses/sf/LICENSE`).
 

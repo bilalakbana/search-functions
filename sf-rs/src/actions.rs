@@ -2,7 +2,7 @@
 //! come after `--`; the Search pattern reaches nvim through the environment, never as an Ex command.
 
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::commands::{Cmd, is_hash};
 use crate::items::Item;
@@ -99,7 +99,26 @@ pub struct Env {
     pub platform: Platform,
     /// Ctrl-O's editor; None when there is none.
     pub editor: Option<Editor>,
+    /// sf's own program, for Ctrl-T's tmux window (`sf in FILE`).
+    pub sf: Option<PathBuf>,
+    /// What sf in that window must see as this one does (`WINDOW_ENV`): tmux gives a new window its
+    /// server's environment, not sf's.
+    pub window_env: Vec<(String, String)>,
 }
+
+/// The variables sf reads: its config, bat's theme, the editor, the desktop session (open, reveal,
+/// copy). Only these go to the window: its command line is visible to `ps`, the rest of the
+/// environment may hold secrets.
+const WINDOW_ENV: [&str; 8] = [
+    "XDG_CONFIG_HOME",
+    "BAT_THEME",
+    "VISUAL",
+    "EDITOR",
+    "WAYLAND_DISPLAY",
+    "DISPLAY",
+    "XDG_SESSION_TYPE",
+    "XDG_CURRENT_DESKTOP",
+];
 
 impl Env {
     pub fn detect() -> Env {
@@ -109,7 +128,16 @@ impl Env {
             std::env::var_os("VISUAL"),
             std::env::var_os("EDITOR"),
         );
-        Env { platform, editor }
+        let window_env = WINDOW_ENV
+            .iter()
+            .filter_map(|&name| Some((name.to_string(), std::env::var(name).ok()?)))
+            .collect();
+        Env {
+            platform,
+            editor,
+            sf: std::env::current_exe().ok(),
+            window_env,
+        }
     }
 }
 
@@ -144,6 +172,7 @@ pub fn perform(
         // Linux: the path as listed (relative to the root); WSL: its Windows form
         ActionKind::Copy => copied(platform.copy_path(item.key.as_os_str(), &path)),
         ActionKind::Editor => editor_window(tab, item, query, root, &path, env),
+        ActionKind::InFile => in_file_window(item, query, root, env),
         // sf answers these itself (a view, Content narrowed to the file); here they mean nothing
         _ => Outcome::Failed("Not available here".into()),
     }
@@ -179,27 +208,72 @@ fn editor_window(
         .unwrap_or(&e.program)
         .to_string_lossy()
         .into_owned();
-    let title = "editor";
     let cmd = editor(e, tab, item, query, path);
     if !env.platform.tmux {
         return Outcome::Foreground(vec![cmd]);
     }
+    tmux_window(
+        &window,
+        "editor",
+        root,
+        &cmd.env,
+        cmd.program.as_os_str(),
+        &cmd.args,
+        env,
+    )
+}
+
+/// Ctrl-T in tmux (Bilal): sf inside the file (`sf in FILE WORDS`) in a window of its own, named
+/// "infile" as the fzf functions named theirs.
+fn in_file_window(item: &Item, query: &str, root: &Path, env: &Env) -> Outcome {
+    if !env.platform.tmux {
+        return Outcome::Failed("Not available here".into()); // sf narrows itself to the file
+    }
+    let Some(sf) = &env.sf else {
+        return Outcome::Failed("sf cannot find its own program".into());
+    };
+    let mut args = vec![OsString::from("in"), item.key.as_os_str().to_os_string()];
+    if !query.is_empty() {
+        args.push(query.into()); // one word: the query as typed, spaces and quotes kept
+    }
+    tmux_window(
+        "infile",
+        "file-content",
+        root,
+        &env.window_env,
+        sf.as_os_str(),
+        &args,
+        env,
+    )
+}
+
+/// `program args` in a new tmux window named `window` (its pane titled `title`), in `root`, with sf's
+/// `$PATH` and `vars`.
+fn tmux_window(
+    window: &str,
+    title: &str,
+    root: &Path,
+    vars: &[(String, String)],
+    program: &std::ffi::OsStr,
+    program_args: &[OsString],
+    env: &Env,
+) -> Outcome {
     // More than one argument after the options: tmux runs the program itself, no shell. The folder
     // is never given with `-c`, which tmux expands as a format (a folder named `#(cmd)` would run
     // cmd); a fixed script changes into it, the folder being one of its arguments.
-    let mut args: Vec<OsString> = ["new-window", "-n", &window].map(OsString::from).into();
+    let mut args: Vec<OsString> = ["new-window", "-n", window].map(OsString::from).into();
     // the window gets sf's PATH (with a release package's engines), not the tmux server's
     let mut path = OsString::from("PATH=");
     path.push(&env.platform.path);
     args.extend(["-e".into(), path]);
-    for (k, v) in &cmd.env {
+    for (k, v) in vars {
         args.push("-e".into()); // -e values are not expanded
         args.push(format!("{k}={v}").into());
     }
     args.extend(["sh", "-c", CD_AND_EXEC, "sf"].map(OsString::from));
     args.push(root.into());
-    args.push(cmd.program.into());
-    args.extend(cmd.args);
+    args.push(program.into());
+    args.extend(program_args.iter().cloned());
     let args: Vec<&std::ffi::OsStr> = args.iter().map(OsString::as_os_str).collect();
     let tmux = std::ffi::OsStr::new("tmux");
     let path = &env.platform.path;
@@ -300,6 +374,8 @@ mod tests {
                     args: Vec::new(),
                     vim: true,
                 }),
+                sf: Some("/opt/sf/bin/sf".into()),
+                window_env: vec![("XDG_CONFIG_HOME".into(), "/tmp/e2e config".into())],
             },
             root,
         }
@@ -659,6 +735,54 @@ mod tests {
                 ],
                 vec!["select-pane", "-T", "editor"]
             ]
+        );
+    }
+
+    #[test]
+    fn in_file_in_tmux_runs_sf_in_a_window() {
+        let f = fixture("act_in_file_tmux", false, true);
+        assert_eq!(
+            act(
+                &f,
+                ActionKind::InFile,
+                Tab::Content,
+                &file("src/a b.c"),
+                "ankara izmir"
+            ),
+            Outcome::Done(None)
+        );
+        let root = f.root.to_str().unwrap();
+        let path_var = format!("PATH={}", f.env.platform.path.to_str().unwrap());
+        assert_eq!(
+            calls(&f.bin, "tmux"),
+            [
+                vec![
+                    "new-window",
+                    "-n",
+                    "infile",
+                    "-e",
+                    &path_var,
+                    "-e",
+                    "XDG_CONFIG_HOME=/tmp/e2e config",
+                    "sh",
+                    "-c",
+                    "cd -- \"$1\" && shift && exec \"$@\"",
+                    "sf",
+                    root,
+                    "/opt/sf/bin/sf",
+                    "in",
+                    "src/a b.c",
+                    "ankara izmir"
+                ],
+                vec!["select-pane", "-T", "file-content"]
+            ]
+        );
+        let f = fixture("act_in_file_no_words", false, true);
+        act(&f, ActionKind::InFile, Tab::Files, &file("a.c"), "");
+        assert_eq!(
+            calls(&f.bin, "tmux")[0].last().map(String::as_str),
+            Some("a.c"),
+            "no empty word"
         );
     }
 

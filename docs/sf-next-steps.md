@@ -35,6 +35,7 @@ How Bilal starts the next session (paste):
     `tests/e2e.sh` 132/132.
   - Ctrl-F filter and the key hints: `cargo test` 323; `tests/e2e.sh` 136/136.
   - File types in Ctrl-S (v0.6.0): `cargo test` 332; `tests/e2e.sh` 140/140.
+  - Ctrl-T window in tmux, words, Match case, Help: `cargo test` 355; `tests/e2e.sh` 149/149.
   - Step 2 (same day): `cargo test` 243; `tests/e2e.sh` 86/86 (with a release package's layout);
     `tests/sub_functions.sh NEW_EMPTY_DIR` 7/7 (`-L sfrs-sub-functions`); `python3 -I packaging/test_build.py` 7;
     `packaging/test_package.sh PACKAGE NEW_EMPTY_DIR` all passed on Ubuntu 22.04, Debian 12, Ubuntu 24.04.
@@ -78,6 +79,7 @@ How Bilal starts the next session (paste):
 | `cli.rs` | `sf [TAB] [QUERY] [--print] [-- ENGINE-OPTIONS]`, the commands, `doctor`; refuses output-changing engine options |
 | `print.rs` | `--print` / piped output (rows as the window draws them on a terminal, real bytes into a pipe) |
 | `views.rs` | the views' git/delta plans (diff, history, log, commit) |
+| `help.rs` | the Help tab's manual (tables of tabs, keys, options, patterns, examples) |
 | `main.rs` | arguments (`args_os`: tabs, the commands, `doctor`), event loop, foreground programs (SIGINT ignored meanwhile), tmux window name |
 
 Outside sf-rs: `sub-functions/platform_action` (the fzf functions' Enter/^E/^C; sf when its usage names the

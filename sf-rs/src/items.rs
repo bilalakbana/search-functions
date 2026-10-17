@@ -114,6 +114,15 @@ impl Item {
         }
     }
 
+    /// The shown text as it is, what a filter that matches case looks in after `haystack`.
+    pub fn text(&self) -> String {
+        match &self.look {
+            Look::Path { .. } => printable(&String::from_utf8_lossy(self.key.as_bytes())),
+            Look::Styled { line, .. } => line.spans.iter().map(|s| s.content.as_ref()).collect(),
+            Look::Match { .. } => String::new(),
+        }
+    }
+
     /// The shown text in lower case, what the filter looks in; empty for matching lines.
     pub fn haystack(&self) -> &str {
         match &self.look {

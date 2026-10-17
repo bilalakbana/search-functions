@@ -16,6 +16,10 @@ const PARALLEL: usize = 50_000;
 pub struct Filter {
     items: Vec<Item>,
     words: Vec<String>,
+    /// Ctrl-S, Match case: the case of the words counts.
+    match_case: bool,
+    /// The words as typed, while their case counts; else empty.
+    exact: Vec<String>,
     /// File types whose items are left out (`file_type`: the extension, None for none).
     hidden_types: Vec<Option<String>>,
     /// Indices of the matching items, in input order; unused while nothing filters (`active`).
@@ -49,11 +53,18 @@ impl Filter {
 
     pub fn set_query(&mut self, q: &str) {
         let words: Vec<String> = q.split_whitespace().map(str::to_lowercase).collect();
-        if words == self.words {
+        let exact: Vec<String> = if self.match_case {
+            q.split_whitespace().map(str::to_string).collect()
+        } else {
+            Vec::new()
+        };
+        if words == self.words && exact == self.exact {
             return;
         }
-        // Every old word inside a new one: the new matches are a subset of the old ones.
-        let narrower = !self.words.is_empty()
+        // Every old word inside a new one: the new matches are a subset of the old ones (in lower
+        // case: with the case counting, an item may have the new word and not the old one).
+        let narrower = !self.match_case
+            && !self.words.is_empty()
             && self
                 .words
                 .iter()
@@ -64,6 +75,7 @@ impl Filter {
             (0..self.items.len()).collect()
         };
         self.words = words;
+        self.exact = exact;
         self.matches = if self.active() {
             self.matching(&candidates)
         } else {
@@ -71,7 +83,22 @@ impl Filter {
         };
     }
 
-    /// Leaves out the items of these file types.
+    /// Whether the case of the words counts; the words are read again.
+    pub fn set_match_case(&mut self, on: bool) {
+        if on == self.match_case {
+            return;
+        }
+        self.match_case = on;
+        let words = self.words.clone();
+        let query = if on {
+            // the case typed is gone with the lower-case words: the caller sets the query again
+            words.join(" ")
+        } else {
+            self.exact.join(" ")
+        };
+        self.words.clear(); // forces set_query to filter afresh
+        self.set_query(&query);
+    }
     pub fn set_hidden_types(&mut self, types: Vec<Option<String>>) {
         if types == self.hidden_types {
             return;
@@ -131,7 +158,14 @@ impl Filter {
             return false;
         }
         let hay = item.haystack();
-        self.words.iter().all(|w| hay.contains(w.as_str()))
+        if !self.words.iter().all(|w| hay.contains(w.as_str())) {
+            return false;
+        }
+        // with the case counting, a second look at what the lower-case words let through
+        self.exact.is_empty() || {
+            let text = item.text();
+            self.exact.iter().all(|w| text.contains(w.as_str()))
+        }
     }
 
     /// The number of matching items.
@@ -176,6 +210,25 @@ mod tests {
         (0..f.len())
             .map(|i| f.get(i).unwrap().key.to_str().unwrap().to_string())
             .collect()
+    }
+
+    #[test]
+    fn match_case_keeps_the_case_typed() {
+        let mut f = Filter::new();
+        f.push(items(&["README.md", "readme.txt", "ReadMe"]));
+        f.set_match_case(true);
+        f.set_query("README");
+        assert_eq!(shown(&f), ["README.md"]);
+        f.set_query("READMEx");
+        assert_eq!(shown(&f), Vec::<String>::new());
+        f.set_query("read");
+        assert_eq!(
+            shown(&f),
+            ["readme.txt"],
+            "not narrowed from the last words"
+        );
+        f.set_match_case(false);
+        assert_eq!(shown(&f).len(), 3);
     }
 
     #[test]

@@ -11,10 +11,19 @@ pub enum Tab {
     Deep,
     Folders,
     Git,
+    /// The manual: what the tabs, keys, options and commands do, with examples.
+    Help,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 5] = [Tab::Files, Tab::Content, Tab::Deep, Tab::Folders, Tab::Git];
+    pub const ALL: [Tab; 6] = [
+        Tab::Files,
+        Tab::Content,
+        Tab::Deep,
+        Tab::Folders,
+        Tab::Git,
+        Tab::Help,
+    ];
 
     pub fn title(self) -> &'static str {
         match self {
@@ -23,6 +32,7 @@ impl Tab {
             Tab::Deep => "Deep",
             Tab::Folders => "Folders",
             Tab::Git => "Git",
+            Tab::Help => "Help",
         }
     }
 
@@ -65,6 +75,12 @@ pub enum Opt {
     /// Deep: PDF, Office and e-book files as text (ugrep+).
     Documents,
     AllBranches,
+    /// Content, Deep, a file: every word on one line (ugrep's Boolean query, `--bool`).
+    WordsOnALine,
+    /// Content, Deep, a file: every word in the file, on any lines (`--bool --files`).
+    WordsInTheFile,
+    /// The case of what is typed counts (else smart case for a pattern, none for a filter).
+    MatchCase,
 }
 
 impl Opt {
@@ -81,6 +97,9 @@ impl Opt {
             Opt::Archives => "Archives & documents",
             Opt::Documents => "Documents",
             Opt::AllBranches => "All branches",
+            Opt::WordsOnALine => "All words on a line",
+            Opt::WordsInTheFile => "All words in the file",
+            Opt::MatchCase => "Match case",
         }
     }
 
@@ -94,6 +113,9 @@ impl Opt {
             Opt::Archives => "zip, tar, 7z, PDF, Office…",
             Opt::Documents => "PDF, Office, e-books as text (slower)",
             Opt::AllBranches => "not only the current one",
+            Opt::WordsOnALine => "a b: both on one line",
+            Opt::WordsInTheFile => "a b: both in the file, any lines",
+            Opt::MatchCase => "A is not a",
         }
     }
 }
@@ -103,6 +125,7 @@ impl Opt {
 pub struct FilesOpts {
     pub hidden: bool,
     pub ignored: bool,
+    pub match_case: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -114,6 +137,10 @@ pub struct ContentOpts {
     pub archives: bool,
     pub hidden: bool,
     pub ignored: bool,
+    /// The words of the pattern all on one line; never on together with `words_in_the_file`.
+    pub words_on_a_line: bool,
+    pub words_in_the_file: bool,
+    pub match_case: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -123,6 +150,18 @@ pub struct DeepOpts {
     pub documents: bool,
     pub hidden: bool,
     pub ignored: bool,
+    pub words_on_a_line: bool,
+    pub words_in_the_file: bool,
+    pub match_case: bool,
+}
+
+/// Ctrl-T, the lines of one file.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct InFileOpts {
+    pub words_on_a_line: bool,
+    pub words_in_the_file: bool,
+    pub match_case: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -130,12 +169,14 @@ pub struct DeepOpts {
 pub struct FoldersOpts {
     pub hidden: bool,
     pub ignored: bool,
+    pub match_case: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GitOpts {
     pub all_branches: bool,
+    pub match_case: bool,
 }
 
 impl Default for FilesOpts {
@@ -143,6 +184,7 @@ impl Default for FilesOpts {
         FilesOpts {
             hidden: false,
             ignored: true,
+            match_case: false,
         }
     }
 }
@@ -155,6 +197,9 @@ impl Default for ContentOpts {
             archives: false,
             hidden: false,
             ignored: true,
+            words_on_a_line: false,
+            words_in_the_file: false,
+            match_case: false,
         }
     }
 }
@@ -166,6 +211,20 @@ impl Default for DeepOpts {
             documents: false,
             hidden: false,
             ignored: true,
+            words_on_a_line: false,
+            words_in_the_file: false,
+            match_case: false,
+        }
+    }
+}
+
+impl Default for InFileOpts {
+    fn default() -> Self {
+        // as the fzf window did: its fzf kept the lines with every word typed (Bilal)
+        InFileOpts {
+            words_on_a_line: true,
+            words_in_the_file: false,
+            match_case: false,
         }
     }
 }
@@ -175,13 +234,17 @@ impl Default for FoldersOpts {
         FoldersOpts {
             hidden: false,
             ignored: true,
+            match_case: false,
         }
     }
 }
 
 impl Default for GitOpts {
     fn default() -> Self {
-        GitOpts { all_branches: true }
+        GitOpts {
+            all_branches: true,
+            match_case: false,
+        }
     }
 }
 
@@ -194,6 +257,7 @@ pub struct Options {
     #[serde(alias = "search")]
     pub content: ContentOpts,
     pub deep: DeepOpts,
+    pub in_file: InFileOpts,
     pub folders: FoldersOpts,
     pub git: GitOpts,
 }
@@ -202,16 +266,28 @@ impl Options {
     /// The tab's options in popup order, with their values.
     pub fn list(&self, tab: Tab) -> Vec<(Opt, bool)> {
         let order: &[Opt] = match tab {
-            Tab::Files | Tab::Folders => &[Opt::Hidden, Opt::Ignored],
+            Tab::Files | Tab::Folders => &[Opt::Hidden, Opt::Ignored, Opt::MatchCase],
             Tab::Content => &[
                 Opt::MatchingLines,
                 Opt::EachMatch,
                 Opt::Archives,
                 Opt::Hidden,
                 Opt::Ignored,
+                Opt::WordsOnALine,
+                Opt::WordsInTheFile,
+                Opt::MatchCase,
             ],
-            Tab::Deep => &[Opt::EachMatch, Opt::Documents, Opt::Hidden, Opt::Ignored],
-            Tab::Git => &[Opt::AllBranches],
+            Tab::Deep => &[
+                Opt::EachMatch,
+                Opt::Documents,
+                Opt::Hidden,
+                Opt::Ignored,
+                Opt::WordsOnALine,
+                Opt::WordsInTheFile,
+                Opt::MatchCase,
+            ],
+            Tab::Git => &[Opt::AllBranches, Opt::MatchCase],
+            Tab::Help => &[],
         };
         order.iter().map(|&o| (o, self.get(tab, o))).collect()
     }
@@ -228,12 +304,44 @@ impl Options {
             return;
         };
         *v = !*v;
-        if *v && tab == Tab::Content {
-            match opt {
-                Opt::MatchingLines => self.content.each_match = false,
-                Opt::EachMatch => self.content.matching_lines = false,
-                _ => {}
+        if !*v {
+            return;
+        }
+        match (tab, opt) {
+            (Tab::Content, Opt::MatchingLines) => self.content.each_match = false,
+            (Tab::Content, Opt::EachMatch) => self.content.matching_lines = false,
+            (Tab::Content, Opt::WordsOnALine) => self.content.words_in_the_file = false,
+            (Tab::Content, Opt::WordsInTheFile) => self.content.words_on_a_line = false,
+            (Tab::Deep, Opt::WordsOnALine) => self.deep.words_in_the_file = false,
+            (Tab::Deep, Opt::WordsInTheFile) => self.deep.words_on_a_line = false,
+            _ => {}
+        }
+    }
+
+    /// The options of a search in one file (Ctrl-T), in popup order.
+    pub fn in_file_list(&self) -> Vec<(Opt, bool)> {
+        let f = &self.in_file;
+        vec![
+            (Opt::WordsOnALine, f.words_on_a_line),
+            (Opt::WordsInTheFile, f.words_in_the_file),
+            (Opt::MatchCase, f.match_case),
+        ]
+    }
+
+    /// Toggles an option of the search in one file; the two kinds of words turn each other off.
+    pub fn toggle_in_file(&mut self, opt: Opt) {
+        let f = &mut self.in_file;
+        match opt {
+            Opt::WordsOnALine => {
+                f.words_on_a_line = !f.words_on_a_line;
+                f.words_in_the_file &= !f.words_on_a_line;
             }
+            Opt::WordsInTheFile => {
+                f.words_in_the_file = !f.words_in_the_file;
+                f.words_on_a_line &= !f.words_in_the_file;
+            }
+            Opt::MatchCase => f.match_case = !f.match_case,
+            _ => {}
         }
     }
 
@@ -241,6 +349,15 @@ impl Options {
         match (tab, opt) {
             (Tab::Files, Opt::Hidden) => Some(&mut self.files.hidden),
             (Tab::Files, Opt::Ignored) => Some(&mut self.files.ignored),
+            (Tab::Files, Opt::MatchCase) => Some(&mut self.files.match_case),
+            (Tab::Content, Opt::WordsOnALine) => Some(&mut self.content.words_on_a_line),
+            (Tab::Content, Opt::WordsInTheFile) => Some(&mut self.content.words_in_the_file),
+            (Tab::Content, Opt::MatchCase) => Some(&mut self.content.match_case),
+            (Tab::Deep, Opt::WordsOnALine) => Some(&mut self.deep.words_on_a_line),
+            (Tab::Deep, Opt::WordsInTheFile) => Some(&mut self.deep.words_in_the_file),
+            (Tab::Deep, Opt::MatchCase) => Some(&mut self.deep.match_case),
+            (Tab::Folders, Opt::MatchCase) => Some(&mut self.folders.match_case),
+            (Tab::Git, Opt::MatchCase) => Some(&mut self.git.match_case),
             (Tab::Content, Opt::MatchingLines) => Some(&mut self.content.matching_lines),
             (Tab::Content, Opt::EachMatch) => Some(&mut self.content.each_match),
             (Tab::Content, Opt::Archives) => Some(&mut self.content.archives),
@@ -264,8 +381,9 @@ mod tests {
 
     #[test]
     fn tab_cycle_wraps() {
-        assert_eq!(Tab::Git.next(), Tab::Files);
-        assert_eq!(Tab::Files.prev(), Tab::Git);
+        assert_eq!(Tab::Git.next(), Tab::Help);
+        assert_eq!(Tab::Help.next(), Tab::Files);
+        assert_eq!(Tab::Files.prev(), Tab::Help);
         assert_eq!(Tab::Files.next(), Tab::Content);
         assert_eq!(Tab::Content.prev(), Tab::Files);
     }
@@ -298,7 +416,10 @@ mod tests {
                 Opt::EachMatch,
                 Opt::Archives,
                 Opt::Hidden,
-                Opt::Ignored
+                Opt::Ignored,
+                Opt::WordsOnALine,
+                Opt::WordsInTheFile,
+                Opt::MatchCase
             ]
         );
     }
@@ -332,6 +453,14 @@ mod tests {
     }
 
     #[test]
+    fn help_is_a_tab_without_options() {
+        assert_eq!(Tab::from_name("help"), Some(Tab::Help));
+        assert_eq!(Tab::Help.title(), "Help");
+        assert!(!Tab::Help.searches());
+        assert!(Options::default().list(Tab::Help).is_empty());
+    }
+
+    #[test]
     fn deep_options_and_defaults() {
         assert_eq!(
             Options::default().list(Tab::Deep),
@@ -339,7 +468,10 @@ mod tests {
                 (Opt::EachMatch, false),
                 (Opt::Documents, false),
                 (Opt::Hidden, false),
-                (Opt::Ignored, true)
+                (Opt::Ignored, true),
+                (Opt::WordsOnALine, false),
+                (Opt::WordsInTheFile, false),
+                (Opt::MatchCase, false)
             ]
         );
         assert_eq!(Opt::Documents.label(Tab::Deep), "Documents");
@@ -360,6 +492,86 @@ mod tests {
         assert!(o.content.matching_lines && !o.content.each_match);
         o.toggle(Tab::Deep, Opt::Documents);
         assert!(o.deep.documents && !o.content.archives);
+    }
+
+    #[test]
+    fn every_tab_can_match_case_and_the_searches_take_words() {
+        let o = Options::default();
+        let opts = |tab| {
+            o.list(tab)
+                .into_iter()
+                .map(|(opt, _)| opt)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            opts(Tab::Files),
+            [Opt::Hidden, Opt::Ignored, Opt::MatchCase]
+        );
+        assert_eq!(
+            opts(Tab::Content),
+            [
+                Opt::MatchingLines,
+                Opt::EachMatch,
+                Opt::Archives,
+                Opt::Hidden,
+                Opt::Ignored,
+                Opt::WordsOnALine,
+                Opt::WordsInTheFile,
+                Opt::MatchCase
+            ]
+        );
+        assert_eq!(
+            opts(Tab::Deep),
+            [
+                Opt::EachMatch,
+                Opt::Documents,
+                Opt::Hidden,
+                Opt::Ignored,
+                Opt::WordsOnALine,
+                Opt::WordsInTheFile,
+                Opt::MatchCase
+            ]
+        );
+        assert_eq!(
+            opts(Tab::Folders),
+            [Opt::Hidden, Opt::Ignored, Opt::MatchCase]
+        );
+        assert_eq!(opts(Tab::Git), [Opt::AllBranches, Opt::MatchCase]);
+        for tab in Tab::ALL {
+            assert!(!o.get(tab, Opt::MatchCase), "{tab:?}: off, as before");
+        }
+        assert!(!o.get(Tab::Content, Opt::WordsOnALine) && !o.get(Tab::Deep, Opt::WordsOnALine));
+    }
+
+    #[test]
+    fn in_a_file_all_words_on_a_line_is_on() {
+        let mut o = Options::default();
+        assert_eq!(
+            o.in_file_list(),
+            [
+                (Opt::WordsOnALine, true),
+                (Opt::WordsInTheFile, false),
+                (Opt::MatchCase, false)
+            ]
+        );
+        o.toggle_in_file(Opt::WordsInTheFile);
+        assert_eq!(
+            o.in_file_list()[..2],
+            [(Opt::WordsOnALine, false), (Opt::WordsInTheFile, true)]
+        );
+        o.toggle(Tab::Content, Opt::WordsOnALine);
+        assert!(o.content.words_on_a_line && !o.content.words_in_the_file);
+        o.toggle(Tab::Content, Opt::WordsInTheFile);
+        assert!(
+            !o.content.words_on_a_line && o.content.words_in_the_file,
+            "one or the other"
+        );
+        assert!(
+            o.in_file.words_in_the_file,
+            "a tab's words leave the file's alone"
+        );
+        let old: Options = toml::from_str("[content]\nmatching_lines = true\n").unwrap();
+        assert!(old.in_file.words_on_a_line && !old.content.match_case);
     }
 
     #[test]

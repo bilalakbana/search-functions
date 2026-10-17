@@ -95,7 +95,7 @@ expect 'start: footer'                     'Enter open · \^S options · \^O nvi
 shot files
 keys C-s
 expect 'types: under the options'          '── File types ──'
-keys Down Down Down Down Space
+keys Down Down Down Down Down Space
 expect 'types: .bin turned off'            '\[ \] \.bin'
 keys Escape
 expect 'types: the list without it'        "Files › .*1 type off +$((n_files - 1))/$n_files"
@@ -116,10 +116,17 @@ keys Escape
 expect 'files: Esc leaves the view'        "Files › main .* 1/$n_files"
 keys C-t
 expect "files: Ctrl-T the file's lines"    'In main\.c › .* 3/3'
+[[ $(tm display-message -p -t e2e '#W') == infile ]] && ok 'files: Ctrl-T in a tmux window, infile' || bad 'files: no infile window'
 type_ 'second more'
-expect 'files: Ctrl-T any of the words'    'In main\.c › second more .* 2/2'
+expect 'in file: all words on a line'      'In main\.c › second more .* 0/0'
+keys C-s
+expect 'in file: its own options'          'In file options'
+keys Down Space Escape
+expect 'in file: all words in the file'    'In main\.c › second more .*words in the file +2/2'
+keys C-s Space Escape
+expect 'in file: on a line again'          'In main\.c › second more .*words on a line +0/0'
 keys Escape
-expect 'files: Esc back to Files'          "Files › main .* 1/$n_files"
+expect 'files: Esc closes the window'      "Files › main .* 1/$n_files"
 
 keys Tab
 expect 'tab: Search keeps the query'       'Content › main'
@@ -205,6 +212,12 @@ shot git
 keys C-c;    expect_log 'git: Ctrl-C copies the hash'  "COPY <$(git -C "$T" rev-parse HEAD)>"
 keys C-e
 expect 'git: other keys not available'     'Not available in Git'
+keys Tab
+expect 'help: the manual'                  'sf — the search functions in one window'
+type_ 'ctrl-f'
+expect 'help: typing finds in it'          'Help › ctrl-f .*/[0-9]+'
+keys Escape
+expect 'help: Esc clears the search'       'Help › type to find in the manual'
 keys Escape
 expect 'esc: back to the shell'            '^READY>\s*$'
 [[ $(tm display-message -p -t e2e '#W') == shell ]] && ok 'tmux: window name restored' || bad 'tmux: window name not restored'
@@ -224,6 +237,10 @@ keys C-o
 expect_log 'no tmux: Ctrl-O runs nvim'     "NVIM [-c] [let @/ = \$SF_QUERY]"
 expect 'no tmux: sf comes back'            'Files +Content +Deep +Folders +Git .*⚙ Config'
 expect 'no tmux: results again'            '5/5'
+keys C-t
+expect 'no tmux: Ctrl-T inside sf'         'In out\.txt › needle .* 1/1'
+keys Escape
+expect 'no tmux: Esc back to Content'      'Content › needle .* 5/5'
 keys Escape
 expect 'no tmux: quit'                     '^READY>\s*$'
 

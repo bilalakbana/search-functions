@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use crate::engines::Engines;
 use crate::items::Item;
-use crate::model::{Opt, Options, Tab};
+use crate::model::{InFileOpts, Opt, Options, Tab};
 
 /// ugrep's colours in the previews: matches red, line numbers and context dim, file names blue.
 pub const GREP_PALETTE: &str = "ln=38;2;128;135;162:cx=38;2;128;135;162:sl=:mt=1;38;2;237;135;150:fn=38;2;138;173;244:se=38;2;110;115;141";
@@ -125,6 +125,45 @@ struct Search {
     documents: bool,
     /// Binary files are searched too (no `--ignore-binary`).
     binaries: bool,
+    /// How the pattern is read: smart case or the case as typed, a pattern or words.
+    reading: Reading,
+}
+
+/// How ugrep reads what was typed.
+#[derive(Clone, Copy)]
+struct Reading {
+    match_case: bool,
+    /// Words, every one on a line (`--bool`)...
+    words_on_a_line: bool,
+    /// ... or every one somewhere in the file (`--bool --files`).
+    words_in_the_file: bool,
+}
+
+/// Where a command takes the case and words options (`Reading::flags`).
+const READING: &str = "--smart-case";
+
+impl Reading {
+    /// ugrep's options for it: `--smart-case` unless the case counts, a Boolean query for words.
+    fn flags(self) -> Vec<&'static str> {
+        let mut flags = Vec::new();
+        if !self.match_case {
+            flags.push("--smart-case");
+        }
+        if self.words_on_a_line || self.words_in_the_file {
+            flags.push("--bool");
+        }
+        if self.words_in_the_file {
+            flags.push("--files");
+        }
+        flags
+    }
+
+    /// `opts` with READING replaced by the flags.
+    fn into(self, opts: &[&'static str]) -> Vec<&'static str> {
+        opts.iter()
+            .flat_map(|&o| if o == READING { self.flags() } else { vec![o] })
+            .collect()
+    }
 }
 
 impl Search {
@@ -133,13 +172,20 @@ impl Search {
         // list: every line of every file, or every PDF converted, would be far too much. Content lists
         // the text files, Deep every file.
         let pattern = !query.is_empty();
+        let reading = |match_case, on_a_line, in_the_file| Reading {
+            match_case,
+            words_on_a_line: pattern && on_a_line,
+            words_in_the_file: pattern && in_the_file,
+        };
         if tab == Tab::Deep {
+            let d = &opts.deep;
             return Search {
                 matching_lines: false,
-                each_match: pattern && opts.deep.each_match,
+                each_match: pattern && d.each_match,
                 archives: pattern,
-                documents: pattern && opts.deep.documents,
+                documents: pattern && d.documents,
                 binaries: true,
+                reading: reading(d.match_case, d.words_on_a_line, d.words_in_the_file),
             };
         }
         let c = &opts.content;
@@ -155,30 +201,52 @@ impl Search {
             documents: archives,
             // with Archives & documents the file list has binaries too, the lists of matches not
             binaries: archives && !matching_lines && !each_match,
+            reading: reading(c.match_case, c.words_on_a_line, c.words_in_the_file),
         }
     }
 }
 
-/// Ctrl-T: the lines of one file (`key`, as listed) that `pattern` matches, every line while it is
-/// empty, read as Matching lines are.
-pub fn in_file_plan(key: &std::ffi::OsStr, pattern: &str, e: &Engines) -> ListPlan {
+/// Ctrl-T: the lines of one file (`key`, as listed) with the typed words (as `opts` say: all on a
+/// line, all in the file, or any of them), every line while there is none; read as Matching lines are.
+pub fn in_file_plan(
+    key: &std::ffi::OsStr,
+    query: &str,
+    opts: &InFileOpts,
+    e: &Engines,
+) -> ListPlan {
     let Some(ugrep) = &e.ugrep else {
         return ListPlan::Hint("ugrep is not installed".into());
     };
+    let words = !query.trim().is_empty();
+    let reading = Reading {
+        match_case: opts.match_case,
+        words_on_a_line: words && opts.words_on_a_line,
+        words_in_the_file: words && opts.words_in_the_file,
+    };
+    let pattern = in_file_pattern(query, opts);
     // -H: the name even for one file, so the rows read as Content's matching lines
     let cmd = Cmd::new(ugrep)
-        .args([
+        .args(reading.into(&[
             "-nHU",
-            "--smart-case",
+            READING,
             "--null",
             "--separator=\x1f",
             "--color=never",
-        ])
-        .args(["--replace=\x01%o\x02", "-e", pattern, "--"])
+        ]))
+        .args(["--replace=\x01%o\x02", "-e", &pattern, "--"])
         .arg(key);
     ListPlan::Run {
         cmd,
         kind: ParseKind::SearchLines,
+    }
+}
+
+/// What ugrep gets in one file: the words as typed for a Boolean query, else any of them (`a|b`).
+pub fn in_file_pattern(query: &str, opts: &InFileOpts) -> String {
+    if opts.words_on_a_line || opts.words_in_the_file {
+        query.to_string()
+    } else {
+        query.split_whitespace().collect::<Vec<_>>().join("|")
     }
 }
 
@@ -202,6 +270,7 @@ pub fn list_plan_with(
     let hidden = opts.get(tab, Opt::Hidden);
     let ignored = opts.get(tab, Opt::Ignored);
     match tab {
+        Tab::Help => hint("Help is the manual, no list"),
         Tab::Files | Tab::Folders => {
             let Some(fd) = &e.fd else {
                 return hint("fd is not installed");
@@ -230,6 +299,7 @@ pub fn list_plan_with(
                 archives,
                 documents,
                 binaries,
+                reading,
             } = Search::of(tab, opts, query);
             let program = if documents {
                 let Some(p) = &e.ugrep_plus else {
@@ -263,7 +333,9 @@ pub fn list_plan_with(
                 (false, _, false) => "-rlU",
                 (false, _, true) => "-rzl",
             };
-            let mut cmd = Cmd::new(program).args([first, "--sort=name", "--smart-case"]);
+            let mut cmd = Cmd::new(program)
+                .args([first, "--sort=name"])
+                .args(reading.flags());
             if !binaries {
                 cmd = cmd.arg("--ignore-binary");
             } else if each_match {
@@ -431,6 +503,7 @@ pub fn preview_plan_with(
         )
     };
     match tab {
+        Tab::Help => PreviewPlan::Nothing,
         Tab::Files => PreviewPlan::Sniff {
             text: bat(None),
             binary: file_type(),
@@ -440,9 +513,9 @@ pub fn preview_plan_with(
         Tab::Content | Tab::Deep => {
             let s = Search::of(tab, opts, query);
             let grep = if s.documents { &e.ugrep_plus } else { &e.ugrep };
-            let with_pattern = |g: &PathBuf, opts: &[&str]| {
+            let with_pattern = |g: &PathBuf, opts: &[&'static str]| {
                 Cmd::new(g)
-                    .args(opts)
+                    .args(s.reading.into(opts))
                     .args(extra)
                     .arg("-e")
                     .arg(query)
@@ -863,6 +936,116 @@ mod tests {
         assert!(!cmd.args.contains(&"--ignore-files".into()));
     }
 
+    fn has(cmd: &Cmd, arg: &str) -> bool {
+        cmd.args.iter().any(|a| a == arg)
+    }
+
+    #[test]
+    fn words_are_a_boolean_query_on_a_line_or_in_the_file() {
+        for tab in [Tab::Content, Tab::Deep] {
+            let mut o = Options::default();
+            o.toggle(tab, Opt::WordsOnALine);
+            let (cmd, _) = run(list_plan(tab, &o, "ankara izmir", &engines()));
+            assert!(
+                has(&cmd, "--bool") && !has(&cmd, "--files"),
+                "{tab:?}: {:?}",
+                cmd.args
+            );
+            let PreviewPlan::Numbered {
+                lines,
+                binary,
+                header,
+                ..
+            } = preview_plan(
+                tab,
+                &o,
+                "ankara izmir",
+                &item("a.txt", None),
+                72,
+                &engines(),
+                Path::new("/r"),
+            )
+            else {
+                panic!("{tab:?}")
+            };
+            let count = header.matches.unwrap();
+            for c in [&lines, &binary, &count.text, &count.binary] {
+                assert!(
+                    has(c, "--bool") && !has(c, "--files"),
+                    "{tab:?}: {:?}",
+                    c.args
+                );
+            }
+            o.toggle(tab, Opt::WordsInTheFile);
+            let (cmd, _) = run(list_plan(tab, &o, "ankara izmir", &engines()));
+            assert!(
+                has(&cmd, "--bool") && has(&cmd, "--files"),
+                "{tab:?}: {:?}",
+                cmd.args
+            );
+        }
+    }
+
+    #[test]
+    fn match_case_drops_smart_case() {
+        for tab in [Tab::Content, Tab::Deep] {
+            let mut o = Options::default();
+            let (cmd, _) = run(list_plan(tab, &o, "Needle", &engines()));
+            assert!(has(&cmd, "--smart-case"), "{tab:?}");
+            o.toggle(tab, Opt::MatchCase);
+            let (cmd, _) = run(list_plan(tab, &o, "Needle", &engines()));
+            assert!(!has(&cmd, "--smart-case"), "{tab:?}: {:?}", cmd.args);
+            let PreviewPlan::Numbered { lines, header, .. } = preview_plan(
+                tab,
+                &o,
+                "Needle",
+                &item("a.txt", None),
+                72,
+                &engines(),
+                Path::new("/r"),
+            ) else {
+                panic!("{tab:?}")
+            };
+            assert!(
+                !has(&lines, "--smart-case") && !has(&header.matches.unwrap().text, "--smart-case")
+            );
+        }
+    }
+
+    #[test]
+    fn in_a_file_the_words_follow_its_options() {
+        let args = |o: &InFileOpts| {
+            run(in_file_plan("f.c".as_ref(), "ankara izmir", o, &engines()))
+                .0
+                .args
+        };
+        let o = InFileOpts::default();
+        let a = args(&o);
+        assert!(
+            a.contains(&"--bool".into()) && a.contains(&"ankara izmir".into()),
+            "{a:?}"
+        );
+        let o = InFileOpts {
+            words_on_a_line: false,
+            words_in_the_file: true,
+            match_case: true,
+        };
+        let a = args(&o);
+        assert!(
+            a.contains(&"--files".into()) && !a.contains(&"--smart-case".into()),
+            "{a:?}"
+        );
+        let o = InFileOpts {
+            words_on_a_line: false,
+            ..InFileOpts::default()
+        };
+        let a = args(&o);
+        assert!(
+            !a.contains(&"--bool".into()) && a.contains(&"ankara|izmir".into()),
+            "any of them: {a:?}"
+        );
+    }
+
     #[test]
     fn search_archives_uses_ugrep_plus_z() {
         let mut o = Options::default();
@@ -1049,7 +1232,16 @@ mod tests {
 
     #[test]
     fn in_file_lists_the_lines_of_one_file() {
-        let (cmd, kind) = run(in_file_plan("src/a b.c".as_ref(), "foo|bar", &engines()));
+        let any = InFileOpts {
+            words_on_a_line: false,
+            ..InFileOpts::default()
+        };
+        let (cmd, kind) = run(in_file_plan(
+            "src/a b.c".as_ref(),
+            "foo bar",
+            &any,
+            &engines(),
+        ));
         assert_eq!(kind, ParseKind::SearchLines);
         assert_eq!(
             cmd.args,
@@ -1068,7 +1260,7 @@ mod tests {
         );
         let none = Engines::default();
         assert_eq!(
-            in_file_plan("a".as_ref(), "", &none),
+            in_file_plan("a".as_ref(), "", &InFileOpts::default(), &none),
             ListPlan::Hint("ugrep is not installed".into())
         );
     }
