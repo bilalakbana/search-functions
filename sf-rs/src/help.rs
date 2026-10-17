@@ -73,7 +73,7 @@ const KEYS: &[(&str, &str)] = &[
     ),
     (
         "Ctrl-Alt-F",
-        "Content, Deep: keep the pattern, typing filters the files found",
+        "Content, Deep: keep the pattern, typing filters the rows · Git: search every version",
     ),
     ("Ctrl-L", "hide or show the preview"),
     ("Ctrl-R", "run the list again"),
@@ -106,7 +106,7 @@ const OPTIONS: &[(&str, &str)] = &[
     ),
     (
         "Documents",
-        "Deep: PDF, Office, e-books as text (ugrep+, slower)",
+        "Deep, Git versions: PDF, Office, e-books, archives as text (slower)",
     ),
     ("All words on a line", "ankara izmir: the lines with both"),
     (
@@ -124,6 +124,10 @@ const OPTIONS: &[(&str, &str)] = &[
     (
         "Regular expression",
         "Content, Deep: on; off, the text as typed · Ctrl-F: off (Perl's: look-around, \\1)",
+    ),
+    (
+        "Binary files",
+        "Git versions (Ctrl-Alt-F): binaries searched as text",
     ),
     (
         "All branches",
@@ -151,6 +155,10 @@ const PATTERNS: &[(&str, &str)] = &[
 
 /// With "All words on a line" or "All words in the file" (ugrep's Boolean query).
 const WORDS: &[(&str, &str)] = &[
+    (
+        "CODE interest",
+        "Matching lines, Each match: each word on the line or in the path",
+    ),
     ("ankara izmir", "both"),
     ("ankara|izmir", "either"),
     ("ankara -izmir", "ankara, not izmir"),
@@ -430,7 +438,7 @@ mod tests {
         for tab in Tab::ALL {
             assert!(manual.contains(&format!("  {}", tab.title())), "{tab:?}");
             let lists = o.list(tab).into_iter().chain(o.in_file_list());
-            for (opt, _) in lists.chain(o.find_list()) {
+            for (opt, _) in lists.chain(o.find_list()).chain(o.versions_list()) {
                 let label = opt.label(tab);
                 assert!(manual.contains(label), "{tab:?}: {label}");
             }

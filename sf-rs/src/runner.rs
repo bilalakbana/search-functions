@@ -16,6 +16,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::commands::{Cmd, ParseKind, SEP};
+use crate::find::{Keeper, RowWords};
 use crate::items::{self, Item, parse};
 
 #[derive(Debug)]
@@ -53,8 +54,16 @@ impl Runner {
         Runner { tx, current: None }
     }
 
-    /// Cancels the running list and starts `cmd` in `root`; its messages carry `generation`.
-    pub fn start(&mut self, generation: u64, cmd: Cmd, kind: ParseKind, root: &Path) {
+    /// Cancels the running list and starts `cmd` in `root`; its messages carry `generation`. With
+    /// `keep`, only the rows with each of its words on their line or in their path are listed.
+    pub fn start(
+        &mut self,
+        generation: u64,
+        cmd: Cmd,
+        kind: ParseKind,
+        keep: Option<RowWords>,
+        root: &Path,
+    ) {
         self.cancel();
         let spawned = Command::new(&cmd.program)
             .args(&cmd.args)
@@ -84,7 +93,7 @@ impl Runner {
         let errors = thread::spawn(move || read_errors(generation, stderr, &err_tx));
         let (tx, job) = (self.tx.clone(), child.clone());
         thread::spawn(move || {
-            read_items(generation, kind, stdout, &tx);
+            read_items(generation, kind, keep.map(|k| k.keeper()), stdout, &tx);
             let _ = errors.join();
             reap(&job);
             let _ = tx.send(ListMsg::Done(generation));
@@ -152,14 +161,26 @@ fn read_errors(generation: u64, stderr: impl Read, tx: &Sender<ListMsg>) {
 
 /// Rows from stdout. Files, Folders and Git need all of them first (sorted, sorted by depth,
 /// numbered); the others are sent as they come. Only Git keeps its raw lines until the end.
-fn read_items(generation: u64, kind: ParseKind, stdout: impl Read, tx: &Sender<ListMsg>) {
+fn read_items(
+    generation: u64,
+    kind: ParseKind,
+    keep: Option<Keeper>,
+    stdout: impl Read,
+    tx: &Sender<ListMsg>,
+) {
     let delimiter = match kind {
         ParseKind::Files | ParseKind::Folders | ParseKind::SearchFiles { .. } => 0,
-        ParseKind::SearchLines | ParseKind::SearchMatches | ParseKind::Git => b'\n',
+        ParseKind::SearchLines
+        | ParseKind::SearchMatches
+        | ParseKind::Git
+        | ParseKind::Versions => b'\n',
     };
     let streamed = matches!(
         kind,
-        ParseKind::SearchFiles { .. } | ParseKind::SearchLines | ParseKind::SearchMatches
+        ParseKind::SearchFiles { .. }
+            | ParseKind::SearchLines
+            | ParseKind::SearchMatches
+            | ParseKind::Versions
     );
     let mut reader = BufReader::with_capacity(64 * 1024, stdout);
     let (mut record, mut batch, mut records) = (Vec::new(), Vec::new(), Vec::new());
@@ -202,6 +223,13 @@ fn read_items(generation: u64, kind: ParseKind, stdout: impl Read, tx: &Sender<L
             if matches!(kind, ParseKind::SearchFiles { .. }) && !seen.insert(item.key.clone()) {
                 continue;
             }
+            let kept = |k: &Keeper| {
+                item.match_parts()
+                    .is_none_or(|(path, text)| k.keeps(&path, &text))
+            };
+            if !keep.as_ref().is_none_or(kept) {
+                continue;
+            }
             batch.push(item);
         }
     }
@@ -212,7 +240,10 @@ fn read_items(generation: u64, kind: ParseKind, stdout: impl Read, tx: &Sender<L
             items::sort_folders(&mut batch);
             batch.insert(0, items::parent());
         }
-        ParseKind::SearchFiles { .. } | ParseKind::SearchLines | ParseKind::SearchMatches => {}
+        ParseKind::SearchFiles { .. }
+        | ParseKind::SearchLines
+        | ParseKind::SearchMatches
+        | ParseKind::Versions => {}
     }
     if !batch.is_empty() {
         let _ = tx.send(ListMsg::Items(generation, batch));
@@ -315,7 +346,7 @@ mod tests {
     fn run(cmd: Cmd, kind: ParseKind) -> (Vec<Item>, Vec<String>) {
         let (tx, rx) = channel();
         let mut r = Runner::new(tx);
-        r.start(1, cmd, kind, Path::new("/"));
+        r.start(1, cmd, kind, None, Path::new("/"));
         until_done(&rx, 1)
     }
 
@@ -408,6 +439,32 @@ mod tests {
     }
 
     #[test]
+    fn only_rows_with_each_word_on_their_line_or_in_their_path_are_kept() {
+        let (tx, rx) = channel();
+        let mut r = Runner::new(tx);
+        let keep = crate::find::RowWords {
+            words: vec!["code".into(), "interest".into()],
+            regex: true,
+            whole_word: false,
+            match_case: false,
+        };
+        r.start(
+            1,
+            printf("CODE.md\\0007\\037the \\001interest\\002\\nb.md\\0001\\037\\001interest\\002 only\\n"),
+            ParseKind::SearchLines,
+            Some(keep),
+            Path::new("/"),
+        );
+        let (items, errors) = until_done(&rx, 1);
+        assert_eq!(
+            keys(&items),
+            ["CODE.md"],
+            "code in its path, interest on its line"
+        );
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
     fn streams_items_from_printf() {
         let (items, errors) = run(
             printf("a\\0b\\0c\\0"),
@@ -425,6 +482,7 @@ mod tests {
             1,
             sh("printf 'a\\0'; sleep 3"),
             ParseKind::SearchFiles { archives: false },
+            None,
             Path::new("/"),
         );
         match rx.recv_timeout(Duration::from_millis(1000)) {
@@ -485,7 +543,7 @@ mod tests {
     fn run_in(cmd: Cmd, kind: ParseKind, root: &Path) -> (Vec<Item>, Vec<String>) {
         let (tx, rx) = channel();
         let mut r = Runner::new(tx);
-        r.start(1, cmd, kind, root);
+        r.start(1, cmd, kind, None, root);
         until_done(&rx, 1)
     }
 
@@ -536,7 +594,7 @@ mod tests {
         let (tx, rx) = channel();
         let mut r = Runner::new(tx);
         let script = format!("echo $$ > '{}'; exec sleep 30", pidfile.display());
-        r.start(1, sh(&script), ParseKind::Files, Path::new("/"));
+        r.start(1, sh(&script), ParseKind::Files, None, Path::new("/"));
         let pid = wait_for_file(&pidfile);
         let t = Instant::now();
         r.cancel();
@@ -558,7 +616,7 @@ mod tests {
         let (tx, _rx) = channel();
         let mut r = Runner::new(tx);
         let script = format!("sleep 30 & echo $! > '{}'; wait", pidfile.display());
-        r.start(1, sh(&script), ParseKind::Files, Path::new("/"));
+        r.start(1, sh(&script), ParseKind::Files, None, Path::new("/"));
         let pid = wait_for_file(&pidfile);
         r.cancel();
         let t = Instant::now();
@@ -574,12 +632,13 @@ mod tests {
         let (tx, rx) = channel();
         let mut r = Runner::new(tx);
         let script = format!("echo $$ > '{}'; exec sleep 30", pidfile.display());
-        r.start(1, sh(&script), ParseKind::Files, Path::new("/"));
+        r.start(1, sh(&script), ParseKind::Files, None, Path::new("/"));
         let pid = wait_for_file(&pidfile);
         r.start(
             2,
             printf("x\\0"),
             ParseKind::SearchFiles { archives: false },
+            None,
             Path::new("/"),
         );
         assert!(std::fs::metadata(format!("/proc/{pid}")).is_err());

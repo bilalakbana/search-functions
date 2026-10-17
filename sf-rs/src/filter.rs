@@ -307,7 +307,7 @@ impl Filter {
         if !self.hidden_types.is_empty() && self.hidden_types.contains(&file_type(&item.key)) {
             return false;
         }
-        if !self.lower.matches(item.haystack()) {
+        if !self.lower.matches(&item.haystack()) {
             return false;
         }
         // with the case counting, a second look at what the lower-case pass let through
@@ -445,6 +445,33 @@ mod tests {
         assert_eq!(shown(&f), ["xyz"]);
         f.set_query("!abcd");
         assert_eq!(shown(&f), ["abc", "xyz"]);
+    }
+
+    #[test]
+    fn matching_lines_are_filtered_by_their_whole_row() {
+        // Ctrl-Alt-F on Matching lines: the path and the line as shown (it let no row through)
+        let rows: Vec<Item> = [
+            &b"CODE_OF_CONDUCT.md\x007\x1fthe \x01interest\x02 of"[..],
+            b"src/a.rs\x003\x1f\x01interest\x02 rate",
+        ]
+        .iter()
+        .map(|r| parse(ParseKind::SearchLines, r, 0).unwrap())
+        .collect();
+        let mut f = Filter::new();
+        f.push(rows);
+        f.set_query("code");
+        assert_eq!(shown(&f), ["CODE_OF_CONDUCT.md"], "the path");
+        f.set_query("rate");
+        assert_eq!(shown(&f), ["src/a.rs"], "the line");
+        f.set_query(":3:");
+        assert_eq!(
+            shown(&f),
+            ["src/a.rs"],
+            "the row as shown, line number and all"
+        );
+        f.set_match_case(true);
+        f.set_query("CODE");
+        assert_eq!(shown(&f), ["CODE_OF_CONDUCT.md"]);
     }
 
     #[test]

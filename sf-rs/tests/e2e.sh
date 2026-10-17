@@ -147,8 +147,8 @@ clear_query; type_ 'needle'
 expect 'search: files with needle'         '5/5'
 expect 'search: preview numbers the matches' 'Match #1'
 expect 'search: preview of the first file' '1: needle ignored'
-expect 'search: match count in the preview' 'Matches +1'
-expect 'search: file in the preview header' 'File +build/out\.txt'
+expect 'search: pattern and count top right' ' needle · 1 match ╮'
+expect_not 'search: no header lines in the text' '^│?File +build/out\.txt'
 shot search
 clear_query; type_ 'zzznotthere'
 expect 'search: no-match hint'             'No match\. Archives & documents'
@@ -188,6 +188,14 @@ keys C-t
 expect 'lines: Ctrl-T keeps the pattern'   'In out\.txt › needle .* 1/1'
 keys Escape
 expect 'lines: Esc back to Content'        'Content › needle'
+clear_query; type_ 'src needle'
+expect 'lines: a word in the path counts'  'Content › src needle .* 3/3'
+expect 'lines: src/main.c kept'            'src/main\.c:1:needle in main'
+keys C-M-f; type_ 'main'
+expect 'lines: Ctrl-Alt-F filters the rows' 'filter: main .* 1/3'
+keys Escape
+clear_query; type_ 'needle'
+expect 'lines: back to needle'             'Content › needle .* 5/5'
 keys C-s Down Space
 expect 'config: Each match on'             '\[x\] Each match'
 expect 'config: Matching lines goes off'   '\[ \] Matching lines'
@@ -409,6 +417,20 @@ find_saved=$(awk '/^\[/ { s = ($0 == "[find]") } s' "$XDG/sf/config.toml" 2>/dev
     && ok 'git: Find'"'"'s options saved as [find]' || bad "git: [find] not saved: ${find_saved:-none}"
 keys Escape
 expect 'git: Esc back to the list'         'Git › '
+keys C-M-f
+expect 'versions: Ctrl-Alt-F, every version' 'Versions › type a pattern'
+type_ 'needle'
+expect 'versions: both commits, five files each' 'Versions › needle .* 10/10'
+expect 'versions: a row names the version'  '[0-9a-f]{7} src/main\.c:1:needle in main'
+keys C-s
+expect 'versions: its own options'          ' Versions options '
+expect 'versions: the commits to choose'    '\[x\] [0-9a-f]{7}  [0-9-]{10}  T  [a-z]+  second \(feat\)'
+keys Down Down Down Space Escape
+expect 'versions: Documents, the zip member' 'docs/arch\.zip\{inzip\.txt\}:1:needle inside zip'
+expect 'versions: two rows more'            'Versions › needle .* 12/12'
+keys C-s Down Down Down Space Escape
+keys Escape
+expect 'versions: Esc back to the commits'  'HEAD -> master\) second \(feat\)'
 keys Enter
 expect 'views: Enter shows the commit'     'commit [0-9a-f]{40}'
 shot view_commit

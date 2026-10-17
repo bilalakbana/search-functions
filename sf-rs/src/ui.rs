@@ -15,6 +15,7 @@ use ratatui::widgets::{
 use crate::app::{App, Find, PopupRow, ScreenLayout};
 use crate::filter::{Kind, Query, Term};
 use crate::model::{Opt, Tab};
+use crate::preview::Found;
 use crate::theme;
 
 const CONFIG: &str = "⚙ Config";
@@ -285,6 +286,11 @@ fn draw_help(frame: &mut Frame, app: &App, area: Rect) -> Rect {
 
 fn draw_preview(frame: &mut Frame, app: &App, area: Rect, status: Option<Line<'static>>) -> Rect {
     let mut block = bordered().title_top(root_title(app));
+    // at the top right, so they stay while the text scrolls: Content's and Deep's pattern with its count,
+    // then Ctrl-F's (the right titles line up from the right, the last one rightmost)
+    if let Some(found) = app.preview_found.as_ref().filter(|_| app.tab.searches()) {
+        block = block.title_top(found_title(found, area.width / 2).right_aligned());
+    }
     if let Some(found) = app
         .preview_find
         .as_ref()
@@ -351,7 +357,22 @@ fn find_title(f: &Find, max: u16) -> Option<Line<'static>> {
         None => ("not found".to_string(), style(theme::RED)),
         Some(c) => (format!("{}/{}", c + 1, f.hits.len()), style(theme::SUB)),
     };
-    let mut text = crate::items::printable(&f.text);
+    Some(titled(&f.text, said, said_style, max))
+}
+
+/// Content's and Deep's pattern and how often it occurs in the previewed file, at its top right.
+fn found_title(f: &Found, max: u16) -> Line<'static> {
+    let count = match f.count {
+        Some(1) => "1 match".to_string(),
+        Some(n) => format!("{n} matches"),
+        None => "? matches".to_string(),
+    };
+    titled(&f.pattern, count, style(theme::PEACH), max)
+}
+
+/// ` TEXT · SAID ` for a border: the text as typed (printable, red), cut with "…" to fit `max` columns.
+fn titled(text: &str, said: String, said_style: Style, max: u16) -> Line<'static> {
+    let mut text = crate::items::printable(text);
     let room = usize::from(max).saturating_sub(said.chars().count() + 5);
     if text.chars().count() > room {
         text = text
@@ -360,13 +381,13 @@ fn find_title(f: &Find, max: u16) -> Option<Line<'static>> {
             .collect::<String>()
             + "…";
     }
-    Some(Line::from(vec![
+    Line::from(vec![
         Span::raw(" "),
         Span::styled(text, style(theme::RED)),
         Span::styled(" · ", style(theme::FAINT)),
         Span::styled(said, said_style),
         Span::raw(" "),
-    ]))
+    ])
 }
 
 /// Ctrl-F's matches coloured in `line`, given as the bytes of its text and whether it is the current
@@ -450,6 +471,18 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
     };
     let query = Query::parse(typed, match_case);
     let terms: Vec<Term> = query.shown_terms().cloned().collect();
+    // a list of matches: the words found in a row's path red there too (ugrep marks the line's)
+    let keeper = app.row_words().map(|w| w.keeper());
+    // searching versions: git grep marks nothing, so the pattern is found again in each row shown
+    let versions_finder = app.versions.as_ref().and_then(|v| {
+        let o = &app.options.versions;
+        let opts = crate::model::FindOpts {
+            match_case: o.match_case || v.query.chars().any(char::is_uppercase),
+            whole_word: o.whole_word,
+            regex: o.regex,
+        };
+        crate::find::Finder::new(&v.query, &opts).ok().flatten()
+    });
     for i in app.offset..app.offset + visible {
         let Some(item) = app.filter.get(i) else { break };
         y -= 1;
@@ -462,7 +495,18 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
         };
         let mut spans: Vec<Span> = [marker]
             .into_iter()
-            .chain(highlight(item.display(), &terms, match_case).spans)
+            .chain(
+                highlight(
+                    in_version(
+                        in_path(item, keeper.as_ref()),
+                        item,
+                        versions_finder.as_ref(),
+                    ),
+                    &terms,
+                    match_case,
+                )
+                .spans,
+            )
             .collect();
         if selected {
             // the band under every span: coloured engine output carries its own (reset) background
@@ -481,6 +525,37 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
     let from_top = total.saturating_sub(visible).saturating_sub(app.offset);
     draw_scrollbar(frame, area, total, from_top, visible);
     inner
+}
+
+/// A versions row with what `finder` finds in its text red (not in its version, path or number).
+fn in_version(
+    line: Line<'static>,
+    item: &crate::items::Item,
+    finder: Option<&crate::find::Finder>,
+) -> Line<'static> {
+    let (Some(f), Some((at, text))) = (finder, item.version_text()) else {
+        return line;
+    };
+    let marks: Vec<(Range<usize>, bool)> = f
+        .matches(&text)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|r| (r.start + at..r.end + at, false))
+        .collect();
+    mark_matches(line, &marks)
+}
+
+/// `item`'s row with `keeper`'s words red where they are in its path (a matching line's row starts with it).
+fn in_path(item: &crate::items::Item, keeper: Option<&crate::find::Keeper>) -> Line<'static> {
+    let line = item.display();
+    match (keeper, item.match_parts()) {
+        (Some(k), Some((path, _))) => {
+            let marks: Vec<(Range<usize>, bool)> =
+                k.marks(&path).into_iter().map(|r| (r, false)).collect();
+            mark_matches(line, &marks)
+        }
+        _ => line,
+    }
 }
 
 /// `line` with the filter's terms red and bold where they are found (every occurrence, or at the start
@@ -581,12 +656,16 @@ fn short(opt: Opt) -> &'static str {
         Opt::AllBranches => "all branches",
         Opt::WholeWord => "whole word",
         Opt::Regex => "regex",
+        Opt::Binary => "binary",
     }
 }
 
 fn placeholder(app: &App) -> &'static str {
     if app.preview_find.is_some() {
         return "type to find · Enter ↓ the next · ↑ the one before · ^S options · Esc back";
+    }
+    if app.versions.is_some() {
+        return "type a pattern · searched in the files of every version · ^S options, versions";
     }
     if app.scope.is_some() {
         let f = &app.options.in_file;
@@ -601,14 +680,14 @@ fn placeholder(app: &App) -> &'static str {
     match app.tab {
         Tab::Files => "type to filter file names",
         Tab::Content if app.options.content.matching_lines => {
-            "type a pattern · lists the lines that contain it"
+            "type words · each on its line or path"
         }
         Tab::Content if app.options.content.each_match => {
-            "type a pattern · lists every match with the text around it"
+            "type words · every match · each on its line or path"
         }
         Tab::Content => "type a pattern · lists the files that contain it",
         Tab::Deep if app.options.deep.each_match => {
-            "type a pattern · every match with the text around it, in binaries too"
+            "type words · every match, binaries too · each on its line or path"
         }
         Tab::Deep => "type a pattern · the files that contain it, binaries and archives too",
         Tab::Folders => "type to filter folders · Enter goes inside, .. goes up",
@@ -620,6 +699,7 @@ fn placeholder(app: &App) -> &'static str {
 fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     let options = match app.scope {
         _ if app.preview_find.is_some() => app.options.find_list(),
+        _ if app.versions.is_some() => app.options.versions_list(),
         Some(_) => app.options.in_file_list(), // inside one file, its own
         None => app.options.list(app.tab),
     };
@@ -673,6 +753,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 
     let title = match &app.scope {
         _ if app.preview_find.is_some() => "Find in preview".to_string(),
+        _ if app.versions.is_some() => "Versions".to_string(),
         Some(scope) => {
             let name = std::path::Path::new(&scope.key)
                 .file_name()
@@ -681,10 +762,11 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         }
         None => app.tab.title().to_string(),
     };
-    let typed = match &app.preview_find {
-        Some(f) => &f.text,
-        None if app.tab == Tab::Help => &app.help.search,
-        None => &app.query,
+    let typed = match (&app.preview_find, &app.versions) {
+        (Some(f), _) => &f.text,
+        (None, Some(v)) => &v.query,
+        (None, None) if app.tab == Tab::Help => &app.help.search,
+        (None, None) => &app.query,
     };
     let query = crate::items::printable(typed);
     let mut left = vec![
@@ -771,6 +853,7 @@ fn footer_items(tab: Tab, editor: &str) -> Vec<String> {
             "Enter show commit",
             "^S options",
             "^F find",
+            "^Alt-F versions",
             "^C copy hash",
             "Esc quit",
         ],
@@ -792,7 +875,23 @@ fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
         items.iter().map(|i| i.chars().count()).sum::<usize>() + 3 * items.len().saturating_sub(1)
     };
     let mut items = footer_items(app.tab, &app.editor);
-    if app.result_filter.is_some() || app.scope.is_some() || app.preview_find.is_some() {
+    if app.versions.is_some() {
+        // a row is a file in a version: the commit's keys are not for it
+        items = [
+            "Enter show file",
+            "^S options",
+            "^F find",
+            "^C copy",
+            "Esc quit",
+        ]
+        .map(String::from)
+        .to_vec();
+    }
+    if app.result_filter.is_some()
+        || app.scope.is_some()
+        || app.preview_find.is_some()
+        || app.versions.is_some()
+    {
         // Esc leaves the filter, the file or the finding, not sf
         if let Some(esc) = items.last_mut() {
             *esc = "Esc back".into();
@@ -832,6 +931,30 @@ struct PopupGeometry {
     per_column: usize,
     /// The first line shown: what no number of columns holds scrolls with the cursor.
     first: usize,
+}
+
+/// A version in the popup: its short hash, date, author, branch and subject (as Bilal asked).
+fn version_line(app: &App, hash: &str, check: Span<'static>) -> Line<'static> {
+    let row = app
+        .versions
+        .as_ref()
+        .and_then(|v| v.list.iter().find(|r| r.hash == hash));
+    let short: String = hash.chars().take(7).collect();
+    let mut spans = vec![
+        check,
+        Span::raw(" "),
+        Span::styled(short, style(theme::BLUE).add_modifier(Modifier::BOLD)),
+    ];
+    if let Some(r) = row {
+        let subject: String = r.subject.chars().take(50).collect();
+        spans.extend([
+            Span::styled(format!("  {}", r.date), style(theme::DIM)),
+            Span::styled(format!("  {}", r.author), style(theme::SUB)),
+            Span::styled(format!("  {}", r.branch), style(theme::YELLOW)),
+            Span::styled(format!("  {subject}"), style(theme::TEXT)),
+        ]);
+    }
+    Line::from(spans)
 }
 
 /// The popup hangs under ⚙ Config at the right edge, between the tab bar and the input line. Lines
@@ -917,17 +1040,30 @@ fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLa
                 Span::styled(format!(" {:<name_w$}", type_name(ty)), style(theme::TEXT)),
                 Span::styled(format!("  {n:>6}"), style(theme::DIM)),
             ]),
+            PopupRow::AllVersions(on) => {
+                lines.push((
+                    None,
+                    Line::from(Span::styled("── Versions ──", style(theme::FAINT))),
+                ));
+                Line::from(vec![
+                    check(*on),
+                    Span::styled(" All versions", style(theme::TEXT)),
+                ])
+            }
+            PopupRow::Version(hash, on) => version_line(app, hash, check(*on)),
         };
         lines.push((Some(i), line));
     }
-    let has_types = rows.iter().any(|r| matches!(r, PopupRow::AllTypes(_)));
-    let help = if has_types {
+    let help = if rows.iter().any(|r| matches!(r, PopupRow::AllTypes(_))) {
         "Space / click · a all types · Esc close"
+    } else if rows.iter().any(|r| matches!(r, PopupRow::AllVersions(_))) {
+        "Space / click · a all versions · Esc close"
     } else {
         "Space / click · Esc close"
     };
     let title = match app.scope {
         _ if app.preview_find.is_some() => " Find options ".to_string(),
+        _ if app.versions.is_some() => " Versions options ".to_string(),
         Some(_) => " In file options ".to_string(),
         None => format!(" {} options ", app.tab.title()),
     };
@@ -1313,7 +1449,7 @@ mod tests {
         let buf = render(&mut a, 120, 24);
         let input = row(&buf, 23);
         assert!(
-            input.contains("type a pattern · lists every match with the text around it"),
+            input.contains("type words · every match · each on its line or path"),
             "{input:?}"
         );
     }
@@ -1332,7 +1468,7 @@ mod tests {
         a.options.deep.documents = true;
         let input = row(&render(&mut a, 120, 24), 23);
         assert!(
-            input.contains("type a pattern · every match with the text around it, in binaries too"),
+            input.contains("type words · every match, binaries too · each on its line or path"),
             "{input:?}"
         );
         assert!(
@@ -1459,7 +1595,7 @@ mod tests {
             ),
             (
                 Tab::Git,
-                "Enter show commit · ^S options · ^F find · ^C copy hash · Esc quit",
+                "Enter show commit · ^S options · ^F find · ^Alt-F versions · ^C copy hash · Esc quit",
             ),
         ];
         for (tab, want) in cases {
@@ -1489,7 +1625,7 @@ mod tests {
             a.on_view(crate::preview::PreviewMsg {
                 generation: a.view_gen,
                 text: Text::from(text),
-                header_lines: 0,
+                found: None,
             });
         }
     }
@@ -1597,7 +1733,7 @@ mod tests {
         let (mut a, _) = app_with_preview(Tab::Files);
         feed(&mut a, &["a"]);
         a.on_preview(crate::preview::PreviewMsg {
-            header_lines: 0,
+            found: None,
             generation: a.preview_gen,
             text: Text::raw("x\n".repeat(200)),
         });
@@ -1638,6 +1774,33 @@ mod tests {
     fn fg_at(buf: &Buffer, text: &str, offset: u16) -> ratatui::style::Color {
         let (x, y) = find(buf, text).unwrap();
         buf[(x + offset, y)].fg
+    }
+
+    #[test]
+    fn words_found_in_a_path_are_red_there_too() {
+        let (mut a, now) = app(Tab::Content);
+        a.options.content.matching_lines = true;
+        for c in "code interest".chars() {
+            a.handle_key(key(KeyCode::Char(c)), now);
+        }
+        a.tick(now + std::time::Duration::from_secs(1));
+        a.on_list(crate::runner::ListMsg::Items(
+            a.list_gen,
+            crate::app::tests::rows(
+                crate::commands::ParseKind::SearchLines,
+                &["docs/CODE.md\x007\x1fthe \x01interest\x02"],
+            ),
+        ));
+        let buf = render(&mut a, 120, 30);
+        let row = "docs/CODE.md:7:the interest";
+        assert_eq!(fg_at(&buf, row, 5), theme::RED, "C of CODE, in the path");
+        assert_eq!(fg_at(&buf, row, 8), theme::RED, "E of CODE");
+        assert_ne!(fg_at(&buf, row, 0), theme::RED, "d of docs");
+        assert_eq!(
+            fg_at(&buf, row, 19),
+            theme::RED,
+            "i of interest, ugrep's mark"
+        );
     }
 
     #[test]
@@ -1890,7 +2053,7 @@ mod tests {
             })
             .collect();
         a.on_preview(crate::preview::PreviewMsg {
-            header_lines: 0,
+            found: None,
             generation: a.preview_gen,
             text: Text::from(lines),
         });
@@ -1935,7 +2098,7 @@ mod tests {
             Line::from(vec![Span::styled("+ the new Needle", green)]),
         ];
         a.on_preview(crate::preview::PreviewMsg {
-            header_lines: 0,
+            found: None,
             generation: a.preview_gen,
             text: Text::from(lines),
         });
@@ -1955,6 +2118,75 @@ mod tests {
         );
     }
 
+    /// Git searching every version (Ctrl-Alt-F) for `query`, with a row found.
+    fn versions_found(query: &str) -> (App, Instant) {
+        let (mut a, now) = app_with_preview(Tab::Git);
+        a.handle_key(crate::app::tests::ctrl_alt('f'), now);
+        for c in query.chars() {
+            a.handle_key(key(KeyCode::Char(c)), now);
+        }
+        a.tick(now + std::time::Duration::from_secs(1));
+        let rev = "0123456789abcdef0123456789abcdef01234567";
+        a.on_list(crate::runner::ListMsg::Items(
+            a.list_gen,
+            crate::app::tests::rows(
+                crate::commands::ParseKind::Versions,
+                &[&format!("{rev}:src/a.c\x009\x00the Needle here")],
+            ),
+        ));
+        (a, now)
+    }
+
+    #[test]
+    fn searching_versions_says_so_and_marks_what_it_found() {
+        let (mut a, now) = versions_found("needle");
+        let buf = render(&mut a, 120, 30);
+        assert!(
+            row(&buf, 29).contains("Versions › needle"),
+            "{:?}",
+            row(&buf, 29)
+        );
+        assert!(!row(&buf, 29).contains("regex"), "the default goes unsaid");
+        let r = "0123456 src/a.c:9:the Needle here";
+        assert_eq!(fg_at(&buf, r, 22), theme::RED, "N of Needle, case aside");
+        assert_ne!(fg_at(&buf, r, 18), theme::RED, "t of the");
+        assert!(row(&buf, 0).contains("Esc back"), "{:?}", row(&buf, 0));
+        a.on_versions(vec![crate::versions::VersionRow {
+            hash: "0123456789abcdef0123456789abcdef01234567".into(),
+            date: "2026-10-17".into(),
+            author: "Bilal Akbana".into(),
+            branch: "main".into(),
+            subject: "sf 0.9.1".into(),
+        }]);
+        a.handle_key(ctrl('s'), now);
+        let buf = render(&mut a, 120, 30);
+        assert!(find(&buf, " Versions options ").is_some());
+        assert!(find(&buf, "── Versions ──").is_some());
+        assert!(
+            find(&buf, "a all versions").is_some(),
+            "the popup's own keys"
+        );
+        assert!(
+            find(
+                &buf,
+                "[x] 0123456  2026-10-17  Bilal Akbana  main  sf 0.9.1"
+            )
+            .is_some(),
+            "hash, date, author, branch, subject"
+        );
+        let (mut b, now) = versions_found("");
+        let input = row(&render(&mut b, 120, 30), 29);
+        assert!(input.contains("Versions › type a pattern"), "{input:?}");
+        let _ = now;
+    }
+
+    #[test]
+    fn git_names_ctrl_alt_f_for_versions() {
+        let (mut a, _) = app(Tab::Git);
+        let top = row(&render(&mut a, 200, 24), 0);
+        assert!(top.contains("^Alt-F versions"), "{top:?}");
+    }
+
     #[test]
     fn git_names_ctrl_f() {
         let (mut a, _) = app(Tab::Git);
@@ -1968,7 +2200,7 @@ mod tests {
         feed(&mut a, &["abcdef1"]);
         render(&mut a, 120, 30);
         a.on_preview(crate::preview::PreviewMsg {
-            header_lines: 0,
+            found: None,
             generation: a.preview_gen,
             text: Text::from(lines),
         });
@@ -2065,6 +2297,57 @@ mod tests {
         let (x, y) = find(&buf, "a( · bad regex").expect("bad regex");
         assert_eq!(y, 1, "on the preview's border");
         assert_eq!(buf[(x + 5, y)].fg, theme::RED);
+    }
+
+    /// Content with a row and its preview, which found `count` matches of "interest".
+    fn content_found(count: Option<u64>) -> (App, Instant) {
+        let (mut a, now) = app_with_preview(Tab::Content);
+        feed(&mut a, &["a.md"]);
+        render(&mut a, 120, 30);
+        a.on_preview(crate::preview::PreviewMsg {
+            found: Some(crate::preview::Found {
+                pattern: "interest".into(),
+                count,
+            }),
+            generation: a.preview_gen,
+            text: Text::from(vec![Line::raw("fn interest")]),
+        });
+        (a, now)
+    }
+
+    #[test]
+    fn content_names_the_pattern_and_its_count_at_the_top_right() {
+        let top = |a: &mut App| row(&render(a, 120, 30), 1).trim_end().to_string();
+        let (mut a, now) = content_found(Some(12));
+        assert!(
+            top(&mut a).ends_with(" interest · 12 matches ╮"),
+            "{:?}",
+            top(&mut a)
+        );
+        let (mut b, _) = content_found(Some(1));
+        assert!(
+            top(&mut b).ends_with(" interest · 1 match ╮"),
+            "{:?}",
+            top(&mut b)
+        );
+        let (mut c, _) = content_found(None);
+        assert!(
+            top(&mut c).ends_with(" interest · ? matches ╮"),
+            "{:?}",
+            top(&mut c)
+        );
+        a.handle_key(ctrl('f'), now);
+        for ch in "fn".chars() {
+            a.handle_key(key(KeyCode::Char(ch)), now);
+        }
+        let t = top(&mut a);
+        assert!(
+            t.ends_with(" interest · 12 matches ─ fn · 1/1 ╮"),
+            "Ctrl-F's at the far right: {t:?}"
+        );
+        let buf = render(&mut a, 120, 30);
+        let (x, y) = find(&buf, "12 matches").unwrap();
+        assert_eq!(buf[(x, y)].fg, theme::PEACH);
     }
 
     #[test]

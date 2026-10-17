@@ -1,6 +1,7 @@
 //! The app's state and what keys do to it. Pure: it returns effects, the main loop carries them out.
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::ffi::OsString;
 use std::ops::Range;
 use std::path::PathBuf;
@@ -17,12 +18,13 @@ use crate::actions::ActionKind;
 use crate::commands::{self, ListPlan, PreviewPlan};
 use crate::engines::Engines;
 use crate::filter::{Filter, TypeCounts};
-use crate::find::{self, Finder, Trouble};
+use crate::find::{self, Finder, RowWords, Trouble};
 use crate::items::{self, Item};
 use crate::model::{Opt, Options, Tab};
-use crate::preview::PreviewMsg;
+use crate::preview::{Found, PreviewMsg};
 use crate::runner::ListMsg;
 use crate::theme;
+use crate::versions::VersionRow;
 use crate::views::ViewKind;
 
 /// Search runs this long after the last keystroke.
@@ -52,6 +54,8 @@ pub enum Effect {
     ChangeRoot(PathBuf),
     /// Request the open view's text for `view_gen`.
     View,
+    /// Read the versions to choose from (`git log`) for `App::on_versions`.
+    LoadVersions,
     Quit,
 }
 
@@ -186,6 +190,17 @@ impl Help {
     }
 }
 
+/// Git, Ctrl-Alt-F: searching the files of every version of the repository, or of those chosen.
+#[derive(Debug, Default)]
+pub struct Versions {
+    /// The pattern (the Git tab's filter is left alone).
+    pub query: String,
+    /// The versions to choose from, newest first (`git log`, read once the search starts).
+    pub list: Vec<VersionRow>,
+    /// Those turned off in the popup, by hash; none: every version.
+    pub off: HashSet<String>,
+}
+
 /// A row of the Ctrl-S popup.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PopupRow {
@@ -195,6 +210,10 @@ pub enum PopupRow {
     AllTypes(bool),
     /// A file type of the rows: its extension (None: none), how many rows have it, whether they show.
     Type(Option<String>, usize, bool),
+    /// Every version at once: on while none is off (searching versions).
+    AllVersions(bool),
+    /// A version to search in, by its hash, and whether it is.
+    Version(String, bool),
 }
 
 /// A preview that is wanted and not here yet.
@@ -220,6 +239,10 @@ pub struct App {
     pub tmux: bool,
     /// Ctrl-F: finding in the preview; typing goes there, not to the query.
     pub preview_find: Option<Find>,
+    /// Git, Ctrl-Alt-F: searching every version; typing is its pattern.
+    pub versions: Option<Versions>,
+    /// sf itself, which the versions' search runs as its list (`sf grep-versions`).
+    pub self_exe: PathBuf,
     /// `sf history|log|diff FILE`: the view `start` opens instead of a list.
     start_with: Option<ViewKind>,
     /// sf is only that view (a tmux window of its own): Esc quits.
@@ -245,6 +268,8 @@ pub struct App {
     pub offset: usize,
     pub loading: bool,
     pub preview: Text<'static>,
+    /// Content's and Deep's pattern with its count in the previewed file (the preview's top right).
+    pub preview_found: Option<Found>,
     pub preview_scroll: u16,
     /// The tabs whose preview Ctrl-L has hidden; Files starts without one (Bilal).
     previews_hidden: Vec<Tab>,
@@ -287,6 +312,8 @@ impl App {
             result_filter: None,
             tmux: false,
             preview_find: None,
+            versions: None,
+            self_exe: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("sf")),
             start_with: None,
             view_alone: false,
             help: Help {
@@ -308,6 +335,7 @@ impl App {
             offset: 0,
             loading: false,
             preview: Text::default(),
+            preview_found: None,
             preview_scroll: 0,
             previews_hidden: vec![Tab::Files],
             preview_wait: None,
@@ -359,6 +387,16 @@ impl App {
     /// `editor_pattern` before Whole word. Without Regular expression each part is vim's very nomagic
     /// (`\V…\v`: only a backslash means something) and words are only apart by spaces, as ugrep gets them.
     fn editor_words(&self) -> String {
+        let as_typed = |t: &str| format!("\\V{}\\v", t.replace('\\', "\\\\"));
+        if let Some(w) = self.row_words() {
+            // a list of matches: any of its words, each found on the line or in the path
+            let terms: Vec<String> = w
+                .words
+                .iter()
+                .map(|t| if w.regex { t.clone() } else { as_typed(t) })
+                .collect();
+            return terms.join("|");
+        }
         let words = match self.scope {
             Some(_) => {
                 let f = &self.options.in_file;
@@ -372,7 +410,6 @@ impl App {
         let literal =
             self.scope.is_none() && self.tab.searches() && !self.options.get(self.tab, Opt::Regex);
         if literal {
-            let as_typed = |t: &str| format!("\\V{}\\v", t.replace('\\', "\\\\"));
             return if words {
                 let terms: Vec<String> = self.query.split_whitespace().map(as_typed).collect();
                 terms.join("|")
@@ -401,6 +438,14 @@ impl App {
         terms.join("|")
     }
 
+    /// Content's and Deep's lists of matches: the words each row keeps on its line or in its path.
+    pub fn row_words(&self) -> Option<RowWords> {
+        if self.scope.is_some() {
+            return None;
+        }
+        commands::row_words(self.tab, &self.options, &self.query)
+    }
+
     /// What ugrep searches for: the query, in a file (Ctrl-T) as its options read the words.
     pub fn pattern(&self) -> String {
         match self.scope {
@@ -410,6 +455,21 @@ impl App {
     }
 
     pub fn list_plan(&self) -> ListPlan {
+        if let Some(v) = &self.versions {
+            let chosen = (!v.off.is_empty()).then(|| {
+                v.list
+                    .iter()
+                    .filter(|r| !v.off.contains(&r.hash))
+                    .map(|r| r.hash.clone())
+                    .collect()
+            });
+            return commands::versions_plan(
+                &self.self_exe,
+                &v.query,
+                &self.options.versions,
+                chosen,
+            );
+        }
         if let Some(scope) = &self.scope {
             return commands::in_file_plan(
                 &scope.key,
@@ -478,6 +538,7 @@ impl App {
         self.notes = vec![items::hint(hint)];
         self.loading = false;
         self.preview = Text::default();
+        self.preview_found = None;
     }
 
     pub fn set_status(&mut self, text: &str, error: bool, now: Instant) {
@@ -489,6 +550,7 @@ impl App {
         self.types_off.clear();
         self.query.clear();
         self.preview = Text::default();
+        self.preview_found = None;
         vec![self.run_list()]
     }
 
@@ -520,6 +582,23 @@ impl App {
             && let Some(effects) = self.help_key(key)
         {
             return effects;
+        }
+        if self.versions.is_some() {
+            let alt = key.modifiers.contains(KeyModifiers::ALT);
+            match key.code {
+                KeyCode::Esc => return self.leave_versions(),
+                KeyCode::Char('f') if ctrl && alt => return self.leave_versions(),
+                // a commit's keys and the file's: a row here is a file in a version
+                KeyCode::Char('o' | 't' | 'u' | 'g' | 'e') if ctrl && !alt => {
+                    self.set_status("Not available here", true, now);
+                    return Vec::new();
+                }
+                KeyCode::Char('g' | 'u') if alt && !ctrl => {
+                    self.set_status("Not available here", true, now);
+                    return Vec::new();
+                }
+                _ => {}
+            }
         }
         if self.result_filter.is_some() {
             match key.code {
@@ -873,6 +952,7 @@ impl App {
                 // the old preview stays while a list runs (no flicker), but not over an empty one
                 if self.filter.len() == 0 {
                     self.preview = Text::default();
+                    self.preview_found = None;
                 }
                 if self.tab.searches() && self.filter.total() == 0 && self.notes.is_empty() {
                     let hint = match self.tab {
@@ -906,6 +986,7 @@ impl App {
             return;
         }
         self.preview_wait = None;
+        self.preview_found = msg.found;
         if self.preview_find.is_some() {
             // another row's preview while finding: looked for in it from the top
             self.preview = msg.text;
@@ -918,7 +999,7 @@ impl App {
         let at = self
             .current()
             .and_then(|i| i.line)
-            .map_or(0, |n| (msg.header_lines + n as usize).saturating_sub(third));
+            .map_or(0, |n| (n as usize).saturating_sub(third));
         self.preview_scroll = u16::try_from(at).unwrap_or(u16::MAX);
     }
 
@@ -930,7 +1011,7 @@ impl App {
             .set_match_case(self.options.get(self.tab, Opt::MatchCase));
         self.filter.set_query(match &self.result_filter {
             Some(words) => words,
-            None if self.tab.searches() => "",
+            None if self.tab.searches() || self.versions.is_some() => "",
             None => &self.query,
         });
         self.filter.set_hidden_types(self.hidden_types());
@@ -948,15 +1029,22 @@ impl App {
         self.tab = tab;
         self.preview_find = None;
         self.result_filter = None;
+        self.versions = None;
         if tab == Tab::Help {
             return Vec::new(); // the manual: no list, no preview
         }
         self.preview = Text::default();
+        self.preview_found = None;
         self.preview_scroll = 0;
         vec![self.run_list()]
     }
 
     fn edit(&mut self, f: impl FnOnce(&mut String), now: Instant) -> Vec<Effect> {
+        if let Some(v) = &mut self.versions {
+            f(&mut v.query);
+            self.search_due = Some(now + SEARCH_DELAY);
+            return Vec::new();
+        }
         if let Some(words) = &mut self.result_filter {
             f(words);
             self.filter.set_query(words);
@@ -993,6 +1081,7 @@ impl App {
         self.preview_scroll = 0;
         if self.previewed.is_none() {
             self.preview = Text::default();
+            self.preview_found = None;
             self.preview_wait = None;
             return Vec::new();
         }
@@ -1049,6 +1138,16 @@ impl App {
                 )]
             }
             Tab::Folders => vec![Effect::ChangeRoot(self.root.join(&item.key))],
+            Tab::Git if item.version().is_some() => {
+                let (rev, path) = item.version().unwrap_or_default();
+                let kind = ViewKind::Version {
+                    root: self.root.clone(),
+                    rev: rev.to_string(),
+                    path: path.to_string(),
+                    line: item.line.unwrap_or(1),
+                };
+                self.open_view(kind)
+            }
             Tab::Git => match item.key.to_str().filter(|h| commands::is_hash(h)) {
                 Some(hash) => self.open_view(ViewKind::Commit {
                     root: self.root.clone(),
@@ -1106,6 +1205,7 @@ impl App {
         }
         self.tab = Tab::Content;
         self.preview = Text::default();
+        self.preview_found = None;
         self.preview_scroll = 0;
         vec![self.run_list()]
     }
@@ -1137,10 +1237,36 @@ impl App {
 
     /// Ctrl-Alt-F: the pattern stays, typing filters the rows found.
     fn enter_result_filter(&mut self) -> Vec<Effect> {
+        if self.tab == Tab::Git && self.scope.is_none() {
+            return self.enter_versions(); // Bilal: Ctrl-(Shift-)Alt-F in Git
+        }
         if self.tab.searches() && self.scope.is_none() {
             self.result_filter = Some(String::new());
         }
         Vec::new()
+    }
+
+    /// Git, Ctrl-Alt-F: typing searches every version; the versions to choose from are read.
+    fn enter_versions(&mut self) -> Vec<Effect> {
+        self.versions = Some(Versions::default());
+        self.preview = Text::default();
+        self.preview_found = None;
+        vec![Effect::LoadVersions, self.run_list()]
+    }
+
+    /// Esc or Ctrl-Alt-F again: the commits, with the Git tab's filter, again.
+    fn leave_versions(&mut self) -> Vec<Effect> {
+        self.versions = None;
+        self.preview = Text::default();
+        self.preview_found = None;
+        vec![self.run_list()]
+    }
+
+    /// The versions to choose from, newest first.
+    pub fn on_versions(&mut self, list: Vec<VersionRow>) {
+        if let Some(v) = &mut self.versions {
+            v.list = list;
+        }
     }
 
     /// Esc or Ctrl-Alt-F again: typing edits the pattern again; every row found is back.
@@ -1160,6 +1286,7 @@ impl App {
         };
         (self.tab, self.query) = back;
         self.preview = Text::default();
+        self.preview_found = None;
         self.preview_scroll = 0;
         vec![self.run_list()]
     }
@@ -1194,6 +1321,11 @@ impl App {
             msg.text
         };
         v.loading = false;
+        // a file as it was in a version: the line found a third down, as in the preview
+        if let ViewKind::Version { line, .. } = v.kind {
+            let third = self.layout.view.height as usize / 3;
+            v.scroll = (line as usize).saturating_sub(1).saturating_sub(third);
+        }
     }
 
     /// Keys while a view is open: they never reach the tabs.
@@ -1283,7 +1415,7 @@ impl App {
                 if let Some(i) = self
                     .popup_rows()
                     .iter()
-                    .position(|r| matches!(r, PopupRow::AllTypes(_)))
+                    .position(|r| matches!(r, PopupRow::AllTypes(_) | PopupRow::AllVersions(_)))
                 {
                     return self.toggle_row(i, now);
                 }
@@ -1298,6 +1430,7 @@ impl App {
     pub fn popup_rows(&self) -> Vec<PopupRow> {
         let options = match self.scope {
             _ if self.preview_find.is_some() => self.options.find_list(),
+            _ if self.versions.is_some() => self.options.versions_list(),
             Some(_) => self.options.in_file_list(),
             None => self.options.list(self.tab),
         };
@@ -1305,6 +1438,21 @@ impl App {
             .into_iter()
             .map(|(opt, on)| PopupRow::Opt(opt, on))
             .collect();
+        if let Some(v) = self
+            .versions
+            .as_ref()
+            .filter(|_| self.preview_find.is_none())
+        {
+            if !v.list.is_empty() {
+                rows.push(PopupRow::AllVersions(v.off.is_empty()));
+                rows.extend(
+                    v.list
+                        .iter()
+                        .map(|r| PopupRow::Version(r.hash.clone(), !v.off.contains(&r.hash))),
+                );
+            }
+            return rows;
+        }
         if !matches!(self.tab, Tab::Files | Tab::Content | Tab::Deep)
             || self.scope.is_some()
             || self.preview_find.is_some()
@@ -1370,6 +1518,26 @@ impl App {
         let tab = self.tab;
         match self.popup_rows().get(index).cloned() {
             Some(PopupRow::Opt(..)) => return self.toggle_option(index, now),
+            Some(PopupRow::AllVersions(all)) => {
+                if let Some(v) = &mut self.versions {
+                    v.off = if all {
+                        v.list.iter().map(|r| r.hash.clone()).collect()
+                    } else {
+                        HashSet::new()
+                    };
+                }
+                return vec![self.run_list()];
+            }
+            Some(PopupRow::Version(hash, on)) => {
+                if let Some(v) = &mut self.versions {
+                    if on {
+                        v.off.insert(hash);
+                    } else {
+                        v.off.remove(&hash);
+                    }
+                }
+                return vec![self.run_list()];
+            }
             Some(PopupRow::AllTypes(true)) => {
                 // every type off, each with its count
                 let rows = self.popup_rows();
@@ -1403,6 +1571,14 @@ impl App {
             self.options.toggle_find(opt);
             self.find_in_preview();
             return self.save_options(Vec::new(), now);
+        }
+        if self.versions.is_some() {
+            let Some(&(opt, _)) = self.options.versions_list().get(index) else {
+                return Vec::new();
+            };
+            self.options.toggle_versions(opt);
+            let fx = vec![self.run_list()];
+            return self.save_options(fx, now);
         }
         if self.scope.is_some() {
             let Some(&(opt, _)) = self.options.in_file_list().get(index) else {
@@ -1514,7 +1690,7 @@ pub(crate) mod tests {
         a.on_view(PreviewMsg {
             generation: a.view_gen,
             text,
-            header_lines: 0,
+            found: None,
         });
     }
 
@@ -1643,7 +1819,7 @@ pub(crate) mod tests {
             })
             .collect();
         a.on_preview(PreviewMsg {
-            header_lines: 0,
+            found: None,
             generation: a.preview_gen,
             text: Text::from(lines),
         });
@@ -1683,7 +1859,7 @@ pub(crate) mod tests {
         a.layout.preview = Rect::new(1, 2, 80, 10);
         let text: Vec<Line> = lines.iter().map(|l| Line::raw(l.to_string())).collect();
         a.on_preview(PreviewMsg {
-            header_lines: 0,
+            found: None,
             generation: a.preview_gen,
             text: Text::from(text),
         });
@@ -1803,7 +1979,7 @@ pub(crate) mod tests {
         typed(&mut a, "needle", now);
         a.handle_key(key(KeyCode::Enter), now);
         a.on_preview(PreviewMsg {
-            header_lines: 0,
+            found: None,
             generation: a.preview_gen,
             text: Text::from(vec![Line::raw("a"), Line::raw("b needle needle")]),
         });
@@ -1892,7 +2068,7 @@ pub(crate) mod tests {
         a.on_view(PreviewMsg {
             generation: stale,
             text: Text::from("old"),
-            header_lines: 0,
+            found: None,
         });
         assert!(
             a.view.as_ref().unwrap().loading,
@@ -1901,7 +2077,7 @@ pub(crate) mod tests {
         a.on_view(PreviewMsg {
             generation: a.view_gen,
             text: Text::default(),
-            header_lines: 0,
+            found: None,
         });
         let v = a.view.as_ref().unwrap();
         let shown: String = v.text.lines[0]
@@ -2250,13 +2426,13 @@ pub(crate) mod tests {
         feed(&mut a, &["a"]);
         let g0 = a.preview_gen;
         a.on_preview(PreviewMsg {
-            header_lines: 0,
+            found: None,
             generation: g0 - 1,
             text: Text::raw("old"),
         });
         assert_eq!(a.preview, Text::default());
         a.on_preview(PreviewMsg {
-            header_lines: 0,
+            found: None,
             generation: g0,
             text: Text::raw("new"),
         });
@@ -2300,7 +2476,7 @@ pub(crate) mod tests {
         a.tick(now + Duration::from_secs(1));
         feed(&mut a, &["a.txt"]);
         a.on_preview(PreviewMsg {
-            header_lines: 0,
+            found: None,
             generation: a.preview_gen,
             text: Text::raw("a.txt with needle"),
         });
@@ -2315,7 +2491,7 @@ pub(crate) mod tests {
         let (mut a, _) = app(Tab::Files);
         feed(&mut a, &["a.txt"]);
         a.on_preview(PreviewMsg {
-            header_lines: 0,
+            found: None,
             generation: a.preview_gen,
             text: Text::raw("content"),
         });
@@ -2349,7 +2525,7 @@ pub(crate) mod tests {
             rows(ParseKind::SearchLines, &["a\x0050\x1fx"]),
         ));
         a.on_preview(PreviewMsg {
-            header_lines: 0,
+            found: None,
             generation: a.preview_gen,
             text: Text::raw("t"),
         });
@@ -2357,7 +2533,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn matching_line_scroll_skips_the_header() {
+    fn the_pattern_and_count_come_with_the_preview_and_go_with_the_tab() {
         let (mut a, now) = app(Tab::Content);
         a.options.content.matching_lines = true;
         typed(&mut a, "x", now);
@@ -2367,12 +2543,22 @@ pub(crate) mod tests {
             a.list_gen,
             rows(ParseKind::SearchLines, &["a\x0050\x1fx"]),
         ));
+        let found = crate::preview::Found {
+            pattern: "x".into(),
+            count: Some(2),
+        };
         a.on_preview(PreviewMsg {
-            header_lines: 4,
+            found: Some(found.clone()),
             generation: a.preview_gen,
             text: Text::raw("t"),
         });
-        assert_eq!(a.preview_scroll, 43);
+        assert_eq!(
+            a.preview_scroll, 39,
+            "no header lines above the file any more"
+        );
+        assert_eq!(a.preview_found, Some(found));
+        a.switch_tab(Tab::Files);
+        assert_eq!(a.preview_found, None, "another tab's preview has none");
     }
 
     /// Content with the pattern "needle" searched and two files found.
@@ -2382,6 +2568,165 @@ pub(crate) mod tests {
         assert_eq!(a.tick(now + Duration::from_secs(1)), [Effect::RunList]);
         feed(&mut a, &["src/a.c", "docs/b.md"]);
         (a, now + Duration::from_secs(1))
+    }
+
+    fn version_row(hash: &str) -> crate::versions::VersionRow {
+        crate::versions::VersionRow {
+            hash: hash.into(),
+            date: "2026-10-17".into(),
+            author: "T".into(),
+            branch: "main".into(),
+            subject: "s".into(),
+        }
+    }
+
+    /// The `-e` pattern and the versions after `--` of a versions list plan.
+    fn versions_run(a: &App) -> (String, Vec<String>) {
+        let ListPlan::Run { cmd, kind, .. } = a.list_plan() else {
+            panic!("{:?}", a.list_plan())
+        };
+        assert_eq!(kind, ParseKind::Versions);
+        assert_eq!(cmd.program, a.self_exe, "sf itself: sf grep-versions");
+        let q = crate::versions::parse_args(&cmd.args[1..]).unwrap();
+        (q.pattern, q.revs)
+    }
+
+    #[test]
+    fn ctrl_alt_f_in_git_searches_every_version() {
+        let (mut a, now) = app(Tab::Git);
+        a.query = "feat".into();
+        let fx = a.handle_key(ctrl_alt('f'), now);
+        assert!(
+            fx.contains(&Effect::LoadVersions) && fx.contains(&Effect::RunList),
+            "{fx:?}"
+        );
+        assert!(
+            matches!(a.list_plan(), ListPlan::Hint(_)),
+            "nothing typed yet"
+        );
+        typed(&mut a, "needle", now);
+        assert_eq!(a.versions.as_ref().unwrap().query, "needle");
+        assert_eq!(a.query, "feat", "the Git tab's filter is left alone");
+        assert_eq!(a.tick(now + Duration::from_secs(1)), [Effect::RunList]);
+        assert_eq!(versions_run(&a), ("needle".into(), vec![]), "every version");
+        assert_eq!(a.handle_key(key(KeyCode::Esc), now), [Effect::RunList]);
+        assert!(
+            a.versions.is_none() && a.query == "feat",
+            "back to the commits"
+        );
+        a.handle_key(ctrl_alt('f'), now);
+        assert!(a.versions.is_some());
+        assert_eq!(
+            a.handle_key(ctrl_alt('f'), now),
+            [Effect::RunList],
+            "Ctrl-Alt-F again: back"
+        );
+        assert!(a.versions.is_none());
+    }
+
+    #[test]
+    fn the_versions_popup_chooses_options_and_versions() {
+        let (mut a, now) = app(Tab::Git);
+        a.handle_key(ctrl_alt('f'), now);
+        typed(&mut a, "x", now);
+        a.on_versions(vec![version_row("aaa"), version_row("bbb")]);
+        a.handle_key(ctrl('s'), now);
+        let v = |h: &str, on| PopupRow::Version(h.into(), on);
+        assert_eq!(
+            a.popup_rows(),
+            [
+                PopupRow::Opt(Opt::WholeWord, false),
+                PopupRow::Opt(Opt::Regex, true),
+                PopupRow::Opt(Opt::Binary, false),
+                PopupRow::Opt(Opt::Documents, false),
+                PopupRow::Opt(Opt::MatchCase, false),
+                PopupRow::AllVersions(true),
+                v("aaa", true),
+                v("bbb", true)
+            ]
+        );
+        a.popup = Some(6);
+        assert_eq!(
+            a.handle_key(key(KeyCode::Char(' ')), now),
+            [Effect::RunList]
+        );
+        assert_eq!(versions_run(&a).1, ["bbb"], "only the versions chosen");
+        assert_eq!(a.popup_rows()[5], PopupRow::AllVersions(false));
+        a.popup = Some(5);
+        a.handle_key(key(KeyCode::Char(' ')), now);
+        assert!(versions_run(&a).1.is_empty(), "all of them again");
+        a.handle_key(key(KeyCode::Char(' ')), now);
+        assert!(matches!(a.list_plan(), ListPlan::Hint(_)), "none chosen");
+        a.handle_key(key(KeyCode::Char('a')), now);
+        assert!(versions_run(&a).1.is_empty(), "a: all of them");
+        a.popup = Some(2);
+        assert_eq!(
+            a.handle_key(key(KeyCode::Char(' ')), now),
+            [Effect::RunList, Effect::SaveConfig]
+        );
+        assert!(a.options.versions.binary && !a.options.git.match_case);
+    }
+
+    #[test]
+    fn enter_on_a_versions_row_shows_the_file_as_it_was() {
+        let (mut a, now) = app(Tab::Git);
+        a.handle_key(ctrl_alt('f'), now);
+        let rev = "0123456789abcdef0123456789abcdef01234567";
+        a.on_list(ListMsg::Items(
+            a.list_gen,
+            rows(
+                ParseKind::Versions,
+                &[&format!("{rev}:src/a.c\x009\x00the x")],
+            ),
+        ));
+        assert_eq!(a.handle_key(key(KeyCode::Enter), now), [Effect::View]);
+        let kind = &a.view.as_ref().unwrap().kind;
+        let want = ViewKind::Version {
+            root: a.root.clone(),
+            rev: rev.into(),
+            path: "src/a.c".into(),
+            line: 9,
+        };
+        assert_eq!(kind, &want);
+        a.handle_key(key(KeyCode::Esc), now);
+        assert!(
+            a.view.is_none() && a.versions.is_some(),
+            "Esc: back to the versions found"
+        );
+        a.handle_key(ctrl('g'), now);
+        assert!(
+            a.status.as_ref().unwrap().0.contains("Not available"),
+            "{:?}",
+            a.status
+        );
+    }
+
+    #[test]
+    fn the_file_as_it_was_opens_at_the_line_found() {
+        let (mut a, now) = app(Tab::Git);
+        a.handle_key(ctrl_alt('f'), now);
+        let rev = "0123456789abcdef0123456789abcdef01234567";
+        a.on_list(ListMsg::Items(
+            a.list_gen,
+            rows(ParseKind::Versions, &[&format!("{rev}:a.c\x0050\x00x")]),
+        ));
+        a.layout.view = Rect::new(0, 0, 80, 30);
+        a.handle_key(key(KeyCode::Enter), now);
+        let text = Text::from(
+            (1..=100)
+                .map(|i| Line::raw(i.to_string()))
+                .collect::<Vec<_>>(),
+        );
+        a.on_view(PreviewMsg {
+            generation: a.view_gen,
+            text,
+            found: None,
+        });
+        assert_eq!(
+            a.view.as_ref().unwrap().scroll,
+            39,
+            "line 50 a third down (index 49 - 10)"
+        );
     }
 
     #[test]
@@ -2603,7 +2948,7 @@ pub(crate) mod tests {
         a.tick(t0 + ms(300));
         assert_eq!(shown(&a), "searching inside src/a.c…");
         a.on_preview(PreviewMsg {
-            header_lines: 0,
+            found: None,
             generation: a.preview_gen,
             text: Text::raw("a.c's matches"),
         });
@@ -2645,7 +2990,7 @@ pub(crate) mod tests {
         feed(&mut a, &["a"]);
         a.layout.preview = Rect::new(1, 2, 80, 10);
         a.on_preview(PreviewMsg {
-            header_lines: 0,
+            found: None,
             generation: a.preview_gen,
             text: Text::raw("x\n".repeat(100)),
         });
@@ -2852,7 +3197,7 @@ pub(crate) mod tests {
         let (mut a, now) = app(Tab::Files);
         a.start_in_file("src/a b.c".into(), "ankara izmir".into());
         assert_eq!((a.tab, a.query.as_str()), (Tab::Content, "ankara izmir"));
-        let ListPlan::Run { cmd, kind } = a.list_plan() else {
+        let ListPlan::Run { cmd, kind, .. } = a.list_plan() else {
             panic!()
         };
         assert_eq!(kind, ParseKind::SearchLines);
@@ -2943,6 +3288,20 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn the_editor_gets_any_of_the_words_when_matches_are_listed() {
+        let (mut a, _) = app(Tab::Content);
+        a.options.toggle(Tab::Content, Opt::MatchingLines);
+        a.query = r#"CODE "of x""#.into();
+        assert_eq!(a.editor_pattern(), "CODE|of x");
+        assert_eq!(
+            a.row_words().map(|w| w.words),
+            Some(vec!["CODE".to_string(), "of x".to_string()])
+        );
+        a.options.toggle(Tab::Content, Opt::MatchingLines);
+        assert_eq!(a.row_words(), None, "listing files: a pattern");
+    }
+
+    #[test]
     fn ctrl_t_searches_inside_the_file_for_the_words() {
         let (mut a, now) = app(Tab::Files);
         a.query = "a.c".into();
@@ -2953,7 +3312,7 @@ pub(crate) mod tests {
             (Tab::Content, ""),
             "a Files filter is no pattern"
         );
-        let ListPlan::Run { cmd, kind } = a.list_plan() else {
+        let ListPlan::Run { cmd, kind, .. } = a.list_plan() else {
             panic!()
         };
         assert_eq!(kind, ParseKind::SearchLines);
@@ -3090,7 +3449,7 @@ pub(crate) mod tests {
         let (mut a, now) = app_with_preview(Tab::Files);
         feed(&mut a, &["a"]);
         a.on_preview(PreviewMsg {
-            header_lines: 0,
+            found: None,
             generation: a.preview_gen,
             text: Text::raw("x\n".repeat(100)),
         });
@@ -3141,7 +3500,7 @@ pub(crate) mod tests {
         let (mut a, now) = app_with_preview(Tab::Files);
         feed(&mut a, &["a"]);
         a.on_preview(PreviewMsg {
-            header_lines: 0,
+            found: None,
             generation: a.preview_gen,
             text: Text::raw("content"),
         });

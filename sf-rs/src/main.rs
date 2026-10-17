@@ -20,13 +20,14 @@ mod runner;
 mod testutil;
 mod theme;
 mod ui;
+mod versions;
 mod views;
 
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::io::{IsTerminal, stdout};
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::sync::mpsc::channel;
 use std::time::{Duration, Instant};
@@ -74,6 +75,9 @@ of its own); the words are read as its options say (all on a line by default), E
 log and diff [--short] FILE show the file's history with its changes, its log, its changes against HEAD
 (whole or short), as Ctrl-U, Alt-U, Ctrl-G and Alt-G do (in tmux in windows of their own); Esc quits.
 
+sf grep-versions is what the Git tab's Ctrl-Alt-F runs: git grep over every version (or those given),
+documents and archives too with --documents.
+
 The other forms do one action as the window does, on Linux and on WSL alike: open PATH with its default
 application, reveal it in the file manager, copy PATH (on WSL its Windows form) or TEXT to the
 clipboard. doctor shows what sf finds here and how each action works.
@@ -104,6 +108,7 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         Ok(Cli::Doctor) => return doctor(),
+        Ok(Cli::GrepVersions(query)) => return grep_versions(&query),
         Ok(Cli::Command { name, value }) => return command(&name, &value),
         Ok(Cli::Run {
             tab,
@@ -125,6 +130,43 @@ fn main() -> ExitCode {
         return print_list(tab, &query, &extra);
     }
     report(run(tab, query, extra, Start::Tab))
+}
+
+/// `sf grep-versions`: the search in every version, in the repository at the current folder.
+fn grep_versions(query: &versions::Query) -> ExitCode {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let engines = engines::discover(&path);
+    let Some(git) = engines.git else {
+        eprintln!("sf: git is not installed");
+        return ExitCode::from(2);
+    };
+    let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let status = versions::search(
+        query,
+        &git,
+        engines.ugrep.as_deref(),
+        &versions::filters(&path),
+        &root,
+        &mut std::io::stdout().lock(),
+        &mut std::io::stderr(),
+    );
+    ExitCode::from(status)
+}
+
+/// The versions to choose from in the Git tab's search (Ctrl-Alt-F): `git log` in the root.
+fn load_versions(app: &App) -> Result<Vec<versions::VersionRow>, String> {
+    let git = app.engines.git.as_ref().ok_or("git is not installed")?;
+    let out = Command::new(git)
+        .args(versions::LOG_ARGS)
+        .current_dir(&app.root)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|e| format!("{}: {e}", git.display()))?;
+    if !out.status.success() {
+        let message = String::from_utf8_lossy(&out.stderr);
+        return Err(format!("git log: {}", message.trim()));
+    }
+    Ok(versions::parse_log(&out.stdout))
 }
 
 /// The window's end as sf's exit status; an error is said on stderr.
@@ -309,7 +351,9 @@ fn event_loop(
             let now = Instant::now();
             match effect {
                 Effect::RunList => match app.list_plan() {
-                    ListPlan::Run { cmd, kind } => runner.start(app.list_gen, cmd, kind, &app.root),
+                    ListPlan::Run { cmd, kind, keep } => {
+                        runner.start(app.list_gen, cmd, kind, keep, &app.root)
+                    }
                     ListPlan::Hint(hint) => {
                         runner.cancel();
                         app.show_hint(&hint);
@@ -319,6 +363,10 @@ fn event_loop(
                     preview_width = app.layout.preview.width;
                     previewer.request(app.preview_gen, app.preview_plan());
                 }
+                Effect::LoadVersions => match load_versions(&app) {
+                    Ok(list) => app.on_versions(list),
+                    Err(e) => app.set_status(&e, true, now),
+                },
                 Effect::SaveConfig => {
                     if let Some(path) = config_path {
                         if let Err(e) = config::save(path, &app.options) {

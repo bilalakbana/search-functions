@@ -3,6 +3,7 @@
 //! A row is kept small (a list can hold millions): its key, and only what drawing needs to build the
 //! coloured line for the few rows on screen.
 
+use std::borrow::Cow;
 use std::ffi::OsString;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 
@@ -37,6 +38,10 @@ enum Look {
         text: Box<str>,
         cut: bool,
     },
+    /// A line of a file in a version of the repository (Git, Ctrl-Alt-F): the key is `REV:PATH`, drawn
+    /// as the short version, the path, the line number and `text` (printable; matches are marked when
+    /// drawn).
+    Version { text: Box<str>, cut: bool },
     /// Drawn as it is: Git rows, notes, the parent row.
     Styled {
         line: Box<Line<'static>>,
@@ -110,8 +115,57 @@ impl Item {
                 }
                 Line::from(spans)
             }
+            Look::Version { text, cut } => {
+                let (rev, path) = self.version().unwrap_or(("", ""));
+                let faint = Style::new().fg(theme::FAINT);
+                let mut spans = vec![
+                    Span::styled(
+                        rev.chars().take(7).collect::<String>(),
+                        Style::new().fg(theme::BLUE).add_modifier(Modifier::BOLD),
+                    ),
+                    Span::raw(" "),
+                ];
+                spans.extend(path_spans(&printable(path)));
+                spans.extend([
+                    Span::styled(":", faint),
+                    Span::styled(
+                        self.line.unwrap_or(0).to_string(),
+                        Style::new().fg(theme::DIM),
+                    ),
+                    Span::styled(":", faint),
+                    Span::raw(text.to_string()),
+                ]);
+                if *cut {
+                    spans.push(Span::styled("…", Style::new().fg(theme::DIM)));
+                }
+                Line::from(spans)
+            }
             Look::Styled { line, .. } => (**line).clone(),
         }
+    }
+
+    /// A versions row's text, and the byte where it starts in the drawn row (after the short version,
+    /// the path and the line number).
+    pub fn version_text(&self) -> Option<(usize, String)> {
+        let Look::Version { text, .. } = &self.look else {
+            return None;
+        };
+        let (rev, path) = self.version()?;
+        let before = format!(
+            "{} {}:{}:",
+            rev.chars().take(7).collect::<String>(),
+            printable(path),
+            self.line.unwrap_or(0)
+        );
+        Some((before.len(), text.to_string()))
+    }
+
+    /// A versions row's version (the full hash) and path.
+    pub fn version(&self) -> Option<(&str, &str)> {
+        if !matches!(self.look, Look::Version { .. }) {
+            return None;
+        }
+        self.key.to_str()?.split_once(':')
     }
 
     /// The shown text as it is, what a filter that matches case looks in after `haystack`.
@@ -119,15 +173,36 @@ impl Item {
         match &self.look {
             Look::Path { .. } => printable(&String::from_utf8_lossy(self.key.as_bytes())),
             Look::Styled { line, .. } => line.spans.iter().map(|s| s.content.as_ref()).collect(),
-            Look::Match { .. } => String::new(),
+            Look::Match { .. } => {
+                let (path, text) = self.match_parts().unwrap_or_default();
+                format!("{path}:{}:{text}", self.line.unwrap_or(0))
+            }
+            Look::Version { .. } => self
+                .display()
+                .spans
+                .iter()
+                .map(|s| s.content.as_ref())
+                .collect(),
         }
     }
 
-    /// The shown text in lower case, what the filter looks in; empty for matching lines.
-    pub fn haystack(&self) -> &str {
+    /// A matching line's path (with its archive member) and text as shown, without the match marks.
+    pub fn match_parts(&self) -> Option<(String, String)> {
+        let Look::Match { member, text, .. } = &self.look else {
+            return None;
+        };
+        let mut path = printable(&String::from_utf8_lossy(self.key.as_bytes()));
+        path.push_str(member);
+        let marks = [char::from(MATCH_START), char::from(MATCH_END)];
+        Some((path, text.replace(marks, "")))
+    }
+
+    /// The shown text in lower case, what the filter looks in; a matching line's is made when asked
+    /// (Ctrl-Alt-F on Matching lines is rare, and rows stay small without a copy).
+    pub fn haystack(&self) -> Cow<'_, str> {
         match &self.look {
-            Look::Path { lower, .. } | Look::Styled { lower, .. } => lower,
-            Look::Match { .. } => "",
+            Look::Path { lower, .. } | Look::Styled { lower, .. } => Cow::Borrowed(lower),
+            Look::Match { .. } | Look::Version { .. } => Cow::Owned(self.text().to_lowercase()),
         }
     }
 }
@@ -181,6 +256,7 @@ pub fn parse(kind: ParseKind, raw: &[u8], git_number: u32) -> Option<Item> {
         }
         ParseKind::SearchLines => search_line(raw),
         ParseKind::SearchMatches => search_line(&marked(raw)),
+        ParseKind::Versions => version_line(raw),
         ParseKind::Git => Some(git_line(raw, git_number)),
     }
 }
@@ -286,6 +362,28 @@ fn search_line(raw: &[u8]) -> Option<Item> {
         line: Some(line),
         selectable: true,
         look: Look::Match { member, text, cut },
+    })
+}
+
+/// `REV:PATH\0LINE\0TEXT` from `sf grep-versions`: REV a full hash, LINE digits.
+fn version_line(raw: &[u8]) -> Option<Item> {
+    let mut parts = raw.splitn(3, |&b| b == 0);
+    let (key, digits, text) = (parts.next()?, parts.next()?, parts.next()?);
+    let (rev, path) = (key.get(..40)?, key.get(41..)?);
+    if key.get(40) != Some(&b':') || !rev.iter().all(u8::is_ascii_hexdigit) || path.is_empty() {
+        return None;
+    }
+    if digits.is_empty() || !digits.iter().all(u8::is_ascii_digit) {
+        return None;
+    }
+    let line: u32 = std::str::from_utf8(digits).ok()?.parse().ok()?;
+    let text = text.strip_suffix(b"\r").unwrap_or(text);
+    let (text, cut) = match_text(&String::from_utf8_lossy(text));
+    Some(Item {
+        key: OsString::from_vec(key.to_vec()),
+        line: Some(line),
+        selectable: true,
+        look: Look::Version { text, cut },
     })
 }
 
@@ -525,6 +623,40 @@ mod tests {
     #[test]
     fn empty_record_is_nothing() {
         assert_eq!(parse(ParseKind::Files, b"", 0), None);
+    }
+
+    #[test]
+    fn a_versions_row_names_the_version_the_path_and_the_line() {
+        let rev = "7b4ef6fd550f68d2d2bd2907c800fb95c06d973c";
+        let raw = format!("{rev}:src/odd:name.txt\x003\x00the\tneedle\r");
+        let it = parse(ParseKind::Versions, raw.as_bytes(), 0).unwrap();
+        assert_eq!(
+            it.key,
+            format!("{rev}:src/odd:name.txt").as_str(),
+            "the version and the path"
+        );
+        assert_eq!(it.line, Some(3));
+        assert_eq!(
+            text_of(&it.display()),
+            "7b4ef6f src/odd:name.txt:3:the needle"
+        );
+        assert_eq!(
+            it.display().spans[0].style.fg,
+            Some(theme::BLUE),
+            "the version"
+        );
+        assert_eq!(it.version(), Some((rev, "src/odd:name.txt")));
+        assert_eq!(&*it.haystack(), "7b4ef6f src/odd:name.txt:3:the needle");
+        assert_eq!(parse(ParseKind::Versions, b"nohash:a\x001\x00x", 0), None);
+        assert_eq!(
+            parse(
+                ParseKind::Versions,
+                format!("{rev}:a\x00x\x00t").as_bytes(),
+                0
+            ),
+            None,
+            "no line number"
+        );
     }
 
     #[test]

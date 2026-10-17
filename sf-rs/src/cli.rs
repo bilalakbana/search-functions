@@ -35,6 +35,8 @@ pub enum Cli {
         view: View,
         file: OsString,
     },
+    /// `sf grep-versions …`: the Git tab's search in every version (Ctrl-Alt-F), run as its list.
+    GrepVersions(crate::versions::Query),
     /// The window, or with `print` the list it would show.
     Run {
         tab: Tab,
@@ -47,6 +49,9 @@ pub enum Cli {
 /// The arguments after `sf`; an error is said with the usage.
 pub fn parse(args: &[OsString]) -> Result<Cli, String> {
     let first = args.first().and_then(|a| a.to_str());
+    if first == Some("grep-versions") {
+        return crate::versions::parse_args(&args[1..]).map(Cli::GrepVersions);
+    }
     if let Some(name) = first.filter(|n| *n == "doctor" || COMMANDS.contains(n)) {
         if name == "doctor" {
             return if args.len() == 1 {
@@ -426,6 +431,17 @@ mod tests {
         assert_eq!(parse(&args(&["--help"])), Ok(Cli::Help));
         assert_eq!(parse(&args(&["files", "-h"])), Ok(Cli::Help));
         assert_eq!(parse(&args(&["doctor"])), Ok(Cli::Doctor));
+        let q = crate::versions::Query {
+            pattern: "x".into(),
+            opts: crate::model::VersionsOpts::default(),
+            revs: Vec::new(),
+        };
+        assert_eq!(
+            parse(&args(&["grep-versions", "-e", "x"])),
+            Ok(Cli::GrepVersions(q)),
+            "the Git tab's Ctrl-Alt-F runs it as its list"
+        );
+        assert!(parse(&args(&["grep-versions"])).is_err());
         assert_eq!(
             parse(&args(&["open", "a b"])),
             Ok(Cli::Command {

@@ -321,7 +321,8 @@ Step 4, advancedsearch and detailedsearch inside sf (2026-10-17):
   matches: turning one on turns the other off. The row, Ctrl-O, Ctrl-T and the preview work as in Matching lines;
   `--print` prints ugrep's own output.
 - Content's preview with a pattern numbers the matches as `detailedsearch` did, in the form Bilal chose ("with
-  context, numbered"): `File`, `Pattern`, `Matches` as before, then for each matching line "Match #N" (a line with
+  context, numbered"): `File`, `Pattern`, `Matches` as before (after v0.9.1 the pattern and count sit at the
+  preview's top right instead, see there), then for each matching line "Match #N" (a line with
   three matches "Match #2–4", so the numbers add up to `Matches`), the line with 2 lines above and below, its
   number followed by `:` and its matches red, a thin rule between the blocks. The matching lines come from the
   same `ugrep -nHU --null --separator=0x1f --replace=0x01%o0x02` records as Matching lines (with the options after
@@ -535,3 +536,37 @@ count only at the preview's top right, Perl's syntax):
   expression too complex; as a pattern just under the limit on every line of a 4 MiB preview would keep sf from
   answering for minutes, finding stops after 500 ms (`FIND_BUDGET`, `find::find_all`) and says "too slow". sf's
   own dependency on the regex crate went with it.
+
+After v0.9.1 (2026-10-17, Bilal's requests; his choices from a proposal: the versions' search in every version
+(`git grep`), PDF/DOCX/ZIP through ugrep "with plugins, maybe without a folder" (checked: yes), each word on the
+line or in the path, pattern and count at the top right):
+
+- Matching lines and Each match are two ways to list matches (Bilal asked the difference): a line with three
+  matches is one row or three, and a long line (minified code) shows its start or ±50 characters around each
+  match.
+- Content's and Deep's preview names the pattern and its count at its top right (`ui::found_title`, " interest ·
+  12 matches "), where it stays while the text scrolls; the `File`, `Pattern`, `Matches` lines above the text
+  are gone (the row names the file, the input line the pattern). The preview worker sends them apart
+  (`preview::Found` in `PreviewMsg`); Ctrl-F's title sits right of it.
+- Listing matches (Matching lines, Each match), the typed words are each to be on the line or in the file's
+  path (Bilal: `CODE interest` finds `CODE_OF_CONDUCT.md:7:In the interest…`): ugrep gets each word as an `-e`
+  (lines with any), the rows kept have each one on the line or in the path (`find::RowWords`, checked with
+  fancy-regex, smart case per word; a word sf cannot read, ugrep's `\Q…\E`, drops no row), the path's words red
+  too; `"a b"` is one word. Lines with none of the words are not listed even when the path has them all (that
+  would list every line of such a file). It replaces All words on a line there; All words in the file stays
+  as it was. `--print` into a pipe prints sf's rows then (ugrep's own output would have the lines with any).
+  Fixed: Ctrl-Alt-F let no matching line through (their filter text was empty); it now reads the whole row.
+- Git, Ctrl-Alt-F (Ctrl-Shift-Alt-F reaches sf as the same key: tmux runs without extended keys and sf asks the
+  terminal for none): typing searches the files of every version. `sf grep-versions` (sf itself, run by the
+  window as its list, so Esc ends it as any list) runs `git grep -n -z` over the versions, 200 a time, then
+  with Documents every PDF, Office file, e-book and archive of every version through ugrep, its blob read with
+  `git cat-file` and piped in with `--label=PATH` (ugrep picks the filter by that name): nothing is copied to
+  disk, each blob once, its rows given to every version that has it. ugrep+'s own pandoc filter does not work
+  on stdin (pandoc cannot tell docx from it), so sf passes `pandoc -f FORMAT` itself; archives go through
+  `ugrep -z` and name their member. Rows read `hash path:line:text` (the key is `REV:PATH`); the pattern is
+  found again for the red marks (git grep marks nothing). Its own options (`[versions]`): Whole word,
+  Regular expression (Perl's, `git grep -P`; off `-F`), Binary files (`-a`; off `-I`), Documents, Match case
+  (off: smart case). The popup lists the versions under them (`git log --all --source`: hash, date, author,
+  branch, subject as Bilal asked; All versions on, Space chooses, `a` all; not saved). The preview and Enter's
+  view show the file as it was (`git show REV:PATH | bat`, the line marked; a document as ugrep reads it),
+  Ctrl-C copies `REV:PATH`, the commit's keys say they are not for these rows.

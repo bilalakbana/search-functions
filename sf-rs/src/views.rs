@@ -5,7 +5,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use crate::commands::{Cmd, GIT_SHOW_FORMAT, PreviewPlan, delta_args};
+use crate::commands::{Cmd, GIT_SHOW_FORMAT, GREP_PALETTE, PreviewPlan, delta_args};
 use crate::engines::Engines;
 
 /// What a view shows.
@@ -23,6 +23,13 @@ pub enum ViewKind {
         root: PathBuf,
         hash: String,
         whole: bool,
+    },
+    /// A file as it was in a version (Git, Ctrl-Alt-F, Enter): `line` is the one found.
+    Version {
+        root: PathBuf,
+        rev: String,
+        path: String,
+        line: u32,
     },
 }
 
@@ -43,6 +50,9 @@ impl ViewKind {
             ViewKind::History { path, .. } => format!("{} · history with changes", name(path)),
             ViewKind::Log { path } => format!("{} · log", name(path)),
             ViewKind::Commit { hash, .. } => format!("commit {hash}"),
+            ViewKind::Version { rev, path, .. } => {
+                format!("{path} @ {}", rev.chars().take(7).collect::<String>())
+            }
         }
     }
 
@@ -57,6 +67,7 @@ impl ViewKind {
                 format!("No commits of {}", path.display())
             }
             ViewKind::Commit { hash, .. } => format!("Nothing to show for {hash}"),
+            ViewKind::Version { rev, path, .. } => format!("{path} is empty in {rev}"),
         }
     }
 }
@@ -124,6 +135,12 @@ pub fn view_plan(kind: &ViewKind, width: u16, e: &Engines) -> PreviewPlan {
             }
             (cmd.args(["--end-of-options", hash]), false)
         }
+        ViewKind::Version {
+            root,
+            rev,
+            path,
+            line,
+        } => return version_plan(git(root), rev, path, *line, width, e),
     };
     let Some(delta_path) = &e.delta else {
         return PreviewPlan::Run(cmd);
@@ -137,6 +154,55 @@ pub fn view_plan(kind: &ViewKind, width: u16, e: &Engines) -> PreviewPlan {
         delta = delta.arg("--side-by-side");
     }
     PreviewPlan::Pipe(cmd, delta.args(delta_args(&e.theme)))
+}
+
+/// A file as it was in version `rev`: a text through bat, its line marked; a document or archive as
+/// ugrep reads it (every line of its text), straight from git, never copied to disk.
+fn version_plan(
+    git: Cmd,
+    rev: &str,
+    path: &str,
+    line: u32,
+    width: u16,
+    e: &Engines,
+) -> PreviewPlan {
+    let object = format!("{rev}:{path}");
+    if let Some(doc) = crate::versions::doc_kind(path) {
+        let Some(ugrep) = &e.ugrep else {
+            return PreviewPlan::Text("ugrep is not installed".into());
+        };
+        let mut ug = Cmd::new(ugrep).args(["-n", "--color=always"]);
+        ug = ug.arg(format!("--label={path}"));
+        ug = match doc {
+            crate::versions::Doc::Archive => ug.arg("-z"),
+            crate::versions::Doc::Filtered => {
+                let filters =
+                    crate::versions::filters(&std::env::var_os("PATH").unwrap_or_default());
+                let ug = ug.arg("-h");
+                if filters.is_empty() {
+                    ug
+                } else {
+                    ug.arg(format!("--filter={filters}"))
+                }
+            }
+        };
+        let ug = ug.args(["-e", ""]).env("GREP_COLORS", GREP_PALETTE);
+        return PreviewPlan::Pipe(git.args(["cat-file", "blob"]).arg(object), ug);
+    }
+    let show = git.arg("show").arg(object);
+    let Some(bat) = &e.bat else {
+        return PreviewPlan::Run(show);
+    };
+    let bat = Cmd::new(bat).args([
+        "--color=always".to_string(),
+        "--style=numbers".into(),
+        format!("--theme={}", e.theme),
+        format!("--terminal-width={width}"),
+        format!("--file-name={path}"),
+        format!("--highlight-line={line}"),
+        "-".into(),
+    ]);
+    PreviewPlan::Pipe(show, bat)
 }
 
 #[cfg(test)]
@@ -162,6 +228,71 @@ mod tests {
             PreviewPlan::Pipe(git, delta) => (git, delta),
             other => panic!("expected git | delta, got {other:?}"),
         }
+    }
+
+    fn version(path: &str) -> ViewKind {
+        ViewKind::Version {
+            root: "/r".into(),
+            rev: "0123456789abcdef0123456789abcdef01234567".into(),
+            path: path.into(),
+            line: 7,
+        }
+    }
+
+    #[test]
+    fn a_file_in_a_version_comes_from_git_through_bat() {
+        let e = Engines {
+            bat: Some("/bin/bat".into()),
+            ugrep: Some("/bin/ugrep".into()),
+            ..engines()
+        };
+        let kind = version("src/a b.c");
+        assert_eq!(kind.title(), "src/a b.c @ 0123456");
+        let (git, bat) = pipe(view_plan(&kind, 80, &e));
+        assert_eq!(
+            git.args,
+            os(&[
+                "-C",
+                "/r",
+                "show",
+                "0123456789abcdef0123456789abcdef01234567:src/a b.c"
+            ])
+        );
+        assert_eq!(bat.program, PathBuf::from("/bin/bat"));
+        assert_eq!(
+            bat.args,
+            os(&[
+                "--color=always",
+                "--style=numbers",
+                "--theme=base16",
+                "--terminal-width=80",
+                "--file-name=src/a b.c",
+                "--highlight-line=7",
+                "-"
+            ])
+        );
+        let (cat, ug) = pipe(view_plan(&version("doc/r.pdf"), 80, &e));
+        assert_eq!(
+            cat.args,
+            os(&[
+                "-C",
+                "/r",
+                "cat-file",
+                "blob",
+                "0123456789abcdef0123456789abcdef01234567:doc/r.pdf"
+            ])
+        );
+        assert_eq!(ug.program, PathBuf::from("/bin/ugrep"));
+        let a: Vec<String> = ug
+            .args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        assert!(
+            a.contains(&"--label=doc/r.pdf".to_string())
+                && a.ends_with(&["-e".to_string(), String::new()]),
+            "a document's text, every line: {a:?}"
+        );
     }
 
     #[test]

@@ -87,6 +87,8 @@ pub enum Opt {
     WholeWord,
     /// Ctrl-F: what is typed is a regular expression.
     Regex,
+    /// Searching versions (Git, Ctrl-Alt-F): binary files are searched as text too.
+    Binary,
 }
 
 impl Opt {
@@ -109,6 +111,7 @@ impl Opt {
             Opt::WholeFiles => "Whole files",
             Opt::WholeWord => "Whole word",
             Opt::Regex => "Regular expression",
+            Opt::Binary => "Binary files",
         }
     }
 
@@ -128,6 +131,7 @@ impl Opt {
             Opt::WholeFiles => "the changed files whole, not only around the changes",
             Opt::WholeWord => "not inside a longer word",
             Opt::Regex => r"a.*b  \d+  (x|y)",
+            Opt::Binary => "searched as text",
         }
     }
 }
@@ -180,6 +184,31 @@ pub struct InFileOpts {
     pub words_on_a_line: bool,
     pub words_in_the_file: bool,
     pub match_case: bool,
+}
+
+/// Git, Ctrl-Alt-F: searching the files of every version (or those chosen) of the repository.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VersionsOpts {
+    pub whole_word: bool,
+    /// Perl's (`git grep -P`); off: the text as typed (`-F`).
+    pub regex: bool,
+    pub binary: bool,
+    /// PDF, Office, e-books, archives: each version's file through ugrep(+), no copy on disk.
+    pub documents: bool,
+    pub match_case: bool,
+}
+
+impl Default for VersionsOpts {
+    fn default() -> Self {
+        VersionsOpts {
+            whole_word: false,
+            regex: true,
+            binary: false,
+            documents: false,
+            match_case: false,
+        }
+    }
 }
 
 /// Ctrl-F, finding in the preview (as Notepad++'s Find); all off: the text as typed, case aside.
@@ -292,6 +321,7 @@ pub struct Options {
     pub deep: DeepOpts,
     pub in_file: InFileOpts,
     pub find: FindOpts,
+    pub versions: VersionsOpts,
     pub folders: FoldersOpts,
     pub git: GitOpts,
 }
@@ -391,6 +421,32 @@ impl Options {
             (Opt::WholeWord, f.whole_word),
             (Opt::Regex, f.regex),
         ]
+    }
+
+    /// The options of searching versions (Git, Ctrl-Alt-F), in popup order.
+    pub fn versions_list(&self) -> Vec<(Opt, bool)> {
+        let v = &self.versions;
+        vec![
+            (Opt::WholeWord, v.whole_word),
+            (Opt::Regex, v.regex),
+            (Opt::Binary, v.binary),
+            (Opt::Documents, v.documents),
+            (Opt::MatchCase, v.match_case),
+        ]
+    }
+
+    /// Toggles one of the options of searching versions; another does nothing.
+    pub fn toggle_versions(&mut self, opt: Opt) {
+        let v = &mut self.versions;
+        let slot = match opt {
+            Opt::WholeWord => &mut v.whole_word,
+            Opt::Regex => &mut v.regex,
+            Opt::Binary => &mut v.binary,
+            Opt::Documents => &mut v.documents,
+            Opt::MatchCase => &mut v.match_case,
+            _ => return,
+        };
+        *slot = !*slot;
     }
 
     /// Toggles one of Ctrl-F's options; another does nothing.
@@ -630,6 +686,38 @@ mod tests {
             old.content.regex && old.deep.regex,
             "also in a config from before"
         );
+    }
+
+    #[test]
+    fn searching_versions_has_its_own_options_saved_as_versions() {
+        let mut o = Options::default();
+        assert_eq!(
+            o.versions_list(),
+            [
+                (Opt::WholeWord, false),
+                (Opt::Regex, true),
+                (Opt::Binary, false),
+                (Opt::Documents, false),
+                (Opt::MatchCase, false)
+            ],
+            "a pattern is Perl's regular expression, binaries and documents left out"
+        );
+        o.toggle_versions(Opt::Binary);
+        o.toggle_versions(Opt::Documents);
+        o.toggle_versions(Opt::Regex);
+        assert!(o.versions.binary && o.versions.documents && !o.versions.regex);
+        assert!(!o.deep.documents, "Deep's Documents stays as it is");
+        o.toggle_versions(Opt::Hidden);
+        assert_eq!(
+            o.versions_list().len(),
+            5,
+            "an option it does not have does nothing"
+        );
+        let saved = toml::to_string(&o).unwrap();
+        assert!(saved.contains("[versions]\n"), "{saved}");
+        let old: Options = toml::from_str("[git]\nall_branches = true\n").unwrap();
+        assert_eq!(old.versions, VersionsOpts::default());
+        assert_eq!(Opt::Binary.label(Tab::Git), "Binary files");
     }
 
     #[test]

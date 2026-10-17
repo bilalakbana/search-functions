@@ -1,8 +1,9 @@
 //! `sf --print`, also when the output is not a terminal: the list the window would show, a row a line,
 //! instead of the window. On a terminal every row is drawn as in the window: no control character
 //! reaches it (a file name holding escape sequences could otherwise drive the terminal). Into a pipe or
-//! a file the real bytes go, for scripts: the paths, and in Content ugrep's own output. Exit status as
-//! grep's: 0 something was listed, 1 nothing, 2 an error.
+//! a file the real bytes go, for scripts: the paths, and in Content ugrep's own output (but for a list
+//! of matches with words, which sf keeps by their lines and paths: its rows). Exit status as grep's:
+//! 0 something was listed, 1 nothing, 2 an error.
 
 use std::ffi::OsString;
 use std::io::{self, IsTerminal, Write};
@@ -27,8 +28,10 @@ pub fn print(
     root: &Path,
 ) -> u8 {
     let terminal = io::stdout().is_terminal();
-    if !tab.searches() || terminal {
-        let plan = list_plan_with(tab, options, query, engines, extra, false);
+    let plan = list_plan_with(tab, options, query, engines, extra, false);
+    // ugrep's own output has the lines with any of the words; sf's rows those it keeps
+    let kept = matches!(plan, ListPlan::Run { keep: Some(_), .. });
+    if !tab.searches() || terminal || kept {
         let mut out = io::BufWriter::new(io::stdout().lock());
         return rows(
             tab,
@@ -77,8 +80,8 @@ fn rows(
     out: &mut impl Write,
     err: &mut impl Write,
 ) -> u8 {
-    let (cmd, kind) = match plan {
-        ListPlan::Run { cmd, kind } => (cmd, kind),
+    let (cmd, kind, keep) = match plan {
+        ListPlan::Run { cmd, kind, keep } => (cmd, kind, keep),
         ListPlan::Hint(hint) => {
             let _ = writeln!(err, "sf: {hint}");
             return 2;
@@ -86,7 +89,7 @@ fn rows(
     };
     let (tx, rx) = channel();
     let mut runner = Runner::new(tx);
-    runner.start(1, cmd, kind, root);
+    runner.start(1, cmd, kind, keep, root);
     let mut filter = Filter::new();
     filter.set_match_case(match_case);
     // as in the window: in Content and Deep the query is ugrep's pattern, not a filter of the rows

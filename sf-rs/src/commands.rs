@@ -7,6 +7,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use crate::engines::Engines;
+use crate::find::{RowWords, words_of};
 use crate::items::Item;
 use crate::model::{InFileOpts, Opt, Options, Tab};
 
@@ -103,6 +104,8 @@ pub enum ParseKind {
     SearchMatches,
     Folders,
     Git,
+    /// `sf grep-versions`' rows: `REV:PATH\0LINE\0TEXT`.
+    Versions,
 }
 
 #[derive(Debug, PartialEq)]
@@ -110,6 +113,9 @@ pub enum ListPlan {
     Run {
         cmd: Cmd,
         kind: ParseKind,
+        /// Only the rows with each of these words on their line or in their path (Content's and
+        /// Deep's lists of matches).
+        keep: Option<RowWords>,
     },
     /// Nothing to run; the list shows this line.
     Hint(String),
@@ -127,6 +133,9 @@ struct Search {
     binaries: bool,
     /// How the pattern is read: smart case or the case as typed, a pattern or words.
     reading: Reading,
+    /// Listing matches: ugrep finds the lines with any of the words, the rows kept have each of them on
+    /// the line or in the path.
+    words: Option<RowWords>,
 }
 
 /// How ugrep reads what was typed.
@@ -208,8 +217,24 @@ impl Search {
             whole_word: pattern && whole_word,
             literal: pattern && !regex,
         };
+        // listing matches (not files): each word on the line or in the path, unless all in the file
+        let row_words = |lists: bool, in_the_file: bool, regex, whole_word, match_case| {
+            (pattern && lists && !in_the_file).then(|| RowWords {
+                words: words_of(query),
+                regex,
+                whole_word,
+                match_case,
+            })
+        };
         if tab == Tab::Deep {
             let d = &opts.deep;
+            let words = row_words(
+                d.each_match,
+                d.words_in_the_file,
+                d.regex,
+                d.whole_word,
+                d.match_case,
+            );
             return Search {
                 matching_lines: false,
                 each_match: pattern && d.each_match,
@@ -218,11 +243,12 @@ impl Search {
                 binaries: true,
                 reading: reading(
                     d.match_case,
-                    d.words_on_a_line,
+                    d.words_on_a_line && words.is_none(),
                     d.words_in_the_file,
                     d.whole_word,
                     d.regex,
                 ),
+                words,
             };
         }
         let c = &opts.content;
@@ -231,6 +257,13 @@ impl Search {
         } else {
             (false, false, false)
         };
+        let words = row_words(
+            matching_lines || each_match,
+            c.words_in_the_file,
+            c.regex,
+            c.whole_word,
+            c.match_case,
+        );
         Search {
             matching_lines,
             each_match,
@@ -240,13 +273,68 @@ impl Search {
             binaries: archives && !matching_lines && !each_match,
             reading: reading(
                 c.match_case,
-                c.words_on_a_line,
+                c.words_on_a_line && words.is_none(),
                 c.words_in_the_file,
                 c.whole_word,
                 c.regex,
             ),
+            words,
         }
     }
+
+    /// ugrep's `-e` options: each word (listing matches), else the query; as typed without Regular
+    /// expression.
+    fn patterns(&self, query: &str) -> Vec<String> {
+        let typed = match &self.words {
+            Some(w) => w.words.clone(),
+            None => vec![query.to_string()],
+        };
+        typed
+            .iter()
+            .flat_map(|p| ["-e".to_string(), self.reading.pattern(p)])
+            .collect()
+    }
+}
+
+/// Git, Ctrl-Alt-F: `sf grep-versions` (`exe`, sf itself) as the list, over the `chosen` versions
+/// (None: every one); a hint while nothing is typed or no version is chosen.
+pub fn versions_plan(
+    exe: &Path,
+    query: &str,
+    opts: &crate::model::VersionsOpts,
+    chosen: Option<Vec<String>>,
+) -> ListPlan {
+    if query.is_empty() {
+        return ListPlan::Hint(
+            "type a pattern · searched in the files of every version (^S options, versions)".into(),
+        );
+    }
+    let revs = match chosen {
+        Some(revs) if revs.is_empty() => {
+            return ListPlan::Hint("No version chosen: ^S, All versions".into());
+        }
+        Some(revs) => revs,
+        None => Vec::new(),
+    };
+    let q = crate::versions::Query {
+        pattern: query.to_string(),
+        opts: opts.clone(),
+        revs,
+    };
+    ListPlan::Run {
+        cmd: Cmd::new(exe).args(crate::versions::args(&q)),
+        kind: ParseKind::Versions,
+        keep: None,
+    }
+}
+
+/// Content's and Deep's lists of matches with a pattern: its words, each to be found on a row's line or
+/// in its path; None when files are listed, all words in the file are asked for, or the tab has none.
+pub fn row_words(tab: Tab, opts: &Options, query: &str) -> Option<RowWords> {
+    if !tab.searches() {
+        return None;
+    }
+    Search::of(tab, opts, query).words
 }
 
 /// Ctrl-T: the lines of one file (`key`, as listed) with the typed words (as `opts` say: all on a
@@ -283,6 +371,7 @@ pub fn in_file_plan(
     ListPlan::Run {
         cmd,
         kind: ParseKind::SearchLines,
+        keep: None,
     }
 }
 
@@ -335,9 +424,12 @@ pub fn list_plan_with(
             ListPlan::Run {
                 cmd: cmd.args(["--exclude", ".git"]).args(extra),
                 kind,
+                keep: None,
             }
         }
         Tab::Content | Tab::Deep => {
+            let search = Search::of(tab, opts, query);
+            let patterns = search.patterns(query);
             let Search {
                 matching_lines,
                 each_match,
@@ -345,7 +437,8 @@ pub fn list_plan_with(
                 documents,
                 binaries,
                 reading,
-            } = Search::of(tab, opts, query);
+                words,
+            } = search;
             let program = if documents {
                 let Some(p) = &e.ugrep_plus else {
                     let option = if tab == Tab::Deep {
@@ -421,13 +514,13 @@ pub fn list_plan_with(
                 ParseKind::SearchFiles { archives }
             };
             ListPlan::Run {
-                cmd: cmd.args(extra).args([
-                    "--exclude-dir=.git",
-                    "-e",
-                    &reading.pattern(query),
-                    ".",
-                ]),
+                cmd: cmd
+                    .args(extra)
+                    .arg("--exclude-dir=.git")
+                    .args(patterns)
+                    .arg("."),
                 kind,
+                keep: words,
             }
         }
         Tab::Git => {
@@ -444,6 +537,7 @@ pub fn list_plan_with(
             ListPlan::Run {
                 cmd,
                 kind: ParseKind::Git,
+                keep: None,
             }
         }
     }
@@ -473,10 +567,10 @@ pub enum PreviewPlan {
     Nothing,
 }
 
-/// The lines above a Content preview: the file, and with a pattern the pattern and its count.
+/// Content's and Deep's preview: with a pattern, the pattern and its count, drawn at the preview's top
+/// right (`preview::Found`).
 #[derive(Debug, PartialEq)]
 pub struct Header {
-    pub file: String,
     pub matches: Option<Matches>,
 }
 
@@ -565,15 +659,11 @@ pub fn preview_plan_with(
                 Cmd::new(g)
                     .args(s.reading.into(opts))
                     .args(extra)
-                    .arg("-e")
-                    .arg(s.reading.pattern(query))
+                    .args(s.patterns(query))
                     .arg("--")
                     .arg(&path)
             };
             let header = Header {
-                file: crate::items::printable(&String::from_utf8_lossy(
-                    item.key.as_encoded_bytes(),
-                )),
                 matches: grep
                     .as_ref()
                     .filter(|_| !query.is_empty())
@@ -645,6 +735,16 @@ pub fn preview_plan_with(
             None => PreviewPlan::Text("ls is not installed".into()),
         },
         Tab::Git => {
+            // Ctrl-Alt-F's rows: the file as it was in that version
+            if let Some((rev, path)) = item.version() {
+                let version = crate::views::ViewKind::Version {
+                    root: root.to_path_buf(),
+                    rev: rev.to_string(),
+                    path: path.to_string(),
+                    line: item.line.unwrap_or(1),
+                };
+                return crate::views::view_plan(&version, width, e);
+            }
             let Some(hash) = item.key.to_str().filter(|h| is_hash(h)) else {
                 return PreviewPlan::Nothing;
             };
@@ -691,7 +791,7 @@ mod tests {
 
     fn run(plan: ListPlan) -> (Cmd, ParseKind) {
         match plan {
-            ListPlan::Run { cmd, kind } => (cmd, kind),
+            ListPlan::Run { cmd, kind, .. } => (cmd, kind),
             ListPlan::Hint(h) => panic!("expected a command, got the hint {h:?}"),
         }
     }
@@ -1114,6 +1214,136 @@ mod tests {
             }
             assert_eq!(count.pattern, "a.b(", "the header shows it as typed");
         }
+    }
+
+    /// What follows each `-e` of `cmd`.
+    fn patterns_of(cmd: &Cmd) -> Vec<String> {
+        let a: Vec<String> = cmd
+            .args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        a.windows(2)
+            .filter(|w| w[0] == "-e")
+            .map(|w| w[1].clone())
+            .collect()
+    }
+
+    #[test]
+    fn listing_matches_takes_each_word_on_the_line_or_in_the_path() {
+        let query = r#"CODE "of x""#;
+        for (tab, list) in [
+            (Tab::Content, Opt::MatchingLines),
+            (Tab::Content, Opt::EachMatch),
+            (Tab::Deep, Opt::EachMatch),
+        ] {
+            let mut o = Options::default();
+            o.toggle(tab, list);
+            o.toggle(tab, Opt::WordsOnALine); // the words rule replaces it here
+            let ListPlan::Run { cmd, keep, .. } = list_plan(tab, &o, query, &engines()) else {
+                panic!("{tab:?}")
+            };
+            assert_eq!(
+                patterns_of(&cmd),
+                ["CODE", "of x"],
+                "{tab:?}: any of the words"
+            );
+            assert!(!has(&cmd, "--bool"), "{tab:?}: {:?}", cmd.args);
+            let want = RowWords {
+                words: vec!["CODE".into(), "of x".into()],
+                regex: true,
+                whole_word: false,
+                match_case: false,
+            };
+            assert_eq!(
+                keep,
+                Some(want),
+                "{tab:?}: each word on the line or in the path"
+            );
+            let PreviewPlan::Sniff { header, binary, .. } = preview_plan(
+                tab,
+                &o,
+                query,
+                &item("a.txt", Some(3)),
+                72,
+                &engines(),
+                Path::new("/r"),
+            ) else {
+                panic!("{tab:?}")
+            };
+            let count = header.unwrap().matches.unwrap();
+            assert_eq!(
+                patterns_of(&count.text),
+                ["CODE", "of x"],
+                "{tab:?}: the count"
+            );
+            if let Binary::Show(m) = binary {
+                assert_eq!(
+                    patterns_of(&m),
+                    ["CODE", "of x"],
+                    "{tab:?}: a binary's matches"
+                );
+            }
+            o.toggle(tab, Opt::Regex);
+            let ListPlan::Run { cmd, keep, .. } = list_plan(tab, &o, "a.b c", &engines()) else {
+                panic!()
+            };
+            assert_eq!(
+                patterns_of(&cmd),
+                [r"a\.b", "c"],
+                "{tab:?}: each word as typed"
+            );
+            assert!(!keep.unwrap().regex);
+        }
+        let mut o = Options::default();
+        let ListPlan::Run { cmd, keep, .. } = list_plan(Tab::Content, &o, query, &engines()) else {
+            panic!()
+        };
+        assert_eq!(
+            (patterns_of(&cmd), keep),
+            (vec![query.to_string()], None),
+            "listing files"
+        );
+        o.toggle(Tab::Content, Opt::MatchingLines);
+        o.toggle(Tab::Content, Opt::WordsInTheFile);
+        let ListPlan::Run { cmd, keep, .. } = list_plan(Tab::Content, &o, query, &engines()) else {
+            panic!()
+        };
+        assert!(
+            has(&cmd, "--files") && keep.is_none(),
+            "all words in the file: as before"
+        );
+    }
+
+    #[test]
+    fn a_versions_row_previews_the_file_as_it_was_in_that_version() {
+        let rev = "0123456789abcdef0123456789abcdef01234567";
+        let raw = format!("{rev}:src/a.c\x009\x00the needle");
+        let it = crate::items::parse(ParseKind::Versions, raw.as_bytes(), 0).unwrap();
+        let mut e = engines();
+        e.bat = Some("/bin/bat".into());
+        let plan = preview_plan(
+            Tab::Git,
+            &Options::default(),
+            "",
+            &it,
+            72,
+            &e,
+            Path::new("/r"),
+        );
+        let PreviewPlan::Pipe(git, bat) = plan else {
+            panic!("{plan:?}")
+        };
+        assert!(
+            git.args.contains(&format!("{rev}:src/a.c").into()),
+            "{:?}",
+            git.args
+        );
+        assert!(
+            bat.args.contains(&"--highlight-line=9".into()),
+            "{:?}",
+            bat.args
+        );
     }
 
     #[test]
@@ -1606,7 +1836,6 @@ mod tests {
             Path::new("/r"),
         ));
         let h = h.expect("a header");
-        assert_eq!(h.file, "src/a b");
         let m = h.matches.expect("the matches");
         assert_eq!(m.pattern, "ne");
         assert_eq!(m.text.program, PathBuf::from("/bin/ugrep"));
@@ -1671,7 +1900,6 @@ mod tests {
             Path::new("/r"),
         ));
         let h = h.unwrap();
-        assert_eq!(h.file, "a\u{fffd}b");
         assert!(h.matches.is_none());
     }
 

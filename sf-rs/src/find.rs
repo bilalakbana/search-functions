@@ -56,6 +56,87 @@ impl Finder {
     }
 }
 
+/// Content's and Deep's lists of matches (Matching lines, Each match): the typed words, each to be
+/// found on the row's line or in its path (Bilal: the file name counts too).
+#[derive(Clone, Debug, PartialEq)]
+pub struct RowWords {
+    pub words: Vec<String>,
+    pub regex: bool,
+    pub whole_word: bool,
+    /// Else smart case for each word, as ugrep's.
+    pub match_case: bool,
+}
+
+impl RowWords {
+    pub fn keeper(&self) -> Keeper {
+        let finders = self
+            .words
+            .iter()
+            .map(|w| {
+                let opts = FindOpts {
+                    match_case: self.match_case || w.chars().any(char::is_uppercase),
+                    whole_word: self.whole_word,
+                    regex: self.regex,
+                };
+                Finder::new(w, &opts).ok().flatten()
+            })
+            .collect();
+        Keeper { finders }
+    }
+}
+
+/// `RowWords` ready to look; a word sf cannot read (ugrep's syntax beyond fancy-regex's) is None and
+/// counts as found, so no row is dropped for it.
+pub struct Keeper {
+    finders: Vec<Option<Finder>>,
+}
+
+impl Keeper {
+    /// Every word is on the line (`text`) or in the path.
+    pub fn keeps(&self, path: &str, text: &str) -> bool {
+        let has = |f: &Finder, s: &str| f.matches(s).map_or(true, |m| !m.is_empty());
+        self.finders
+            .iter()
+            .all(|f| f.as_ref().is_none_or(|f| has(f, path) || has(f, text)))
+    }
+
+    /// Where the words are in `path`: byte ranges in order, overlapping ones joined.
+    pub fn marks(&self, path: &str) -> Vec<Range<usize>> {
+        let mut found: Vec<Range<usize>> = self
+            .finders
+            .iter()
+            .flatten()
+            .flat_map(|f| f.matches(path).unwrap_or_default())
+            .collect();
+        found.sort_by_key(|r| r.start);
+        let mut joined: Vec<Range<usize>> = Vec::new();
+        for r in found {
+            match joined.last_mut() {
+                Some(last) if r.start <= last.end => last.end = last.end.max(r.end),
+                _ => joined.push(r),
+            }
+        }
+        joined
+    }
+}
+
+/// The words of a query: apart by spaces, a `"quoted phrase"` one word (as ugrep's Boolean query).
+pub fn words_of(query: &str) -> Vec<String> {
+    let mut words = Vec::new();
+    let mut rest = query.trim_start();
+    while !rest.is_empty() {
+        let (word, after) = match rest.strip_prefix('"') {
+            Some(quoted) => quoted.split_once('"').unwrap_or((quoted, "")),
+            None => rest.split_once(char::is_whitespace).unwrap_or((rest, "")),
+        };
+        if !word.is_empty() {
+            words.push(word.to_string());
+        }
+        rest = after.trim_start();
+    }
+    words
+}
+
 /// Why `find_all` found nothing to show.
 #[derive(Debug, PartialEq)]
 pub enum Trouble {
@@ -263,6 +344,68 @@ mod tests {
             find_all(&hard, lines, Duration::from_secs(10)),
             Err(Trouble::Bad)
         );
+    }
+
+    fn row_words(words: &[&str], regex: bool, whole_word: bool) -> RowWords {
+        RowWords {
+            words: words.iter().map(|w| w.to_string()).collect(),
+            regex,
+            whole_word,
+            match_case: false,
+        }
+    }
+
+    #[test]
+    fn a_query_splits_into_words_a_quoted_phrase_staying_one() {
+        assert_eq!(
+            words_of(r#"CODE "of conduct"  interest"#),
+            ["CODE", "of conduct", "interest"]
+        );
+        assert_eq!(words_of(r#"  "unclosed phrase"#), ["unclosed phrase"]);
+        assert!(words_of("   ").is_empty());
+    }
+
+    #[test]
+    fn a_row_stays_when_every_word_is_on_its_line_or_in_its_path() {
+        let k = row_words(&["code", "interest"], true, false).keeper();
+        assert!(
+            k.keeps("CODE_OF_CONDUCT.md", "In the interest of"),
+            "code in the path"
+        );
+        assert!(k.keeps("x.md", "code and interest"), "both on the line");
+        assert!(!k.keeps("x.md", "In the interest of"), "code nowhere");
+        let k = row_words(&["Code"], true, false).keeper();
+        assert!(
+            !k.keeps("code.md", "code"),
+            "smart case: an upper-case word counts its case"
+        );
+        let k = row_words(&["code"], true, true).keeper();
+        assert!(
+            !k.keeps("CODE_OF.md", "x"),
+            "whole word: _ is a word character"
+        );
+        assert!(k.keeps("code.md", "x"));
+        let k = row_words(&["inter.st"], true, false).keeper();
+        assert!(k.keeps("a", "interest"), "a regular expression");
+        let k = row_words(&["inter.st"], false, false).keeper();
+        assert!(
+            !k.keeps("a", "interest") && k.keeps("a", "inter.st"),
+            "plain text"
+        );
+    }
+
+    #[test]
+    fn the_words_in_a_path_are_marked() {
+        let k = row_words(&["code", "md"], true, false).keeper();
+        assert_eq!(k.marks("docs/CODE_OF_CONDUCT.md"), [5..9, 21..23]);
+    }
+
+    #[test]
+    fn a_word_sf_cannot_read_lets_the_rows_through() {
+        // ugrep reads \Q…\E, fancy-regex does not: sf cannot check that word, so it drops no row for it
+        let k = row_words(&[r"\Qa.b\E", "x"], true, false).keeper();
+        assert!(k.keeps("p", "x"));
+        assert!(!k.keeps("p", "y"), "the words it can read still count");
     }
 
     #[test]

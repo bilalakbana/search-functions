@@ -13,7 +13,7 @@ use std::thread;
 use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 
-use crate::commands::{Binary, Cmd, Header, PreviewPlan};
+use crate::commands::{Binary, Cmd, Header, Matches, PreviewPlan};
 use crate::commands::{MATCH_END, MATCH_START};
 use crate::items::{ansi_text, printable};
 use crate::theme;
@@ -29,8 +29,15 @@ const MIN_PRINTABLE: f64 = 0.95;
 pub struct PreviewMsg {
     pub generation: u64,
     pub text: Text<'static>,
-    /// Lines of `text` above the file's own (the Content header), for scrolling to a line.
-    pub header_lines: usize,
+    /// Content's and Deep's pattern and how often it occurs in the file.
+    pub found: Option<Found>,
+}
+
+/// A pattern and how often it occurs in the previewed file (None: the count failed).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Found {
+    pub pattern: String,
+    pub count: Option<u64>,
 }
 
 pub struct Previewer {
@@ -87,7 +94,7 @@ fn work(shared: &Shared, tx: &Sender<PreviewMsg>) {
                 st = shared.wake.wait(st).unwrap_or_else(|e| e.into_inner());
             }
         };
-        let (text, header_lines) = produce(plan, shared);
+        let (text, found) = produce(plan, shared);
         let st = lock(&shared.state);
         if st.closed {
             return;
@@ -100,7 +107,7 @@ fn work(shared: &Shared, tx: &Sender<PreviewMsg>) {
             .send(PreviewMsg {
                 generation,
                 text,
-                header_lines,
+                found,
             })
             .is_err()
         {
@@ -109,8 +116,8 @@ fn work(shared: &Shared, tx: &Sender<PreviewMsg>) {
     }
 }
 
-/// The preview and how many of its lines are a header above the file's own.
-fn produce(plan: PreviewPlan, shared: &Shared) -> (Text<'static>, usize) {
+/// The preview, and with a pattern how often it occurs.
+fn produce(plan: PreviewPlan, shared: &Shared) -> (Text<'static>, Option<Found>) {
     match plan {
         PreviewPlan::Sniff {
             path,
@@ -134,56 +141,37 @@ fn produce(plan: PreviewPlan, shared: &Shared) -> (Text<'static>, usize) {
                 numbered(&path, &is_text, lines, binary, shared)
             })
         }
-        other => (unsniffed(other, shared), 0),
+        other => (unsniffed(other, shared), None),
     }
 }
 
-/// The lines of `body` under the header's; the header's count runs beside the body's commands (a big
-/// archive takes seconds for each).
+/// The lines of `body`, and the header's pattern with its count; the count runs beside the body's
+/// commands (a big archive takes seconds for each).
 fn with_header(
     header: Option<Header>,
     text: bool,
     shared: &Shared,
     body: impl FnOnce() -> Vec<Line<'static>>,
-) -> (Text<'static>, usize) {
-    let (head, body) = thread::scope(|s| {
-        let head = header.map(|h| s.spawn(move || header_lines(h, text, shared)));
+) -> (Text<'static>, Option<Found>) {
+    thread::scope(|s| {
+        let count = header
+            .and_then(|h| h.matches)
+            .map(|m| s.spawn(move || found(m, text, shared)));
         let body = body();
-        let head = head.map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e)));
-        (head, body)
-    });
-    let Some(mut lines) = head else {
-        return (Text::from(body), 0);
-    };
-    let n = lines.len();
-    lines.extend(body);
-    (Text::from(lines), n)
+        let found = count.map(|c| c.join().unwrap_or_else(|e| std::panic::resume_unwind(e)));
+        (Text::from(body), found)
+    })
 }
 
-/// `File  path`, with a pattern `Pattern  p` and `Matches  n`, then an empty line.
-fn header_lines(header: Header, text: bool, shared: &Shared) -> Vec<Line<'static>> {
-    let label = |l: &str| Span::styled(format!("{l:<9}"), Style::new().fg(theme::DIM));
-    let mut file = vec![label("File")];
-    file.extend(crate::items::path_spans(&header.file));
-    let mut lines = vec![Line::from(file)];
-    if let Some(m) = header.matches {
-        let count = run(&[if text { m.text } else { m.binary }], shared)
-            .ok()
-            .and_then(|out| count_of(&out.stdout));
-        lines.push(Line::from(vec![
-            label("Pattern"),
-            Span::styled(printable(&m.pattern), Style::new().fg(theme::RED)),
-        ]));
-        lines.push(Line::from(vec![
-            label("Matches"),
-            Span::styled(
-                count.map_or_else(|| "?".to_string(), |n| n.to_string()),
-                Style::new().fg(theme::PEACH),
-            ),
-        ]));
+/// The pattern and how often `ugrep -c -o` counts it in a text file (`text`) or any other.
+fn found(m: Matches, text: bool, shared: &Shared) -> Found {
+    let count = run(&[if text { m.text } else { m.binary }], shared)
+        .ok()
+        .and_then(|out| count_of(&out.stdout));
+    Found {
+        pattern: m.pattern,
+        count,
     }
-    lines.push(Line::default());
-    lines
 }
 
 /// The total of `ugrep -c -o`: one count per line, after the last `:` when there is a name (archive
@@ -678,7 +666,6 @@ pub fn is_text(path: &Path) -> io::Result<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::commands::Matches;
     use crate::testutil::temp_dir;
     use std::sync::mpsc::{Receiver, channel};
     use std::time::{Duration, Instant};
@@ -888,9 +875,8 @@ mod tests {
         Cmd::new("/usr/bin/printf").arg(s)
     }
 
-    fn header(file: &str, count: Option<Cmd>) -> Option<Header> {
+    fn header(count: Option<Cmd>) -> Option<Header> {
         Some(Header {
-            file: file.into(),
             matches: count.map(|c| Matches {
                 pattern: "ne".into(),
                 text: c.clone(),
@@ -907,34 +893,25 @@ mod tests {
             .expect("no preview within 5 s")
     }
 
+    fn found(count: Option<u64>) -> Option<Found> {
+        Some(Found {
+            pattern: "ne".into(),
+            count,
+        })
+    }
+
     #[test]
-    fn header_shows_file_pattern_and_count() {
+    fn the_pattern_and_its_count_come_apart_from_the_text() {
+        // drawn at the preview's top right, where they stay while it scrolls (Bilal)
         let path = file("h.txt", b"text\n");
         let m = msg(PreviewPlan::Sniff {
             path,
             text: Some(printf("BODY")),
             binary: Binary::Describe(None),
-            header: header("src/h.txt", Some(printf("3\\n"))),
+            header: header(Some(printf("3\\n"))),
         });
-        assert_eq!(
-            plain(&m.text),
-            "File     src/h.txt\nPattern  ne\nMatches  3\n\nBODY"
-        );
-        assert_eq!(m.header_lines, 4);
-        assert_eq!(m.text.lines[1].spans[1].style.fg, Some(theme::RED));
-        let file: Vec<_> = m.text.lines[0].spans[1..]
-            .iter()
-            .map(|s| (s.content.to_string(), s.style.fg))
-            .collect();
-        assert_eq!(
-            file,
-            [
-                ("src".to_string(), Some(theme::BLUE)),
-                ("/".to_string(), Some(theme::YELLOW)),
-                ("h.txt".to_string(), Some(theme::GREEN)),
-            ]
-        );
-        assert_eq!(m.text.lines[2].spans[1].style.fg, Some(theme::PEACH));
+        assert_eq!(plain(&m.text), "BODY", "no header lines above the file");
+        assert_eq!(m.found, found(Some(3)));
     }
 
     #[test]
@@ -945,13 +922,13 @@ mod tests {
             // octal: \062 is "2", so the line number is not read as part of the NUL's digits
             lines: sh("printf 'n.txt\\000\\062\\037b \\001needle\\002\\n'; echo oops >&2"),
             binary: printf("never"),
-            header: header("n.txt", Some(printf("1\\n"))).unwrap(),
+            header: header(Some(printf("1\\n"))).unwrap(),
         });
         assert_eq!(
             plain(&m.text),
-            "File     n.txt\nPattern  ne\nMatches  1\n\nMatch #1\n   1  a\n   2: b needle\n   3  c\noops"
+            "Match #1\n   1  a\n   2: b needle\n   3  c\noops"
         );
-        assert_eq!(m.header_lines, 4);
+        assert_eq!(m.found, found(Some(1)));
     }
 
     #[test]
@@ -961,13 +938,14 @@ mod tests {
             path,
             lines: printf("never"),
             binary: sh("printf 'x needle\\nneedle y\\n'; echo oops >&2"),
-            header: header("n.bin", None).unwrap(),
+            header: header(None).unwrap(),
         });
         let rule = "─".repeat(40);
         assert_eq!(
             plain(&m.text),
-            format!("File     n.bin\n\nMatch #1\nx needle\n{rule}\nMatch #2\nneedle y\noops")
+            format!("Match #1\nx needle\n{rule}\nMatch #2\nneedle y\noops")
         );
+        assert_eq!(m.found, None);
     }
 
     #[test]
@@ -977,7 +955,7 @@ mod tests {
             path,
             lines: Cmd::new("/nonexistent/ugrep"),
             binary: printf("never"),
-            header: header("n2.txt", None).unwrap(),
+            header: header(None).unwrap(),
         });
         assert!(
             plain(&m.text).contains("/nonexistent/ugrep: No such file"),
@@ -987,16 +965,16 @@ mod tests {
     }
 
     #[test]
-    fn header_without_pattern_is_the_file() {
+    fn without_a_pattern_nothing_is_found() {
         let path = file("h2.txt", b"text\n");
         let m = msg(PreviewPlan::Sniff {
             path,
             text: Some(printf("BODY")),
             binary: Binary::Describe(None),
-            header: header("h2.txt", None),
+            header: header(None),
         });
-        assert_eq!(plain(&m.text), "File     h2.txt\n\nBODY");
-        assert_eq!(m.header_lines, 2);
+        assert_eq!(plain(&m.text), "BODY");
+        assert_eq!(m.found, None);
     }
 
     #[test]
@@ -1006,9 +984,9 @@ mod tests {
             path,
             text: None,
             binary: Binary::Show(printf("BIN")),
-            header: header("h.zip", Some(printf("h.zip{a}:1\\nh.zip{b:c}:2\\n"))),
+            header: header(Some(printf("h.zip{a}:1\\nh.zip{b:c}:2\\n"))),
         });
-        assert!(plain(&m.text).contains("Matches  3"), "{}", plain(&m.text));
+        assert_eq!(m.found, found(Some(3)));
     }
 
     #[test]
@@ -1018,9 +996,9 @@ mod tests {
             path,
             text: Some(printf("BODY")),
             binary: Binary::Describe(None),
-            header: header("h3.txt", Some(Cmd::new("/nonexistent/ugrep"))),
+            header: header(Some(Cmd::new("/nonexistent/ugrep"))),
         });
-        assert!(plain(&m.text).contains("Matches  ?"), "{}", plain(&m.text));
+        assert_eq!(m.found, found(None), "the pattern, its count unknown");
     }
 
     #[test]
@@ -1104,7 +1082,7 @@ mod tests {
             path,
             lines: printf("never"),
             binary: sh("seq 400 | sed 's/^/x needle /'; exec sleep 30"),
-            header: header("many.bin", None).unwrap(),
+            header: header(None).unwrap(),
         });
         assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
         let shown = plain(&m.text);
@@ -1135,18 +1113,15 @@ mod tests {
             path,
             lines: sh("sleep 1; printf 'both.txt\\000\\062\\037\\001needle\\002\\n'"),
             binary: printf("never"),
-            header: header("both.txt", Some(sh("sleep 1; echo 1"))).unwrap(),
+            header: header(Some(sh("sleep 1; echo 1"))).unwrap(),
         });
         assert!(
             t.elapsed() < Duration::from_millis(1800),
             "{:?}",
             t.elapsed()
         );
-        assert!(
-            plain(&m.text).contains("Matches  1\n\nMatch #1"),
-            "{}",
-            plain(&m.text)
-        );
+        assert!(plain(&m.text).starts_with("Match #1"), "{}", plain(&m.text));
+        assert_eq!(m.found, found(Some(1)));
     }
 
     #[test]
@@ -1164,7 +1139,7 @@ mod tests {
                 path: file("kill.txt", b"needle\n"),
                 lines: waits(&lines_pid),
                 binary: printf("never"),
-                header: header("kill.txt", Some(waits(&count_pid))).unwrap(),
+                header: header(Some(waits(&count_pid))).unwrap(),
             },
         );
         let t = Instant::now();
