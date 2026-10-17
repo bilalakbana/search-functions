@@ -35,7 +35,7 @@ pub enum Cli {
         view: View,
         file: OsString,
     },
-    /// `sf grep-versions …`: the Git tab's search in every version (Ctrl-Alt-F), run as its list.
+    /// `sf grep-versions …`: the Git tab's search in every version (Ctrl-Shift-Alt-F), run as its list.
     GrepVersions(crate::versions::Query),
     /// The window, or with `print` the list it would show.
     Run {
@@ -439,7 +439,7 @@ mod tests {
         assert_eq!(
             parse(&args(&["grep-versions", "-e", "x"])),
             Ok(Cli::GrepVersions(q)),
-            "the Git tab's Ctrl-Alt-F runs it as its list"
+            "the Git tab's Ctrl-Shift-Alt-F runs it as its list"
         );
         assert!(parse(&args(&["grep-versions"])).is_err());
         assert_eq!(

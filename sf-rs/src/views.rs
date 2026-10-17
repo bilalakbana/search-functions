@@ -24,7 +24,7 @@ pub enum ViewKind {
         hash: String,
         whole: bool,
     },
-    /// A file as it was in a version (Git, Ctrl-Alt-F, Enter): `line` is the one found.
+    /// A file as it was in a version (Git, Ctrl-Shift-Alt-F, Enter): `line` is the one found.
     Version {
         root: PathBuf,
         rev: String,

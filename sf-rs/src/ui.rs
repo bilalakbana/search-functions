@@ -809,9 +809,15 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     let [left_area, right_area] =
         Layout::horizontal([Constraint::Min(0), Constraint::Length(right_w)]).areas(area);
 
+    // Ctrl-Alt-F: the words that filter the rows are typed; the pattern stays, named after them
+    let filtering = app
+        .result_filter
+        .as_ref()
+        .filter(|_| app.preview_find.is_none());
     let title = match &app.scope {
         _ if app.preview_find.is_some() => "Find in preview".to_string(),
         _ if app.versions.is_some() => "Search in versions".to_string(),
+        _ if filtering.is_some() => format!("{} filter", app.tab.title()),
         Some(scope) => {
             let name = std::path::Path::new(&scope.key)
                 .file_name()
@@ -824,7 +830,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         (Some(f), _) => &f.text,
         (None, Some(v)) => &v.query,
         (None, None) if app.tab == Tab::Help => &app.help.search,
-        (None, None) => &app.query,
+        (None, None) => filtering.unwrap_or(&app.query),
     };
     let query = crate::items::printable(typed);
     let mut left = vec![
@@ -835,32 +841,24 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         ),
         Span::styled(" › ", style(theme::FAINT)),
     ];
-    let mut cursor_x = left_area.x
+    let cursor_x = left_area.x
         + 1
         + title.chars().count() as u16
         + 3
         + Line::raw(query.as_str()).width() as u16;
     let hint =
         |text: &'static str| Span::styled(text, style(theme::DIM).add_modifier(Modifier::ITALIC));
-    if query.is_empty() {
-        left.push(hint(placeholder(app)));
-    } else {
-        left.push(Span::styled(query, style(theme::TEXT)));
+    match (query.is_empty(), filtering) {
+        (true, Some(_)) => left.push(hint("type words · the rows with all of them")),
+        (true, None) => left.push(hint(placeholder(app))),
+        (false, _) => left.push(Span::styled(query, style(theme::TEXT))),
     }
-    // Ctrl-Alt-F: the pattern stays; the cursor is in the words that filter the rows (not while finding)
-    if let Some(words) = app
-        .result_filter
-        .as_ref()
-        .filter(|_| app.preview_find.is_none())
-    {
-        let words = crate::items::printable(words);
-        left.push(Span::styled(" · filter: ", style(theme::FAINT)));
-        cursor_x += " · filter: ".chars().count() as u16 + Line::raw(words.as_str()).width() as u16;
-        if words.is_empty() {
-            left.push(hint("type words · the rows with all of them"));
-        } else {
-            left.push(Span::styled(words, style(theme::TEXT)));
-        }
+    if filtering.is_some() && !app.query.is_empty() {
+        left.push(Span::styled(" · pattern: ", style(theme::FAINT)));
+        left.push(Span::styled(
+            crate::items::printable(&app.query),
+            style(theme::SUB),
+        ));
     }
     frame.render_widget(Paragraph::new(Line::from(left)), left_area);
     frame.render_widget(
@@ -912,7 +910,7 @@ fn footer_items(tab: Tab, editor: &str) -> Vec<String> {
             "Enter show commit",
             "^S options",
             "^F find",
-            "^Alt-F search in versions",
+            "^Shift-Alt-F search in versions",
             "^C copy hash",
             "Esc quit",
         ],
@@ -1556,13 +1554,15 @@ mod tests {
     }
 
     #[test]
-    fn the_result_filter_is_drawn_after_the_pattern() {
+    fn the_result_filter_is_typed_the_pattern_named_after_it() {
         let (mut a, now) = app(Tab::Content);
         a.start_query("needle".into());
         feed(&mut a, &["src/main.c", "docs/b.md"]);
         let input = row(&render(&mut a, 120, 24), 23);
         assert!(
-            input.contains("Content › needle · filter: type words · the rows with all of them"),
+            input.contains(
+                "Content filter › type words · the rows with all of them · pattern: needle"
+            ),
             "{input:?}"
         );
         for c in "main".chars() {
@@ -1570,7 +1570,7 @@ mod tests {
         }
         let buf = render(&mut a, 120, 24);
         assert!(
-            row(&buf, 23).contains("Content › needle · filter: main"),
+            row(&buf, 23).contains("Content filter › main · pattern: needle"),
             "{:?}",
             row(&buf, 23)
         );
@@ -1668,7 +1668,7 @@ mod tests {
             ),
             (
                 Tab::Git,
-                "Enter show commit · ^S options · ^F find · ^Alt-F search in versions · ^C copy hash · Esc quit",
+                "Enter show commit · ^S options · ^F find · ^Shift-Alt-F search in versions · ^C copy hash · Esc quit",
             ),
         ];
         for (tab, want) in cases {
@@ -2191,10 +2191,10 @@ mod tests {
         );
     }
 
-    /// Git searching every version (Ctrl-Alt-F) for `query`, with a row found.
+    /// Git searching every version (Ctrl-Shift-Alt-F) for `query`, with a row found.
     fn versions_found(query: &str) -> (App, Instant) {
         let (mut a, now) = app_with_preview(Tab::Git);
-        a.handle_key(crate::app::tests::ctrl_alt('f'), now);
+        a.handle_key(crate::app::tests::ctrl_shift_alt('f'), now);
         for c in query.chars() {
             a.handle_key(key(KeyCode::Char(c)), now);
         }
@@ -2323,7 +2323,7 @@ mod tests {
     fn git_names_ctrl_alt_f_for_versions() {
         let (mut a, _) = app(Tab::Git);
         let top = row(&render(&mut a, 200, 24), 0);
-        assert!(top.contains("^Alt-F search in versions"), "{top:?}");
+        assert!(top.contains("^Shift-Alt-F search in versions"), "{top:?}");
     }
 
     #[test]
@@ -2563,7 +2563,10 @@ mod tests {
         );
         a.handle_key(key(KeyCode::Esc), now);
         let input = row(&render(&mut a, 120, 30), 29);
-        assert!(input.contains("needle · filter: words"), "back: {input:?}");
+        assert!(
+            input.contains("Content filter › words · pattern: needle"),
+            "back: {input:?}"
+        );
     }
 
     #[test]
@@ -2620,6 +2623,43 @@ mod tests {
             a.handle_key(ctrl('s'), now);
             render(&mut a, w, h);
         }
+    }
+
+    #[test]
+    fn the_result_filter_says_so_and_its_cursor_follows_its_words() {
+        // Bilal: with no pattern, Ctrl-Alt-F left the title "Content" and the cursor inside the hint
+        let (mut a, now) = app(Tab::Content);
+        a.handle_key(crate::app::tests::ctrl_alt('f'), now);
+        let mut t = Terminal::new(TestBackend::new(120, 24)).unwrap();
+        t.draw(|f| draw(f, &mut a)).unwrap();
+        let input = row(t.backend().buffer(), 23);
+        assert!(input.contains("Content filter › type words"), "{input:?}");
+        assert!(
+            !input.contains("type a pattern"),
+            "no pattern's hint: {input:?}"
+        );
+        let pos = t.get_cursor_position().unwrap();
+        let before: String = input.chars().take(pos.x as usize).collect();
+        assert!(
+            before.trim_end().ends_with("Content filter ›"),
+            "{before:?}"
+        );
+        a.query = "needle".into();
+        for c in "src".chars() {
+            a.handle_key(key(KeyCode::Char(c)), now);
+        }
+        t.draw(|f| draw(f, &mut a)).unwrap();
+        let input = row(t.backend().buffer(), 23);
+        assert!(
+            input.contains("Content filter › src · pattern: needle"),
+            "{input:?}"
+        );
+        let pos = t.get_cursor_position().unwrap();
+        let before: String = input.chars().take(pos.x as usize).collect();
+        assert!(
+            before.ends_with("› src"),
+            "the cursor after the words: {before:?}"
+        );
     }
 
     #[test]

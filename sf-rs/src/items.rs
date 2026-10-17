@@ -38,7 +38,7 @@ enum Look {
         text: Box<str>,
         cut: bool,
     },
-    /// A line of a file in a version of the repository (Git, Ctrl-Alt-F): the key is `REV:PATH`, drawn
+    /// A line of a file in a version of the repository (Git, Ctrl-Shift-Alt-F): the key is `REV:PATH`, drawn
     /// as the short version, the path, the line number and `text` (printable; matches are marked when
     /// drawn).
     Version { text: Box<str>, cut: bool },

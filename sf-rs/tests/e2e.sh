@@ -78,6 +78,9 @@ tm kill-server 2>/dev/null
 tm new-session -d -s e2e -x 160 -y 40 "env -i HOME=$HOME PATH=$STUBS:/usr/local/bin:/usr/bin:/bin TERM=xterm-256color \
     COLORTERM=truecolor LANG=C.UTF-8 XDG_CONFIG_HOME=$XDG LESS=-R WAYLAND_DISPLAY=wayland-e2e \
     TMUX=\$TMUX TMUX_PANE=\$TMUX_PANE bash --norc --noprofile"
+# as Bilal's tmux: modified keys apart for the programs that ask (sf: Ctrl-Shift-Alt-F is not Ctrl-Alt-F)
+tm set -s extended-keys on
+tm set -s extended-keys-format csi-u
 keys "PS1='READY> '; cd '$T'" Enter
 wait_pane '^READY>' || { echo "e2e: shell did not start" >&2; exit 2; }
 tm rename-window -t e2e shell
@@ -206,7 +209,7 @@ clear_query; type_ 'src needle'
 expect 'lines: a word in the path counts'  'Content › src needle .* 3/3'
 expect 'lines: src/main.c kept'            'src/main\.c:1:needle in main'
 keys C-M-f; type_ 'main'
-expect 'lines: Ctrl-Alt-F filters the rows' 'filter: main .* 1/3'
+expect 'lines: Ctrl-Alt-F filters the rows' 'Content filter › main · pattern: src needle .* 1/3'
 keys Escape
 clear_query; type_ 'needle'
 expect 'lines: back to needle'             'Content › needle .* 5/5'
@@ -240,7 +243,7 @@ expect 'deep: each match in an archive'    'docs/arch\.zip\{inzip\.txt\}:1:needl
 keys C-s Space Escape
 expect 'deep: files again'                 'Deep › needle .* 7/7'
 keys C-M-f; type_ 'blob'
-expect 'deep: Ctrl-Alt-F filters the rows' 'Deep › needle · filter: blob .* 1/7'
+expect 'deep: Ctrl-Alt-F filters the rows' 'Deep filter › blob · pattern: needle .* 1/7'
 keys Escape
 expect 'deep: Esc back to the pattern'     'Deep › needle +ignored +7/7'
 
@@ -339,9 +342,9 @@ shot doctor
 
 # the command line: a start query, engine options after --, the list printed instead of the window
 keys "clear; '$SF' content needle" Enter
-expect 'start: Content with the pattern'   'Content › needle · filter: .* 5/5'
+expect 'start: Content with the pattern'   'Content filter › type words.* · pattern: needle .* 5/5'
 type_ 'src'
-expect 'start: typing filters the rows'    'Content › needle · filter: src .* 3/5'
+expect 'start: typing filters the rows'    'Content filter › src · pattern: needle .* 3/5'
 keys Escape
 expect 'start: Esc back to the pattern'    'Content › needle +ignored +5/5'
 keys Escape
@@ -433,7 +436,9 @@ find_saved=$(awk '/^\[/ { s = ($0 == "[find]") } s' "$XDG/sf/config.toml" 2>/dev
 keys Escape
 expect 'git: Esc back to the list'         'Git › '
 keys C-M-f
-expect 'versions: Ctrl-Alt-F, every version' 'Search in versions › type a pattern'
+expect_not 'versions: Ctrl-Alt-F is not it'  'Search in versions'
+keys C-M-S-f
+expect 'versions: Ctrl-Shift-Alt-F, every version' 'Search in versions › type a pattern'
 expect 'versions: nothing typed, every file'"'"'s history' 'Search in versions › .* 12/12'
 type_ 'needle'
 expect 'versions: both commits, five files each' 'Search in versions › needle .* 10/10'

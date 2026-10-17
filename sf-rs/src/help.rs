@@ -73,11 +73,15 @@ const KEYS: &[(&str, &str)] = &[
     ),
     (
         "Ctrl-Alt-F",
-        "Content, Deep: keep the pattern, typing filters the rows · Git: Search in versions",
+        "Content, Deep: keep the pattern, typing filters the rows",
     ),
     (
         "Ctrl-P",
         "Content, Deep: the files to search in, chosen from those listed",
+    ),
+    (
+        "Ctrl-Shift-Alt-F",
+        "Git: Search in versions (tmux needs extended-keys on, see README)",
     ),
     ("Ctrl-L", "hide or show the preview"),
     ("Ctrl-R", "run the list again"),
@@ -132,7 +136,7 @@ const OPTIONS: &[(&str, &str)] = &[
     ),
     (
         "Binary files",
-        "Git versions (Ctrl-Alt-F): binaries searched as text",
+        "Git versions (Ctrl-Shift-Alt-F): binaries searched as text",
     ),
     (
         "All branches",

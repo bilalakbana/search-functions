@@ -34,7 +34,10 @@ use std::time::{Duration, Instant};
 
 use anyhow::Context;
 use ratatui::DefaultTerminal;
-use ratatui::crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event};
+use ratatui::crossterm::event::{
+    self, DisableMouseCapture, EnableMouseCapture, Event, KeyboardEnhancementFlags,
+    PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
+};
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{EnterAlternateScreen, enable_raw_mode};
 
@@ -75,7 +78,7 @@ of its own); the words are read as its options say (all on a line by default), E
 log and diff [--short] FILE show the file's history with its changes, its log, its changes against HEAD
 (whole or short), as Ctrl-U, Alt-U, Ctrl-G and Alt-G do (in tmux in windows of their own); Esc quits.
 
-sf grep-versions is what the Git tab's Ctrl-Alt-F runs: git grep over every version (or those given),
+sf grep-versions is what the Git tab's Ctrl-Shift-Alt-F runs: git grep over every version (or those given),
 documents and archives too with --documents.
 
 The other forms do one action as the window does, on Linux and on WSL alike: open PATH with its default
@@ -153,7 +156,7 @@ fn grep_versions(query: &versions::Query) -> ExitCode {
     ExitCode::from(status)
 }
 
-/// The versions to choose from in the Git tab's search (Ctrl-Alt-F): `git log` in the root.
+/// The versions to choose from in the Git tab's search (Ctrl-Shift-Alt-F): `git log` in the root.
 fn load_versions(app: &App) -> Result<Vec<versions::VersionRow>, String> {
     let git = app.engines.git.as_ref().ok_or("git is not installed")?;
     let out = Command::new(git)
@@ -336,12 +339,16 @@ fn run(tab: Tab, query: String, extra: Vec<OsString>, start: Start) -> anyhow::R
     };
 
     let mut terminal = ratatui::try_init().context("starting the terminal")?;
+    let keys = KeyReports::choose(std::env::var_os("TMUX").is_some(), || {
+        ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false)
+    });
     // ratatui's hook leaves raw mode and the alternate screen; this one also ends the mouse capture
-    // and gives the tmux window its name back.
+    // and the modified keys, and gives the tmux window its name back.
     let previous = std::panic::take_hook();
     let restore_window = window.clone();
     std::panic::set_hook(Box::new(move |info| {
         let _ = execute!(stdout(), DisableMouseCapture);
+        keys.disable();
         if let Some(w) = &restore_window {
             w.restore();
         }
@@ -349,8 +356,10 @@ fn run(tab: Tab, query: String, extra: Vec<OsString>, start: Start) -> anyhow::R
     }));
     let result = execute!(stdout(), EnableMouseCapture)
         .context("enabling the mouse")
-        .and_then(|()| event_loop(&mut terminal, app, &env, config_path.as_deref()));
+        .and_then(|()| keys.enable().context("asking for modified keys"))
+        .and_then(|()| event_loop(&mut terminal, keys, app, &env, config_path.as_deref()));
     let _ = execute!(stdout(), DisableMouseCapture);
+    keys.disable();
     ratatui::restore();
     if let Some(w) = &window {
         w.restore();
@@ -360,6 +369,7 @@ fn run(tab: Tab, query: String, extra: Vec<OsString>, start: Start) -> anyhow::R
 
 fn event_loop(
     terminal: &mut DefaultTerminal,
+    keys: KeyReports,
     mut app: App,
     env: &Env,
     config_path: Option<&Path>,
@@ -416,7 +426,7 @@ fn event_loop(
                         Outcome::Done(None) => {}
                         Outcome::Failed(e) => app.set_status(&e, true, now),
                         Outcome::Foreground(cmds) => {
-                            if let Err(e) = foreground(terminal, &cmds, &app.root) {
+                            if let Err(e) = foreground(terminal, keys, &cmds, &app.root) {
                                 app.set_status(&format!("{e:#}"), true, Instant::now());
                             }
                         }
@@ -484,14 +494,81 @@ fn event_loop(
     }
 }
 
+/// How sf asks the terminal to tell modified keys apart (Bilal: Ctrl-Shift-Alt-F is not Ctrl-Alt-F). In
+/// tmux xterm's modifyOtherKeys mode 1, which tmux passes on as csi-u (`ESC[102;8u`) when its
+/// `extended-keys` is on and its `extended-keys-format` csi-u; elsewhere the kitty protocol, where the
+/// terminal has it; else nothing, and both keys reach sf as Ctrl-Alt-F.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum KeyReports {
+    Off,
+    ModifyOtherKeys,
+    Kitty,
+}
+
+const MODIFY_OTHER_KEYS_ON: &str = "\x1b[>4;1m";
+const MODIFY_OTHER_KEYS_OFF: &str = "\x1b[>4;0m";
+
+impl KeyReports {
+    /// tmux knows no kitty protocol: it is asked for modifyOtherKeys, and only another terminal is
+    /// asked (`kitty`) whether it has the kitty protocol.
+    fn choose(tmux: bool, kitty: impl FnOnce() -> bool) -> KeyReports {
+        if tmux {
+            KeyReports::ModifyOtherKeys
+        } else if kitty() {
+            KeyReports::Kitty
+        } else {
+            KeyReports::Off
+        }
+    }
+
+    fn enable(self) -> std::io::Result<()> {
+        use std::io::Write;
+        match self {
+            KeyReports::Off => Ok(()),
+            KeyReports::ModifyOtherKeys => {
+                let mut out = stdout();
+                out.write_all(MODIFY_OTHER_KEYS_ON.as_bytes())?;
+                out.flush()
+            }
+            KeyReports::Kitty => execute!(
+                stdout(),
+                PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+            ),
+        }
+    }
+
+    /// Back to the keys as the terminal sends them by default (a program it hands over, sf's end).
+    fn disable(self) {
+        use std::io::Write;
+        match self {
+            KeyReports::Off => {}
+            KeyReports::ModifyOtherKeys => {
+                let mut out = stdout();
+                let _ = out.write_all(MODIFY_OTHER_KEYS_OFF.as_bytes());
+                let _ = out.flush();
+            }
+            KeyReports::Kitty => {
+                let _ = execute!(stdout(), PopKeyboardEnhancementFlags);
+            }
+        }
+    }
+}
+
 /// Hands the terminal to a program (a pipeline) and takes it back when the program ends.
-fn foreground(terminal: &mut DefaultTerminal, cmds: &[Cmd], root: &Path) -> anyhow::Result<()> {
+fn foreground(
+    terminal: &mut DefaultTerminal,
+    keys: KeyReports,
+    cmds: &[Cmd],
+    root: &Path,
+) -> anyhow::Result<()> {
     execute!(stdout(), DisableMouseCapture).context("ending the mouse capture")?;
+    keys.disable();
     ratatui::try_restore().context("giving the terminal to the program")?;
     let result = run_pipeline(cmds, root);
     enable_raw_mode().context("taking the terminal back")?;
     execute!(stdout(), EnterAlternateScreen, EnableMouseCapture)
         .context("taking the terminal back")?;
+    keys.enable().context("asking for modified keys again")?;
     terminal.clear().context("redrawing")?;
     result
 }
@@ -601,5 +678,26 @@ impl TmuxWindow {
             .tmux(&["rename-window", "--", &self.name])
             .stdout(Stdio::null())
             .status();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn modified_keys_are_asked_for_as_the_terminal_can_tell_them() {
+        // tmux: xterm's modifyOtherKeys mode 1, which tmux reports as csi-u (extended-keys on)
+        let mut asked = false;
+        let in_tmux = KeyReports::choose(true, || {
+            asked = true;
+            true
+        });
+        assert_eq!(in_tmux, KeyReports::ModifyOtherKeys);
+        assert!(!asked, "tmux is not asked for the kitty protocol");
+        assert_eq!(KeyReports::choose(false, || true), KeyReports::Kitty);
+        assert_eq!(KeyReports::choose(false, || false), KeyReports::Off);
+        assert_eq!(MODIFY_OTHER_KEYS_ON, "\x1b[>4;1m");
+        assert_eq!(MODIFY_OTHER_KEYS_OFF, "\x1b[>4;0m");
     }
 }

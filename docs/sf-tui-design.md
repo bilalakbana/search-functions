@@ -611,3 +611,21 @@ the tag a version is in beside its hash):
   change (git grep over all of them, as chosen).
 - File types stand above Ctrl-P (Bilal: .cpp on, a few files chosen, then All types showed .cpp only, as the
   search looked in the chosen files): any change of the types ends that tab's choice and searches again.
+
+After v0.12.1 (2026-10-17, Bilal's two reports; his choice: sf asks for modified keys and Claude adds the tmux
+lines):
+
+- Ctrl-Shift-Alt-F and Ctrl-Alt-F are two keys: Search in versions is Ctrl-Shift-Alt-F in Git only, Ctrl-Alt-F
+  does nothing in Git and stays Content's and Deep's filter (the Shift one does nothing there). sf asks the
+  terminal to tell them apart (`main::KeyReports`): in tmux xterm's modifyOtherKeys mode 1 (`ESC[>4;1m`, off
+  with `ESC[>4;0m` at the end, around a program it hands the terminal to, and in the panic hook), which tmux
+  passes on as csi-u when `extended-keys` is on and `extended-keys-format` csi-u (tried in a private tmux:
+  Ctrl-Alt-F `ESC[102;7u`, Ctrl-Shift-Alt-F `ESC[102;8u`, Ctrl-F stays `^F`); elsewhere the kitty protocol
+  when the terminal answers crossterm's query (Ghostty does). crossterm reads csi-u as the letter with SHIFT.
+  Bilal's `~/.dot-files/.tmux.conf` got `extended-keys on`, `extended-keys-format csi-u` and
+  `terminal-features ',xterm*:extkeys'` (tmux asks Ghostty for such keys; detach and attach again). Without
+  them both keys reach sf as Ctrl-Alt-F and Search in versions has no key. The e2e's tmux runs with the first
+  two, so every key of the e2e goes through mode 1.
+- Ctrl-Alt-F's input line is the filter's own: "Content filter › words", the pattern named after them
+  ("· pattern: needle"), the cursor after the words. With no pattern it showed the pattern's hint with the
+  cursor inside it and still read "Content".

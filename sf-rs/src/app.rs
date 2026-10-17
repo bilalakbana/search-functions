@@ -194,7 +194,7 @@ impl Help {
     }
 }
 
-/// Git, Ctrl-Alt-F: searching the files of every version of the repository, or of those chosen.
+/// Git, Ctrl-Shift-Alt-F: searching the files of every version of the repository, or of those chosen.
 #[derive(Debug, Default)]
 pub struct Versions {
     /// The pattern (the Git tab's filter is left alone).
@@ -257,7 +257,7 @@ pub struct App {
     pub tmux: bool,
     /// Ctrl-F: finding in the preview; typing goes there, not to the query.
     pub preview_find: Option<Find>,
-    /// Git, Ctrl-Alt-F: searching every version; typing is its pattern.
+    /// Git, Ctrl-Shift-Alt-F: searching every version; typing is its pattern.
     pub versions: Option<Versions>,
     /// Ctrl-P: each tab's files to search in (Content, Deep; Bilal: each its own).
     pub chosen: Vec<(Tab, Chosen)>,
@@ -644,6 +644,7 @@ impl App {
             }
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let shift = key.modifiers.contains(KeyModifiers::SHIFT);
         if self.preview_find.is_some()
             && let Some(effects) = self.find_key(key)
         {
@@ -658,7 +659,7 @@ impl App {
             let alt = key.modifiers.contains(KeyModifiers::ALT);
             match key.code {
                 KeyCode::Esc => return self.leave_versions(),
-                KeyCode::Char('f') if ctrl && alt => return self.leave_versions(),
+                KeyCode::Char('f' | 'F') if ctrl && alt && shift => return self.leave_versions(),
                 _ => {}
             }
         }
@@ -677,7 +678,9 @@ impl App {
         if self.result_filter.is_some() {
             match key.code {
                 KeyCode::Esc => return self.leave_result_filter(),
-                KeyCode::Char('f') if ctrl && key.modifiers.contains(KeyModifiers::ALT) => {
+                KeyCode::Char('f')
+                    if ctrl && key.modifiers.contains(KeyModifiers::ALT) && !shift =>
+                {
                     return self.leave_result_filter();
                 }
                 _ => {}
@@ -711,6 +714,9 @@ impl App {
             ),
             KeyCode::Char('h') if ctrl && alt => self.edit(String::clear, now),
             // Ctrl-Alt-F, not Alt-F: Bilal's KDE opens rofi on Alt+F
+            // Ctrl-Shift-Alt-F and Ctrl-Alt-F are two keys (Bilal); sf asks the terminal to tell them
+            // apart (main::KeyReports), else both reach it as Ctrl-Alt-F
+            KeyCode::Char('f' | 'F') if ctrl && alt && shift => self.open_versions(),
             KeyCode::Char('f') if ctrl && alt => self.enter_result_filter(),
             KeyCode::Char(c) if ctrl => match c {
                 'w' | 'h' => self.edit(delete_word, now),
@@ -1354,16 +1360,21 @@ impl App {
 
     /// Ctrl-Alt-F: the pattern stays, typing filters the rows found.
     fn enter_result_filter(&mut self) -> Vec<Effect> {
-        if self.tab == Tab::Git && self.scope.is_none() {
-            return self.enter_versions(); // Bilal: Ctrl-(Shift-)Alt-F in Git
-        }
         if self.tab.searches() && self.scope.is_none() {
             self.result_filter = Some(String::new());
         }
         Vec::new()
     }
 
-    /// Git, Ctrl-Alt-F: typing searches every version; the versions to choose from are read.
+    /// Ctrl-Shift-Alt-F: Search in versions, in Git only.
+    fn open_versions(&mut self) -> Vec<Effect> {
+        if self.tab == Tab::Git && self.scope.is_none() {
+            return self.enter_versions();
+        }
+        Vec::new()
+    }
+
+    /// Git, Ctrl-Shift-Alt-F: typing searches every version; the versions to choose from are read.
     fn enter_versions(&mut self) -> Vec<Effect> {
         self.versions = Some(Versions::default());
         self.preview = Text::default();
@@ -1371,7 +1382,7 @@ impl App {
         vec![Effect::LoadVersions, self.run_list()]
     }
 
-    /// Esc or Ctrl-Alt-F again: the commits, with the Git tab's filter, again.
+    /// Esc or Ctrl-Shift-Alt-F again: the commits, with the Git tab's filter, again.
     fn leave_versions(&mut self) -> Vec<Effect> {
         self.versions = None;
         self.preview = Text::default();
@@ -2314,6 +2325,14 @@ pub(crate) mod tests {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL | KeyModifiers::ALT)
     }
 
+    /// As crossterm reads `ESC[102;8u` (tmux's csi-u, the kitty protocol): the letter as it is, SHIFT.
+    pub fn ctrl_shift_alt(c: char) -> KeyEvent {
+        KeyEvent::new(
+            KeyCode::Char(c),
+            KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT,
+        )
+    }
+
     pub fn alt(code: KeyCode) -> KeyEvent {
         KeyEvent::new(code, KeyModifiers::ALT)
     }
@@ -2908,10 +2927,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn ctrl_alt_f_in_git_searches_every_version() {
+    fn ctrl_shift_alt_f_in_git_searches_every_version() {
         let (mut a, now) = app(Tab::Git);
         a.query = "feat".into();
-        let fx = a.handle_key(ctrl_alt('f'), now);
+        let fx = a.handle_key(ctrl_shift_alt('f'), now);
         assert!(
             fx.contains(&Effect::LoadVersions) && fx.contains(&Effect::RunList),
             "{fx:?}"
@@ -2931,12 +2950,12 @@ pub(crate) mod tests {
             a.versions.is_none() && a.query == "feat",
             "back to the commits"
         );
-        a.handle_key(ctrl_alt('f'), now);
+        a.handle_key(ctrl_shift_alt('f'), now);
         assert!(a.versions.is_some());
         assert_eq!(
-            a.handle_key(ctrl_alt('f'), now),
+            a.handle_key(ctrl_shift_alt('f'), now),
             [Effect::RunList],
-            "Ctrl-Alt-F again: back"
+            "Ctrl-Shift-Alt-F again: back"
         );
         assert!(a.versions.is_none());
     }
@@ -2944,7 +2963,7 @@ pub(crate) mod tests {
     #[test]
     fn the_versions_popup_chooses_options_and_versions() {
         let (mut a, now) = app(Tab::Git);
-        a.handle_key(ctrl_alt('f'), now);
+        a.handle_key(ctrl_shift_alt('f'), now);
         typed(&mut a, "x", now);
         a.on_versions(vec![version_row("aaa"), version_row("bbb")]);
         a.handle_key(ctrl('s'), now);
@@ -2988,7 +3007,7 @@ pub(crate) mod tests {
     #[test]
     fn enter_on_a_versions_row_shows_the_file_as_it_was() {
         let (mut a, now) = app(Tab::Git);
-        a.handle_key(ctrl_alt('f'), now);
+        a.handle_key(ctrl_shift_alt('f'), now);
         let rev = "0123456789abcdef0123456789abcdef01234567";
         a.on_list(ListMsg::Items(
             a.list_gen,
@@ -3050,7 +3069,7 @@ pub(crate) mod tests {
     #[test]
     fn the_file_as_it_was_opens_at_the_line_found() {
         let (mut a, now) = app(Tab::Git);
-        a.handle_key(ctrl_alt('f'), now);
+        a.handle_key(ctrl_shift_alt('f'), now);
         let rev = "0123456789abcdef0123456789abcdef01234567";
         a.on_list(ListMsg::Items(
             a.list_gen,
@@ -3073,6 +3092,37 @@ pub(crate) mod tests {
             39,
             "line 50 a third down (index 49 - 10)"
         );
+    }
+
+    #[test]
+    fn ctrl_alt_f_and_ctrl_shift_alt_f_are_two_keys() {
+        // Bilal: in Git both opened Search in versions
+        let (mut a, now) = app(Tab::Git);
+        assert_eq!(
+            a.handle_key(ctrl_alt('f'), now),
+            [],
+            "Git has no filter of rows found"
+        );
+        assert!(a.versions.is_none() && a.result_filter.is_none());
+        let shifted = KeyEvent::new(
+            KeyCode::Char('F'),
+            KeyModifiers::CONTROL | KeyModifiers::ALT | KeyModifiers::SHIFT,
+        );
+        assert!(
+            !a.handle_key(shifted, now).is_empty(),
+            "an upper-case F too"
+        );
+        assert!(a.versions.is_some());
+        let (mut c, now) = found(Tab::Content);
+        assert_eq!(c.handle_key(ctrl_shift_alt('f'), now), []);
+        assert!(
+            c.result_filter.is_none() && c.versions.is_none(),
+            "not Content's filter"
+        );
+        c.handle_key(ctrl_alt('f'), now);
+        assert!(c.result_filter.is_some());
+        c.handle_key(ctrl_shift_alt('f'), now);
+        assert!(c.result_filter.is_some(), "nor does it end the filter");
     }
 
     #[test]

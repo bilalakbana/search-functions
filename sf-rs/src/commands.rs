@@ -306,7 +306,7 @@ impl Search {
     }
 }
 
-/// Git, Ctrl-Alt-F: `sf grep-versions` (`exe`, sf itself) as the list, over the `chosen` versions
+/// Git, Ctrl-Shift-Alt-F: `sf grep-versions` (`exe`, sf itself) as the list, over the `chosen` versions
 /// (None: every one); a hint while nothing is typed or no version is chosen.
 pub fn versions_plan(
     exe: &Path,
@@ -741,7 +741,7 @@ pub fn preview_plan_with(
             None => PreviewPlan::Text("ls is not installed".into()),
         },
         Tab::Git => {
-            // Ctrl-Alt-F's rows: the file as it was in that version
+            // Ctrl-Shift-Alt-F's rows: the file as it was in that version
             if let Some((rev, path)) = item.version() {
                 let version = crate::views::ViewKind::Version {
                     root: root.to_path_buf(),

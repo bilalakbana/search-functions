@@ -157,7 +157,7 @@ pub fn perform(
     }
     let platform = &env.platform;
     if tab == Tab::Git {
-        // a versions row (Ctrl-Alt-F): its REV:PATH, as `git show` takes it
+        // a versions row (Ctrl-Shift-Alt-F): its REV:PATH, as `git show` takes it
         if let (ActionKind::Copy, Some((rev, path))) = (kind, item.version()) {
             return copied(platform.copy_text(format!("{rev}:{path}").as_bytes()));
         }
@@ -923,7 +923,7 @@ mod tests {
 
     #[test]
     fn a_versions_row_copies_its_version_and_path() {
-        // Git, Ctrl-Alt-F: the row's key is REV:PATH, which `git show` takes as it is
+        // Git, Ctrl-Shift-Alt-F: the row's key is REV:PATH, which `git show` takes as it is
         let f = fixture("act_versions_copy", false, false);
         let rev = "0123456789abcdef0123456789abcdef01234567";
         let raw = format!("{rev}:src/a.c\x009\x00x");

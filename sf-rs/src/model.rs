@@ -87,7 +87,7 @@ pub enum Opt {
     WholeWord,
     /// Ctrl-F: what is typed is a regular expression.
     Regex,
-    /// Searching versions (Git, Ctrl-Alt-F): binary files are searched as text too.
+    /// Searching versions (Git, Ctrl-Shift-Alt-F): binary files are searched as text too.
     Binary,
     /// A pattern with an upper-case letter counts the case (ugrep's smart case); off with Match case
     /// off: case aside.
@@ -195,7 +195,7 @@ pub struct InFileOpts {
     pub match_case: bool,
 }
 
-/// Git, Ctrl-Alt-F: searching the files of every version (or those chosen) of the repository.
+/// Git, Ctrl-Shift-Alt-F: searching the files of every version (or those chosen) of the repository.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VersionsOpts {
@@ -458,7 +458,7 @@ impl Options {
         ]
     }
 
-    /// The options of searching versions (Git, Ctrl-Alt-F), in popup order.
+    /// The options of searching versions (Git, Ctrl-Shift-Alt-F), in popup order.
     pub fn versions_list(&self) -> Vec<(Opt, bool)> {
         let v = &self.versions;
         vec![

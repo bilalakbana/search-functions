@@ -1,4 +1,4 @@
-//! Git, Ctrl-Alt-F: the files of every version of the repository (or of the versions chosen) searched.
+//! Git, Ctrl-Shift-Alt-F: the files of every version of the repository (or of the versions chosen) searched.
 //! `sf grep-versions` does it as the window's list: `git grep` over the versions, then with Documents
 //! every document's and archive's content (each blob once) through ugrep, read from git, never copied
 //! to disk. Every row goes out as `git grep -z` writes one: `REV:PATH\0LINE\0TEXT\n`.
