@@ -15,9 +15,8 @@ How Bilal starts the next session (paste):
 - `~/.SearchFunctions/sf-rs`: the Rust app `sf` (ratatui 0.30, ~7300 lines incl. tests). Installed as
   `~/.cargo/bin/sf` (`cargo install --path ~/.SearchFunctions/sf-rs`); nothing else in PATH is named sf. The fzf
   prototype `~/.SearchFunctions/sf` still exists (README suggests `alias sf-fzf=…`).
-- Git: `origin` (github.com/bilalakbana/search-functions, public) has everything up to `4289891` (Step 1, the sf
-  part, pushed by Bilal 2026-10-17). Step 1's second commit (fzf functions through `platform_action`, README,
-  docs) came after it: check `git status` / `git log` for whether it is committed and pushed.
+- Git: `origin` (github.com/bilalakbana/search-functions, public) has Steps 1 and 2 (`main` at `02464b8`, tag
+  `v0.1.0`, 2026-10-17); later commits: `git log origin/main..main`.
 - Bilal's config `~/.config/sf/config.toml` holds every option explicitly (sf writes all values); on 2026-10-17
   its hidden/ignored values were set to the new defaults (hidden false, ignored true) with his OK.
 - Tests, all green on 2026-10-17 after Step 1:
@@ -106,7 +105,7 @@ functions go through it.
 This PC: KDE Plasma on Wayland, `org.freedesktop.FileManager1` activatable (running), `wl-copy` installed, no
 xclip/xsel; Docker usable (Bilal is in group `docker`).
 
-### Step 2: one release package — built and tested locally 2026-10-17
+### Step 2: one release package — done and released as v0.1.0, 2026-10-17
 
 What was built and why is in `docs/sf-tui-design.md` → "Release package". In short: `packaging/bundle.toml`
 (pinned downloads), `packaging/build.py` (builds `sf-linux-x86_64.tar.gz` + `.sha256`, ugrep static in Alpine,
@@ -116,17 +115,19 @@ on all three), `.github/workflows/release.yml` (tag `vX.Y.Z` → test, build, pu
 sf's bundle lookup (`engines::bundle_dir`, `with_bundle`, `main::use_bundle`), self-relative sub-functions,
 `show_diffs` → delta without git-split-diffs, README "sf in one line". No weekly version bump (Bilal: not now).
 
-Still open from Step 2 (each needs Bilal's OK):
+Released 2026-10-17 (all with Bilal's OK): `main` pushed at `02464b8`; a dry run of the workflow (run
+38986892829) passed on GitHub (unit tests, build, package test on the three distributions); tag `v0.1.0` pushed,
+its run (38987352934) published https://github.com/bilalakbana/search-functions/releases/tag/v0.1.0
+(`sf-linux-x86_64.tar.gz` + `.sha256`). The README's one-line install was then tried as a new user in a clean
+Ubuntu 24.04 container: sha256 OK, `sf` in `PATH` after login, `sf doctor` with the bundled engines. The Docker
+images used for the tests were removed again.
 
-- Push `main` with the workflow, then a dry run: Actions → release → Run workflow (or
-  `gh workflow run release.yml --ref main` and `gh run watch`). It must pass on GitHub's runner before a tag.
-- Tag and release: `git tag v0.1.0 && git push origin v0.1.0` (the tag must equal `sf-rs/Cargo.toml`'s version);
-  the workflow publishes the release. Then try the one-line install from the README on WSL (it is also the
-  WSL checklist's easiest way to get sf there).
-- Docker images pulled on this PC for the package test: alpine:3.24.2 (= alpine:latest), ubuntu:22.04,
-  debian:12, ubuntu:24.04; removing them is his call.
+Still open:
+
+- Bilal on WSL: install with the README's line, then the Step 1 checklist above.
 - Later, if wanted: a weekly workflow that bumps `bundle.toml` (would need "Allow GitHub Actions to create pull
-  requests" in the repo settings), aarch64 packages.
+  requests" in the repo settings), aarch64 packages. A new release: raise `version` in `sf-rs/Cargo.toml`,
+  commit, push, then tag `vX.Y.Z` the same.
 
 ### Step 3: the terminal windows inside sf (later)
 
