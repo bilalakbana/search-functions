@@ -683,6 +683,61 @@ fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
 
+/// Columns of the Ctrl-S popup are this far apart.
+const COLUMN_GAP: u16 = 3;
+
+/// Where the Ctrl-S popup goes and how its lines are laid out.
+#[derive(Debug, PartialEq)]
+struct PopupGeometry {
+    /// The popup with its frame.
+    area: Rect,
+    /// Each column's width, as wide as its own lines; the first column leftmost.
+    widths: Vec<u16>,
+    /// Lines in a column, the last one may have fewer.
+    per_column: usize,
+    /// The first line shown: what no number of columns holds scrolls with the cursor.
+    first: usize,
+}
+
+/// The popup hangs under ⚙ Config at the right edge, between the tab bar and the input line. Lines
+/// (`widths`: one per line) that one column cannot hold go on in more columns, balanced, the popup
+/// growing to the left (the first column leftmost); as many columns as the screen's width holds, and
+/// what does not fit even so scrolls so that the cursor's line (`at`) shows. It never spills over.
+fn popup_geometry(screen: Rect, widths: &[u16], header_width: u16, at: usize) -> PopupGeometry {
+    // the frame (2), a blank line and the help line (2); the tab bar and the input line stay free
+    let room = (screen.height.saturating_sub(2 + 4) as usize).max(1);
+    let lines = widths.len();
+    let mut columns = lines.div_ceil(room).max(1);
+    loop {
+        let capacity = room * columns;
+        let first = if lines > capacity {
+            (at + 1).saturating_sub(capacity)
+        } else {
+            0
+        };
+        let shown = &widths[first..lines.min(first + capacity)];
+        let per_column = shown.len().div_ceil(columns).max(1);
+        let column_widths: Vec<u16> = shown
+            .chunks(per_column)
+            .map(|c| c.iter().copied().max().unwrap_or(0))
+            .collect();
+        let content = column_widths.iter().sum::<u16>()
+            + COLUMN_GAP * column_widths.len().saturating_sub(1) as u16;
+        let w = content.max(header_width) + 4;
+        if w <= screen.width || columns == 1 {
+            let w = w.min(screen.width);
+            let h = (per_column as u16 + 4).min(screen.height.saturating_sub(2));
+            return PopupGeometry {
+                area: Rect::new(screen.right() - w, screen.y + 1, w, h),
+                widths: column_widths,
+                per_column,
+                first,
+            };
+        }
+        columns -= 1; // too wide: fewer columns, the rest scrolls
+    }
+}
+
 fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLayout) {
     let rows = app.popup_rows();
     let check = |on: bool| {
@@ -740,21 +795,17 @@ fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLa
         Some(_) => " In file options ".to_string(),
         None => format!(" {} options ", app.tab.title()),
     };
-    let content_w = lines
+    let at = lines
         .iter()
-        .map(|(_, l)| l.width())
-        .chain([help.chars().count(), title.chars().count()])
-        .max()
+        .position(|(i, _)| *i == Some(cursor))
         .unwrap_or(0);
-    let area = frame.area();
-    let w = (content_w as u16 + 4).min(area.width);
-    let h = (lines.len() as u16 + 4).min(area.height);
-    let popup = Rect::new(
-        area.x + (area.width - w) / 2,
-        area.y + (area.height - h) / 2,
-        w,
-        h,
-    );
+    let widths: Vec<u16> = lines.iter().map(|(_, l)| l.width() as u16).collect();
+    let header_w = [help.chars().count(), title.chars().count()]
+        .into_iter()
+        .max()
+        .unwrap_or(0) as u16;
+    let g = popup_geometry(frame.area(), &widths, header_w, at);
+    let popup = g.area;
     frame.render_widget(Clear, popup);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
@@ -765,27 +816,29 @@ fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLa
         ));
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
-    // a long list of types scrolls so that the cursor's row stays in view
-    let room = inner.height.saturating_sub(2) as usize;
-    let at = lines
-        .iter()
-        .position(|(i, _)| *i == Some(cursor))
-        .unwrap_or(0);
-    let first = (at + 1).saturating_sub(room.max(1));
-    for (n, (index, line)) in lines.into_iter().skip(first).take(room).enumerate() {
-        let y = inner.y + n as u16;
-        let rect = Rect::new(inner.x, y, inner.width, 1);
+    // column after column, each from the top; the first column leftmost
+    let shown = lines
+        .into_iter()
+        .skip(g.first)
+        .take(g.widths.len() * g.per_column);
+    for (n, (index, line)) in shown.enumerate() {
+        let (column, row) = (n / g.per_column, n % g.per_column);
+        let left: u16 = g.widths[..column].iter().map(|w| w + COLUMN_GAP).sum();
+        let (x, y) = (inner.x + 1 + left, inner.y + row as u16);
+        let width = g.widths[column];
+        let cell = Rect::new(x, y, width, 1).intersection(inner);
+        if cell.is_empty() {
+            continue;
+        }
+        let band = Rect::new(x - 1, y, width + 2, 1).intersection(inner);
         if index == Some(cursor) {
             frame
                 .buffer_mut()
-                .set_style(rect, Style::new().bg(theme::SURFACE));
+                .set_style(band, Style::new().bg(theme::SURFACE));
         }
-        frame.render_widget(
-            Paragraph::new(line),
-            Rect::new(inner.x + 1, y, inner.width.saturating_sub(1), 1),
-        );
+        frame.render_widget(Paragraph::new(line), cell);
         if let Some(i) = index {
-            layout.popup_rows.push((i, rect));
+            layout.popup_rows.push((i, band));
         }
     }
     if inner.height > 0 {
@@ -933,6 +986,147 @@ mod tests {
         a.handle_key(key(KeyCode::Char(' ')), now);
         let input = row(&render(&mut a, 100, 24), 23);
         assert!(input.contains("2 types off"), "{input:?}");
+    }
+
+    #[test]
+    fn the_popup_hangs_under_config_at_the_right_edge() {
+        let g = popup_geometry(Rect::new(0, 0, 120, 30), &[40; 5], 20, 0);
+        assert_eq!(
+            (g.area.right(), g.area.y),
+            (120, 1),
+            "under the tab bar, at the right edge"
+        );
+        assert_eq!(
+            (g.widths.as_slice(), g.per_column, g.first),
+            (&[40][..], 5, 0)
+        );
+        assert_eq!(
+            g.area.height,
+            5 + 4,
+            "the rows, the frame, a blank and the help line"
+        );
+    }
+
+    #[test]
+    fn a_list_too_long_for_one_column_grows_to_the_left() {
+        // 30 high: 24 rows fit a column between the tab bar, the input line and the frame
+        let g = popup_geometry(Rect::new(0, 0, 120, 30), &[30; 40], 20, 0);
+        assert_eq!(
+            (g.widths.as_slice(), g.per_column, g.first),
+            (&[30, 30][..], 20, 0)
+        );
+        assert_eq!(g.area.right(), 120, "still at the right edge");
+        assert_eq!(g.area.width, 2 * 30 + COLUMN_GAP + 4);
+        assert!(g.area.bottom() <= 29, "the input line stays free");
+    }
+
+    #[test]
+    fn each_column_is_as_wide_as_its_own_lines() {
+        // the options' long lines in the first column, short types after them
+        let mut widths = vec![50; 5];
+        widths.extend([12; 35]);
+        let g = popup_geometry(Rect::new(0, 0, 120, 30), &widths, 20, 0);
+        assert_eq!(g.widths, [50, 12]);
+        assert_eq!(g.area.width, 50 + 12 + COLUMN_GAP + 4);
+    }
+
+    #[test]
+    fn what_no_number_of_columns_holds_scrolls_and_nothing_spills() {
+        // 80 x 24: 18 rows a column, two 30-wide columns fit, three do not
+        let screen = Rect::new(0, 0, 80, 24);
+        let g = popup_geometry(screen, &[30; 60], 20, 59);
+        assert_eq!((g.widths.len(), g.per_column), (2, 18));
+        assert_eq!(g.first, 60 - 36, "the shown lines end at the cursor's");
+        assert!(g.area.x >= screen.x && g.area.right() <= screen.right());
+        assert!(g.area.bottom() <= 23);
+        let g = popup_geometry(Rect::new(0, 0, 30, 10), &[50; 8], 20, 0);
+        assert!(
+            g.area.width <= 30 && g.area.bottom() <= 9,
+            "too small a screen: cut, not spilled"
+        );
+    }
+
+    #[test]
+    fn many_types_take_columns_under_config() {
+        let (mut a, now) = app(Tab::Files);
+        let names: Vec<String> = (0..40).map(|i| format!("f.t{i:02}")).collect();
+        feed(
+            &mut a,
+            &names.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
+        a.handle_key(ctrl('s'), now);
+        let buf = render(&mut a, 160, 30);
+        let p = a.layout.popup;
+        assert_eq!((p.right(), p.y), (160, 1), "under ⚙ Config");
+        let (hx, hy) = find(&buf, "Hidden files").unwrap();
+        let (tx, _) = find(&buf, "[x] .t39").unwrap();
+        assert_eq!(hy, 2, "the first row right under the frame");
+        assert!(
+            tx > hx,
+            "the list goes on in a column to the right of the first"
+        );
+        assert!(row(&buf, 29).contains("Files ›"), "the input line stays");
+        assert_eq!(
+            a.layout.popup_rows.len(),
+            a.popup_rows().len(),
+            "every row on screen"
+        );
+    }
+
+    #[test]
+    fn a_click_in_the_second_column_turns_that_type_off() {
+        use ratatui::crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+        let (mut a, now) = app(Tab::Files);
+        let names: Vec<String> = (0..40).map(|i| format!("f.t{i:02}")).collect();
+        feed(
+            &mut a,
+            &names.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
+        a.handle_key(ctrl('s'), now);
+        render(&mut a, 160, 30);
+        let first_x = a.layout.popup_rows[0].1.x;
+        let &(i, r) = a
+            .layout
+            .popup_rows
+            .iter()
+            .find(|(_, r)| r.x > first_x)
+            .expect("a second column");
+        let click = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: r.x + 2,
+            row: r.y,
+            modifiers: KeyModifiers::NONE,
+        };
+        a.handle_mouse(click, now);
+        assert_eq!(a.popup, Some(i));
+        assert!(
+            matches!(a.popup_rows()[i], PopupRow::Type(_, _, false)),
+            "{:?}",
+            a.popup_rows()[i]
+        );
+        assert_eq!(a.filter.len(), 39);
+    }
+
+    #[test]
+    fn left_and_right_go_across_the_columns() {
+        let (mut a, now) = app(Tab::Files);
+        let names: Vec<String> = (0..40).map(|i| format!("f.t{i:02}")).collect();
+        feed(
+            &mut a,
+            &names.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
+        a.handle_key(ctrl('s'), now);
+        render(&mut a, 160, 30);
+        let at = |a: &App, i: usize| a.layout.popup_rows.iter().find(|(j, _)| *j == i).unwrap().1;
+        let from = at(&a, 0);
+        a.handle_key(key(KeyCode::Right), now);
+        let to = at(&a, a.popup.unwrap());
+        assert_eq!(to.y, from.y, "the same line");
+        assert!(to.x > from.x, "the next column");
+        a.handle_key(key(KeyCode::Left), now);
+        assert_eq!(a.popup, Some(0));
+        a.handle_key(key(KeyCode::Left), now);
+        assert_eq!(a.popup, Some(0), "no column further left");
     }
 
     #[test]

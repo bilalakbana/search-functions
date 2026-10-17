@@ -137,7 +137,7 @@ These shortcuts apply when using the interactive search tools (`fzf`, `ugrep-fzf
 | `Ctrl-u` / `Ctrl-g` / `Alt-g` / `Alt-u` | git diff / diff (delta) / short diff / log of the file (`sf`: history with changes / changes against HEAD / short / log, shown inside its window; `/` searches, `Esc` back; `Enter` in Git shows a commit so) |
 | `Alt-j` / `Ctrl-j` | Folder list / file list in a new tmux window |
 | `Ctrl-l` | Toggle the preview                       |
-| `Ctrl-s` | `sf`: the tab's options (⚙ Config); in Files, Content and Deep also the file types of the list, all on: `Space` turns one off or on, `a` all of them (each tab its own, not saved) |
+| `Ctrl-s` | `sf`: the tab's options (⚙ Config); in Files, Content and Deep also the file types of the list, all on: `Space` turns one off or on, `a` all of them (each tab its own, not saved); it opens under ⚙ Config at the right edge and takes more columns, growing to the left, when the list is long (`←` `→` go across) |
 | `Ctrl-f` | `sf`, Content and Deep: keep the pattern, typing filters the files found by their names (as `advancedsearch PATTERN`); `Esc` back to the pattern |
 
 > These are customizable if you tweak your FZF or terminal bindings.

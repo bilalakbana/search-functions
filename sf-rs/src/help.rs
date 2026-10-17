@@ -224,7 +224,7 @@ pub fn text() -> Text<'static> {
     table(
         &mut lines,
         "Options",
-        "Ctrl-S; Space or a click",
+        "Ctrl-S; Space or a click, ←→ across its columns",
         OPTIONS,
         24,
         theme::SUB,

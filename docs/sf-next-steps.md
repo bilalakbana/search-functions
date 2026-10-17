@@ -36,6 +36,7 @@ How Bilal starts the next session (paste):
   - Ctrl-F filter and the key hints: `cargo test` 323; `tests/e2e.sh` 136/136.
   - File types in Ctrl-S (v0.6.0): `cargo test` 332; `tests/e2e.sh` 140/140.
   - Ctrl-T window in tmux, words, Match case, Help (v0.7.0): `cargo test` 355; `tests/e2e.sh` 149/149.
+  - Ctrl-S popup under ⚙ Config in columns: `cargo test` 362; `tests/e2e.sh` 149/149.
   - Step 2 (same day): `cargo test` 243; `tests/e2e.sh` 86/86 (with a release package's layout);
     `tests/sub_functions.sh NEW_EMPTY_DIR` 7/7 (`-L sfrs-sub-functions`); `python3 -I packaging/test_build.py` 7;
     `packaging/test_package.sh PACKAGE NEW_EMPTY_DIR` all passed on Ubuntu 22.04, Debian 12, Ubuntu 24.04.

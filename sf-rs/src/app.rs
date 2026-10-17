@@ -1073,6 +1073,20 @@ impl App {
             }
             KeyCode::Up => self.popup = Some((cursor + n - 1) % n),
             KeyCode::Down => self.popup = Some((cursor + 1) % n),
+            // across the columns: the row on the same line of the next or previous one
+            KeyCode::Left | KeyCode::Right => {
+                let rows = &self.layout.popup_rows;
+                if let Some(&(_, here)) = rows.iter().find(|(i, _)| *i == cursor) {
+                    let right = key.code == KeyCode::Right;
+                    let next = rows
+                        .iter()
+                        .filter(|(_, r)| r.y == here.y && (r.x > here.x) == right && r.x != here.x)
+                        .min_by_key(|(_, r)| r.x.abs_diff(here.x));
+                    if let Some(&(i, _)) = next {
+                        self.popup = Some(i);
+                    }
+                }
+            }
             KeyCode::Char(' ') | KeyCode::Enter => return self.toggle_row(cursor, now),
             KeyCode::Char('a') => {
                 if let Some(i) = self

@@ -417,3 +417,15 @@ Ctrl-T in tmux, words, Match case and Help (2026-10-17, Bilal's four requests wi
   not the tabs' query), Enter the next, Esc clears then quits; ↑↓ PgUp PgDn and the wheel scroll. A test
   fails when an option is missing from it. `sf help` starts there.
 
+The Ctrl-S popup's place (2026-10-17, Bilal: "under Config, at the right, never spilling; a column more on the
+left when it is long"; he chose the reading order left to right):
+
+- `ui::popup_geometry` (pure, unit-tested): the popup hangs under ⚙ Config at the right edge, between the
+  tab bar and the input line. Lines one column cannot hold go on in more columns, balanced, the popup growing
+  to the left with the first column leftmost; each column as wide as its own lines (the options' hints make
+  the first wide, the types' columns stay narrow, so more of them fit); as many columns as the width holds,
+  and what does not fit even so scrolls with the cursor. It never spills over the screen. ←/→ go to the row
+  on the same line of the next or previous column; a click works in every column.
+- Tried on real folders: /usr/lib/python3/dist-packages (55 types, two columns), /usr/share/doc (731 types,
+  five columns at 200 × 50, the rest scrolling), 80 × 24 in Content (one column, at the right edge).
+
