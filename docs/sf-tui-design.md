@@ -609,3 +609,5 @@ the tag a version is in beside its hash):
   chosen into account: with only .cpp left on in Ctrl-S it listed every file).
 - Seen on Bilal's ugrep clone: `hello` gives over 1.25 M rows, as each version repeats the lines it did not
   change (git grep over all of them, as chosen).
+- File types stand above Ctrl-P (Bilal: .cpp on, a few files chosen, then All types showed .cpp only, as the
+  search looked in the chosen files): any change of the types ends that tab's choice and searches again.

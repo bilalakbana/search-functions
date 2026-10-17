@@ -51,6 +51,7 @@ How Bilal starts the next session (paste):
   - Git file keys silent, Smart case, Ctrl-P files (v0.11.0): `cargo test` 453; `tests/e2e.sh` 191/191.
   - v0.12.0 (Search in versions named, file history while empty, version names, popup wheel, scroll
     bars dragged, Ctrl-P lists what shows): `cargo test` 462; `tests/e2e.sh` 192/192.
+  - File types above Ctrl-P: `cargo test` 463; `tests/e2e.sh` 194/194.
   - Step 2 (same day): `cargo test` 243; `tests/e2e.sh` 86/86 (with a release package's layout);
     `tests/sub_functions.sh NEW_EMPTY_DIR` 7/7 (`-L sfrs-sub-functions`); `python3 -I packaging/test_build.py` 7;
     `packaging/test_package.sh PACKAGE NEW_EMPTY_DIR` all passed on Ubuntu 22.04, Debian 12, Ubuntu 24.04.

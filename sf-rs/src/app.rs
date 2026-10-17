@@ -1751,6 +1751,8 @@ impl App {
             None => return Vec::new(),
         }
         if self.tab.searches() {
+            // the types stand above the files chosen (Bilal): a change of them ends the choice
+            self.chosen.retain(|(t, _)| *t != tab);
             return vec![self.run_list()]; // ugrep leaves them out (`list_plan`)
         }
         self.filter.set_hidden_types(self.hidden_types());
@@ -2846,6 +2848,33 @@ pub(crate) mod tests {
         a.set_root(PathBuf::from("/elsewhere"));
         typed(&mut a, "x", now);
         assert_eq!(searched_in(&a), ["."], "a new root: every file again");
+    }
+
+    #[test]
+    fn file_types_stand_above_the_files_chosen() {
+        // Bilal: .cpp on in Ctrl-S, a few files chosen with Ctrl-P, then All types showed .cpp only
+        let (mut a, now) = found(Tab::Content);
+        a.handle_key(ctrl('p'), now);
+        a.popup = Some(2);
+        a.handle_key(key(KeyCode::Char(' ')), now);
+        a.handle_key(key(KeyCode::Esc), now);
+        assert_eq!(searched_in(&a), ["--", "src/a.c"]);
+        a.handle_key(ctrl('s'), now);
+        let all_types = a
+            .popup_rows()
+            .iter()
+            .position(|r| matches!(r, PopupRow::AllTypes(_)))
+            .unwrap();
+        a.popup = Some(all_types);
+        assert_eq!(
+            a.handle_key(key(KeyCode::Char(' ')), now),
+            [Effect::RunList]
+        );
+        assert!(
+            a.chosen_of(Tab::Content).is_none(),
+            "a change of types ends the choice"
+        );
+        assert_eq!(searched_in(&a), ["."], "every file again");
     }
 
     #[test]

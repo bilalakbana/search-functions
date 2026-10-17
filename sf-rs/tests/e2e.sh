@@ -181,6 +181,10 @@ keys C-p a Escape
 expect 'files: all files again'            'Content › ignored .* 1/1'
 clear_query; type_ 'needle'
 expect 'files: back to needle'             'Content › needle .* 5/5'
+keys C-p Down Space Escape
+expect 'files: one left out again'         '4 files chosen +4/5'
+keys C-s a a Escape
+expect 'files: types above the choice'     'Content › needle +ignored +5/5'
 keys C-s
 expect 'config: popup'                     'Content options'
 expect 'config: boxes'                     '\[ \] Matching lines'
