@@ -171,8 +171,47 @@ pub fn parse(kind: ParseKind, raw: &[u8], git_number: u32) -> Option<Item> {
             (!key.is_empty()).then(|| Item::path(key))
         }
         ParseKind::SearchLines => search_line(raw),
+        ParseKind::SearchMatches => search_line(&marked(raw)),
         ParseKind::Git => Some(git_line(raw, git_number)),
     }
+}
+
+/// ugrep's coloured Each match record as a Matching lines record: the match, `ESC[7m` up to the next
+/// `ESC[m`, between MATCH_START and MATCH_END; every other escape sequence dropped.
+fn marked(raw: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(raw.len());
+    let mut in_match = false;
+    let mut i = 0;
+    while i < raw.len() {
+        if raw[i] == 0x1b && raw.get(i + 1) == Some(&b'[') {
+            // ESC [ parameters m
+            let end = raw[i + 2..]
+                .iter()
+                .position(|b| !(b.is_ascii_digit() || *b == b';'))
+                .map(|n| i + 2 + n);
+            if let Some(end) = end.filter(|&e| raw[e] == b'm') {
+                match &raw[i + 2..end] {
+                    b"7" => {
+                        out.push(MATCH_START);
+                        in_match = true;
+                    }
+                    b"" | b"0" if in_match => {
+                        out.push(MATCH_END);
+                        in_match = false;
+                    }
+                    _ => {}
+                }
+                i = end + 1;
+                continue;
+            }
+        }
+        out.push(raw[i]);
+        i += 1;
+    }
+    if in_match {
+        out.push(MATCH_END);
+    }
+    out
 }
 
 /// A path as ugrep-fzf colours it: folders blue, slashes yellow, the name green.
@@ -366,6 +405,18 @@ mod tests {
 
     fn text_of(line: &Line) -> String {
         line.spans.iter().map(|s| s.content.as_ref()).collect()
+    }
+
+    #[test]
+    fn each_match_rows_read_ugreps_colours_as_marks() {
+        // `ugrep -o -B50 -A50 --color=always` with GREP_COLORS ms=7 and every other colour empty
+        let coloured =
+            b"f.txt\x1b[m\x001\x1b[m\x1f\x1b[maaaa \x1b[m\x1b[7mneedle\x1b[m bbbb needle\x1b[m...\x1b[m";
+        let plain = b"f.txt\x001\x1faaaa \x01needle\x02 bbbb needle...";
+        assert_eq!(
+            parse(ParseKind::SearchMatches, coloured, 0),
+            parse(ParseKind::SearchLines, plain, 0)
+        );
     }
 
     fn files(raw: &[u8]) -> Item {

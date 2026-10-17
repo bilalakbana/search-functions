@@ -401,6 +401,7 @@ fn short(opt: Opt) -> &'static str {
         Opt::Hidden => "hidden",
         Opt::Ignored => "ignored",
         Opt::MatchingLines => "matching lines",
+        Opt::EachMatch => "each match",
         Opt::Archives => "archives & documents",
         Opt::AllBranches => "all branches",
     }
@@ -414,6 +415,9 @@ fn placeholder(app: &App) -> &'static str {
         Tab::Files => "type to filter file names",
         Tab::Content if app.options.content.matching_lines => {
             "type a pattern · lists the lines that contain it"
+        }
+        Tab::Content if app.options.content.each_match => {
+            "type a pattern · lists every match with the text around it"
         }
         Tab::Content => "type a pattern · lists the files that contain it",
         Tab::Folders => "type to filter folders · Enter goes inside, .. goes up",
@@ -696,10 +700,11 @@ mod tests {
         let buf = render(&mut a, 80, 24);
         assert!(find(&buf, "Content options").is_some());
         assert!(find(&buf, "[ ] Matching lines").is_some());
+        assert!(find(&buf, "[ ] Each match").is_some());
         assert!(find(&buf, "[ ] Archives & documents").is_some());
         assert!(find(&buf, "[ ] Hidden files").is_some());
         assert!(find(&buf, "[x] Ignored files").is_some());
-        assert_eq!(a.layout.popup_rows.len(), 4);
+        assert_eq!(a.layout.popup_rows.len(), 5);
         assert_eq!(a.layout.popup_rows[0].0, Opt::MatchingLines);
         let (_, y) = find(&buf, "[ ] Matching lines").unwrap();
         assert_eq!(a.layout.popup_rows[0].1.y, y);
@@ -719,6 +724,18 @@ mod tests {
         let input = row(&buf, 23);
         assert!(input.contains("Content › n"), "{input:?}");
         assert!(!input.contains("type a pattern"));
+    }
+
+    #[test]
+    fn placeholder_says_each_match() {
+        let (mut a, _) = app(Tab::Content);
+        a.options.content.each_match = true;
+        let buf = render(&mut a, 120, 24);
+        let input = row(&buf, 23);
+        assert!(
+            input.contains("type a pattern · lists every match with the text around it"),
+            "{input:?}"
+        );
     }
 
     #[test]

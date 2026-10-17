@@ -50,6 +50,8 @@ pub enum Opt {
     Hidden,
     Ignored,
     MatchingLines,
+    /// Content: every match with the text around it (detailedsearch).
+    EachMatch,
     Archives,
     AllBranches,
 }
@@ -64,6 +66,7 @@ impl Opt {
             Opt::Ignored if folders => "Ignored folders",
             Opt::Ignored => "Ignored files",
             Opt::MatchingLines => "Matching lines",
+            Opt::EachMatch => "Each match",
             Opt::Archives => "Archives & documents",
             Opt::AllBranches => "All branches",
         }
@@ -75,6 +78,7 @@ impl Opt {
             Opt::Hidden => "names starting with a dot",
             Opt::Ignored => ".gitignore'd",
             Opt::MatchingLines => "list lines, not files",
+            Opt::EachMatch => "every match, the text around it",
             Opt::Archives => "zip, tar, 7z, PDF, Office…",
             Opt::AllBranches => "not only the current one",
         }
@@ -92,6 +96,8 @@ pub struct FilesOpts {
 #[serde(default)]
 pub struct ContentOpts {
     pub matching_lines: bool,
+    /// Each match with ~50 characters around it; never on together with `matching_lines`.
+    pub each_match: bool,
     pub archives: bool,
     pub hidden: bool,
     pub ignored: bool,
@@ -123,6 +129,7 @@ impl Default for ContentOpts {
     fn default() -> Self {
         ContentOpts {
             matching_lines: false,
+            each_match: false,
             archives: false,
             hidden: false,
             ignored: true,
@@ -162,7 +169,13 @@ impl Options {
     pub fn list(&self, tab: Tab) -> Vec<(Opt, bool)> {
         let order: &[Opt] = match tab {
             Tab::Files | Tab::Folders => &[Opt::Hidden, Opt::Ignored],
-            Tab::Content => &[Opt::MatchingLines, Opt::Archives, Opt::Hidden, Opt::Ignored],
+            Tab::Content => &[
+                Opt::MatchingLines,
+                Opt::EachMatch,
+                Opt::Archives,
+                Opt::Hidden,
+                Opt::Ignored,
+            ],
             Tab::Git => &[Opt::AllBranches],
         };
         order.iter().map(|&o| (o, self.get(tab, o))).collect()
@@ -173,10 +186,19 @@ impl Options {
         self.clone().slot(tab, opt).is_some_and(|v| *v)
     }
 
-    /// Toggling an option the tab does not have does nothing.
+    /// Toggling an option the tab does not have does nothing. Matching lines and Each match are two
+    /// ways to list the matches: turning one on turns the other off.
     pub fn toggle(&mut self, tab: Tab, opt: Opt) {
-        if let Some(v) = self.slot(tab, opt) {
-            *v = !*v;
+        let Some(v) = self.slot(tab, opt) else {
+            return;
+        };
+        *v = !*v;
+        if *v {
+            match opt {
+                Opt::MatchingLines => self.content.each_match = false,
+                Opt::EachMatch => self.content.matching_lines = false,
+                _ => {}
+            }
         }
     }
 
@@ -185,6 +207,7 @@ impl Options {
             (Tab::Files, Opt::Hidden) => Some(&mut self.files.hidden),
             (Tab::Files, Opt::Ignored) => Some(&mut self.files.ignored),
             (Tab::Content, Opt::MatchingLines) => Some(&mut self.content.matching_lines),
+            (Tab::Content, Opt::EachMatch) => Some(&mut self.content.each_match),
             (Tab::Content, Opt::Archives) => Some(&mut self.content.archives),
             (Tab::Content, Opt::Hidden) => Some(&mut self.content.hidden),
             (Tab::Content, Opt::Ignored) => Some(&mut self.content.ignored),
@@ -231,8 +254,31 @@ mod tests {
             .collect();
         assert_eq!(
             order,
-            [Opt::MatchingLines, Opt::Archives, Opt::Hidden, Opt::Ignored]
+            [
+                Opt::MatchingLines,
+                Opt::EachMatch,
+                Opt::Archives,
+                Opt::Hidden,
+                Opt::Ignored
+            ]
         );
+    }
+
+    #[test]
+    fn each_match_and_matching_lines_exclude_each_other() {
+        let mut o = Options::default();
+        o.toggle(Tab::Content, Opt::MatchingLines);
+        o.toggle(Tab::Content, Opt::EachMatch);
+        assert!(o.content.each_match && !o.content.matching_lines);
+        o.toggle(Tab::Content, Opt::MatchingLines);
+        assert!(o.content.matching_lines && !o.content.each_match);
+        o.toggle(Tab::Content, Opt::MatchingLines);
+        assert!(
+            !o.content.matching_lines && !o.content.each_match,
+            "off again: files"
+        );
+        let old: Options = toml::from_str("[content]\nmatching_lines = true\n").unwrap();
+        assert!(!old.content.each_match, "a config from before has it off");
     }
 
     #[test]

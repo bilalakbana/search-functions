@@ -52,6 +52,10 @@ const GIT_LOG_FORMAT: &str = "--format=format:%C(bold blue)%h%C(reset) %C(dim wh
      %C(white)%s%C(reset) %C(bold green)(%ar)%C(reset)%x1f%H";
 
 /// The header of a commit in the Git preview.
+/// Each match's colours: the match in reverse video (`ESC[7m`), which `items` reads as its marks; nothing
+/// else coloured, so the path, the line number and the text around it come out plain.
+pub const EACH_MATCH_COLORS: &str = "ms=7:mc=7:sl=:cx=:fn=:ln=:bn=:cn=:se=";
+
 pub const GIT_SHOW_FORMAT: &str = "--format=%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - \
      %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)%n";
 
@@ -91,8 +95,12 @@ impl Cmd {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ParseKind {
     Files,
-    SearchFiles { archives: bool },
+    SearchFiles {
+        archives: bool,
+    },
     SearchLines,
+    /// Each match with the text around it, as ugrep colours it (`EACH_MATCH_COLORS`).
+    SearchMatches,
     Folders,
     Git,
 }
@@ -174,10 +182,11 @@ pub fn list_plan_with(
         Tab::Content => {
             // While the pattern is empty every file is listed (as ugrep-fzf does), always as a plain file
             // list: every line of every file, or every PDF converted, would be far too much.
-            let (matching_lines, archives) = if query.is_empty() {
-                (false, false)
+            let (matching_lines, each_match, archives) = if query.is_empty() {
+                (false, false, false)
             } else {
-                (opts.content.matching_lines, opts.content.archives)
+                let c = &opts.content;
+                (c.matching_lines, c.each_match, c.archives)
             };
             let program = if archives {
                 let Some(p) = &e.ugrep_plus else {
@@ -193,33 +202,32 @@ pub fn list_plan_with(
             // -s: no messages about unreadable files; what stays on stderr (a broken pattern) is shown.
             // sf reads NUL after a path, 0x1f after a line number and every match between 0x01 and 0x02;
             // printed (`sf --print`), ugrep's own output goes out, coloured on a terminal.
-            let mode = match (matching_lines, archives) {
-                (false, false) => &[
-                    "-rlU",
-                    "--sort=name",
-                    "--smart-case",
-                    "--ignore-binary",
-                    "-s",
-                ][..],
-                (false, true) => &["-rzl", "--sort=name", "--smart-case", "-s"][..],
-                (true, false) => &[
-                    "-rnU",
-                    "--sort=name",
-                    "--smart-case",
-                    "--ignore-binary",
-                    "-s",
-                ][..],
-                (true, true) => &[
-                    "-rzn",
-                    "--sort=name",
-                    "--smart-case",
-                    "--ignore-binary",
-                    "-s",
-                ][..],
+            // Each match (detailedsearch): -o with 50 characters of the line on either side; --replace
+            // would drop them, so the match is found by its colour instead (EACH_MATCH_COLORS).
+            let first = match (matching_lines, each_match, archives) {
+                (_, true, false) => "-rnoU",
+                (_, true, true) => "-rzno",
+                (true, _, false) => "-rnU",
+                (true, _, true) => "-rzn",
+                (false, _, false) => "-rlU",
+                (false, _, true) => "-rzl",
             };
-            let mut cmd = Cmd::new(program).args(mode);
+            let mut cmd = Cmd::new(program).args([first, "--sort=name", "--smart-case"]);
+            if !archives || matching_lines || each_match {
+                cmd = cmd.arg("--ignore-binary");
+            }
+            cmd = cmd.arg("-s");
+            let around = ["-B50", "-A50"];
             if print {
                 cmd = cmd.arg("--color=auto");
+                if each_match {
+                    cmd = cmd.args(around);
+                }
+            } else if each_match {
+                cmd = cmd
+                    .args(["--null", "--separator=\x1f", "--color=always"])
+                    .args(around)
+                    .env("GREP_COLORS", EACH_MATCH_COLORS);
             } else {
                 cmd = cmd.arg("--null");
                 if matching_lines {
@@ -235,7 +243,9 @@ pub fn list_plan_with(
             if !ignored {
                 cmd = cmd.arg("--ignore-files");
             }
-            let kind = if matching_lines {
+            let kind = if each_match {
+                ParseKind::SearchMatches
+            } else if matching_lines {
                 ParseKind::SearchLines
             } else {
                 ParseKind::SearchFiles { archives }
@@ -277,6 +287,14 @@ pub enum PreviewPlan {
         text: Option<Cmd>,
         binary: Binary,
         header: Option<Header>,
+    },
+    /// Content's matches as numbered blocks: `lines` (ugrep's records) with lines around each from
+    /// a text file, `binary` (one match a line) for any other file.
+    Numbered {
+        path: PathBuf,
+        lines: Cmd,
+        binary: Cmd,
+        header: Header,
     },
     Text(String),
     Nothing,
@@ -378,7 +396,7 @@ pub fn preview_plan_with(
                     .arg("--")
                     .arg(&path)
             };
-            let header = Some(Header {
+            let header = Header {
                 file: crate::items::printable(&String::from_utf8_lossy(
                     item.key.as_encoded_bytes(),
                 )),
@@ -390,8 +408,8 @@ pub fn preview_plan_with(
                         text: count(g, &["-c", "-o", "-U", "--smart-case"]),
                         binary: count(g, &["-z", "-c", "-o", "-a", "--smart-case"]),
                     }),
-            });
-            if s.matching_lines {
+            };
+            if s.matching_lines || s.each_match {
                 // documents and archives: their text as ugrep+ converts it
                 let binary = match &e.ugrep_plus {
                     Some(plus) if s.archives => Binary::Show(
@@ -405,7 +423,7 @@ pub fn preview_plan_with(
                 return PreviewPlan::Sniff {
                     text: bat(item.line),
                     binary,
-                    header,
+                    header: Some(header),
                     path,
                 };
             }
@@ -413,7 +431,7 @@ pub fn preview_plan_with(
                 return PreviewPlan::Sniff {
                     text: bat(None),
                     binary: file_type(),
-                    header,
+                    header: Some(header),
                     path,
                 };
             };
@@ -425,24 +443,20 @@ pub fn preview_plan_with(
                     .arg(query)
                     .arg("--")
                     .arg(&path)
-                    .env("GREP_COLORS", GREP_PALETTE)
             };
-            PreviewPlan::Sniff {
-                text: Some(matches(&[
-                    "-nU",
+            PreviewPlan::Numbered {
+                // a text file's matching lines as the list reads them; the preview adds the lines around
+                lines: matches(&[
+                    "-nHU",
                     "--smart-case",
-                    "--color=always",
-                    "-C",
-                    "8",
-                ])),
-                // binaries, archives, documents: the matches with some bytes around them
-                binary: Binary::Show(matches(&[
-                    "-znao",
-                    "--smart-case",
-                    "--color=always",
-                    "-B200",
-                    "-A200",
-                ])),
+                    "--null",
+                    "--separator=\x1f",
+                    "--color=never",
+                    "--replace=\x01%o\x02",
+                ]),
+                // binaries, archives, documents: each match with some bytes around it
+                binary: matches(&["-znao", "--smart-case", "--color=always", "-B200", "-A200"])
+                    .env("GREP_COLORS", GREP_PALETTE),
                 header,
                 path,
             }
@@ -843,9 +857,10 @@ mod tests {
             Path::new("/r"),
             &os(&["-w"]),
         );
-        let PreviewPlan::Sniff {
-            text: Some(text),
-            header: Some(header),
+        let PreviewPlan::Numbered {
+            lines,
+            binary,
+            header,
             ..
         } = plan
         else {
@@ -855,7 +870,8 @@ mod tests {
             let w = c.args.iter().position(|a| a == "-w");
             w.is_some() && w.map(|w| w + 1) == c.args.iter().position(|a| a == "-e")
         };
-        assert!(before_e(&text), "{:?}", text.args);
+        assert!(before_e(&lines), "{:?}", lines.args);
+        assert!(before_e(&binary), "{:?}", binary.args);
         let count = header.matches.unwrap();
         assert!(before_e(&count.text) && before_e(&count.binary));
     }
@@ -1009,7 +1025,7 @@ mod tests {
     }
 
     #[test]
-    fn preview_search_shows_matches_with_context() {
+    fn preview_search_numbers_the_matches() {
         let plan = preview_plan(
             Tab::Content,
             &Options::default(),
@@ -1019,28 +1035,26 @@ mod tests {
             &engines(),
             Path::new("/r"),
         );
-        let PreviewPlan::Sniff { text, .. } = plan else {
+        // the matching lines as sf reads them; the preview adds the lines around from the file
+        let PreviewPlan::Numbered { lines, path, .. } = plan else {
             panic!("{plan:?}")
         };
-        let text = text.unwrap();
-        assert_eq!(text.program, PathBuf::from("/bin/ugrep"));
+        assert_eq!(path, PathBuf::from("/r/a"));
+        assert_eq!(lines.program, PathBuf::from("/bin/ugrep"));
         assert_eq!(
-            text.args,
+            lines.args,
             os(&[
-                "-nU",
+                "-nHU",
                 "--smart-case",
-                "--color=always",
-                "-C",
-                "8",
+                "--null",
+                "--separator=\x1f",
+                "--color=never",
+                "--replace=\x01%o\x02",
                 "-e",
                 "ne",
                 "--",
                 "/r/a"
             ])
-        );
-        assert_eq!(
-            text.env,
-            vec![("GREP_COLORS".to_string(), GREP_PALETTE.to_string())]
         );
     }
 
@@ -1057,11 +1071,7 @@ mod tests {
             &engines(),
             Path::new("/r"),
         );
-        let PreviewPlan::Sniff {
-            binary: Binary::Show(binary),
-            ..
-        } = plan
-        else {
+        let PreviewPlan::Numbered { binary, .. } = plan else {
             panic!("{plan:?}")
         };
         assert_eq!(binary.program, PathBuf::from("/bin/ugrep+"));
@@ -1084,6 +1094,7 @@ mod tests {
     fn header_of(plan: PreviewPlan) -> Option<Header> {
         match plan {
             PreviewPlan::Sniff { header, .. } => header,
+            PreviewPlan::Numbered { header, .. } => Some(header),
             other => panic!("{other:?}"),
         }
     }
@@ -1212,6 +1223,65 @@ mod tests {
                 "/r/a"
             ])
         );
+    }
+
+    #[test]
+    fn each_match_lists_every_match_with_the_text_around_it() {
+        let mut o = Options::default();
+        o.toggle(Tab::Content, Opt::EachMatch);
+        let (cmd, kind) = run(list_plan(Tab::Content, &o, "needle", &engines()));
+        assert_eq!(kind, ParseKind::SearchMatches);
+        assert_eq!(&cmd.args[..2], &os(&["-rnoU", "--sort=name"])[..]);
+        for want in [
+            "--null",
+            "--separator=\x1f",
+            "--color=always",
+            "-B50",
+            "-A50",
+        ] {
+            assert!(cmd.args.contains(&want.into()), "{want}: {:?}", cmd.args);
+        }
+        assert!(
+            cmd.env
+                .iter()
+                .any(|(k, v)| k == "GREP_COLORS" && v.starts_with("ms=7:")),
+            "{:?}",
+            cmd.env
+        );
+        // into a pipe: ugrep's own lines
+        let (cmd, _) = run(list_plan_with(
+            Tab::Content,
+            &o,
+            "needle",
+            &engines(),
+            &[],
+            true,
+        ));
+        assert!(cmd.args.contains(&"-B50".into()) && cmd.args.contains(&"--color=auto".into()));
+        assert!(!cmd.args.contains(&"--null".into()) && cmd.env.is_empty());
+        o.toggle(Tab::Content, Opt::Archives);
+        let (cmd, _) = run(list_plan(Tab::Content, &o, "needle", &engines()));
+        assert_eq!(cmd.program, PathBuf::from("/bin/ugrep+"));
+        assert_eq!(&cmd.args[..1], &os(&["-rzno"])[..]);
+    }
+
+    #[test]
+    fn preview_of_a_match_is_its_line() {
+        let mut o = Options::default();
+        o.toggle(Tab::Content, Opt::EachMatch);
+        let plan = preview_plan(
+            Tab::Content,
+            &o,
+            "ne",
+            &item("a", Some(7)),
+            72,
+            &engines(),
+            Path::new("/r"),
+        );
+        let PreviewPlan::Sniff { text, .. } = plan else {
+            panic!("{plan:?}")
+        };
+        assert!(text.unwrap().args.contains(&"--highlight-line".into()));
     }
 
     #[test]

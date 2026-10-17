@@ -7,8 +7,8 @@ was executed, the old handoff describes the state before that.
 How Bilal starts the next session (paste):
 
 > ~/.SearchFunctions'taki sf işine devam ediyoruz. Önce docs/sf-next-steps.md'yi oku, sonra sf-tui-design.md'yi.
-> "Next steps"teki Adım 4'ü (advancedsearch/detailedsearch sf'de) uygula: inline, alt agent olmadan, testleriyle. Commit/push/silme için
-> her seferinde benden onay al. Bana Türkçe kısa ara raporlar ver.
+> <yapılacak iş: "Next steps"in sonunda açık kalanlar veya yeni bir istek>. Inline, alt agent olmadan, testleriyle.
+> Commit/push/silme için her seferinde benden onay al. Bana Türkçe kısa ara raporlar ver.
 
 ## State
 
@@ -28,6 +28,8 @@ How Bilal starts the next session (paste):
   - `tests/platform_action.sh NEW_EMPTY_DIR` → 20/20: the fzf functions' wrapper (with sf, an old sf, no sf) and
     `sub-functions/file_list` in a private tmux server (`-L sfrs-platform-action`).
   - v0.2.0 (command line, `--print`, Ctrl-O's editor): `cargo test` 261; `tests/e2e.sh` 98/98.
+  - Step 4 (Each match, numbered preview): `cargo test` 290; `tests/e2e.sh` 121/121; platform_action 20/20;
+    sub_functions 7/7.
   - Step 2 (same day): `cargo test` 243; `tests/e2e.sh` 86/86 (with a release package's layout);
     `tests/sub_functions.sh NEW_EMPTY_DIR` 7/7 (`-L sfrs-sub-functions`); `python3 -I packaging/test_build.py` 7;
     `packaging/test_package.sh PACKAGE NEW_EMPTY_DIR` all passed on Ubuntu 22.04, Debian 12, Ubuntu 24.04.
@@ -58,11 +60,11 @@ How Bilal starts the next session (paste):
 | `model.rs` | `Tab` {Files, Content, Folders, Git} (`from_name("search")` still → Content), `Opt`, `Options` (serde; field `content` has `alias = "search"`), defaults |
 | `config.rs` | load/save `$XDG_CONFIG_HOME/sf/config.toml`; an invalid file is reported and never overwritten |
 | `engines.rs` | finds fd/fdfind, bat/batcat, ugrep, ugrep+, git, delta, file, ls in PATH; `$BAT_THEME`; `bundle_dir` / `with_bundle` (a release package's `lib/sf`, first in PATH) |
-| `commands.rs` | pure: `list_plan` (engine command per tab/options/query) and `preview_plan` (Sniff/Run/Pipe, Content `Header` with `ugrep -c -o` counts) |
+| `commands.rs` | pure: `list_plan` (engine command per tab/options/query) and `preview_plan` (Sniff/Numbered/Run/Pipe, Content `Header` with `ugrep -c -o` counts) |
 | `items.rs` | compact rows (`Look::{Path, Match, Styled}`, ~160 B/row), parsers, `path_spans` (folders blue, `/` yellow, name green), `printable`, `ansi_text` (no escape gets through) |
 | `filter.rs` | fzf `-i -e --no-sort` semantics, parallel from 50 000 rows |
 | `runner.rs` | list child in its own process group (kill on cancel), bounded records (64 KiB), batches, sorting/numbering |
-| `preview.rs` | preview worker (newest wins, kills the old), `is_text`, header lines |
+| `preview.rs` | preview worker (newest wins, kills the old), `is_text`, header lines, Content's numbered matches (`numbered_blocks`, `numbered_lines`) |
 | `app.rs` | state machine: keys, mouse, effects; list fills bottom-up like fzf (Up → next row, Home → top) |
 | `ui.rs` | drawing: tab bar with the keys centred, preview, list (bottom-up, highlight of typed words, scrollbars), input |
 | `actions.rs` | Enter/^O/^E/^C: open/reveal/copy through `platform.rs`, the editor (`find_editor`) in a tmux window via `sh -c 'cd -- "$1" && shift && exec "$@"'` (never `tmux -c DIR`: format injection), nvim pattern via `$SF_QUERY` |
@@ -145,15 +147,16 @@ typed words); sf runs no script any more, the package drops fzf and the scripts 
 The engines (fd, ugrep, bat, git, delta) stay external on purpose: reimplementing them would change the regex
 dialect and lose ugrep+'s archive/PDF search.
 
-### Step 4: advancedsearch / detailedsearch in sf (next, approved 2026-10-17)
+### Step 4: advancedsearch / detailedsearch in sf — done 2026-10-17 (not released yet)
 
-- detailedsearch's list (each match with ~50 characters around it, `ugrep -o -B50 -A50`, archives and documents
-  too) as a new Content option **Each match** beside Matching lines (Bilal's choice).
-- advancedsearch's preview numbering: "Match #N" before each match in Content's preview (Bilal: yes). Open
-  detail to settle with a mockup before building: keep the 8 lines of context around each numbered match, or
-  only the matching lines as advancedsearch shows them.
-- Already covered by Content: advancedsearch's file list (Archives & documents for `_plus`; `sf content P -- -i
-  --exclude=x` for its case-insensitivity and excludes).
+What and why: `docs/sf-tui-design.md` → "Step 4". The Content option **Each match** (detailedsearch: a row per
+match with up to 50 columns around it, `ugrep -o -B50 -A50`, archives and documents too; it and Matching lines
+turn each other off), and Content's preview numbers the matches in the form Bilal chose from a mockup ("with
+context, numbered"): "Match #N" blocks with 2 lines around each matching line, the line marked `:`, its matches
+red, a rule between the blocks. advancedsearch's file list was already Content (Archives & documents for `_plus`;
+`sf content P -- -i --exclude=x` for its case-insensitivity and excludes).
+
+Still open: a release (v0.4.0) if Bilal wants one; the Step 1 WSL checklist.
 
 ## Deferred minors (known, not fixed)
 
@@ -168,5 +171,5 @@ dialect and lose ugrep+'s archive/PDF search.
 - The prototype `~/.SearchFunctions/sf` and the old shell functions still use `nvim -c "/QUERY"`-style code paths
   (the prototype's Ctrl-O weakness with a crafted query; tmux `-c` was fixed in the prototype).
 - The prototype `~/.SearchFunctions/sf` still calls xdg-open / open_in_file_manager / wl-copy itself (Linux only).
-- `cargo clippy` names 7 older spots (collapsible `if`s in app.rs, ui.rs, main.rs, preview.rs, runner.rs; a large
-  enum variant in commands.rs; a manual range check in a preview test); none in platform.rs or doctor.rs.
+- `cargo clippy` names 6 older spots (collapsible `if`s in app.rs, ui.rs, main.rs, preview.rs, runner.rs; a manual
+  range check in a preview test); none in the Step 4 code.

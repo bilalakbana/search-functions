@@ -14,6 +14,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 
 use crate::commands::{Binary, Cmd, Header, PreviewPlan};
+use crate::commands::{MATCH_END, MATCH_START};
 use crate::items::{ansi_text, printable};
 use crate::theme;
 
@@ -126,6 +127,19 @@ fn produce(plan: PreviewPlan, shared: &Shared) -> (Text<'static>, usize) {
             lines.extend(body.lines);
             (Text::from(lines), n)
         }
+        PreviewPlan::Numbered {
+            path,
+            lines,
+            binary,
+            header,
+        } => {
+            let is_text = is_text(&path);
+            let body = numbered(&path, &is_text, lines, binary, shared);
+            let mut lines = header_lines(header, matches!(is_text, Ok(true)), shared);
+            let n = lines.len();
+            lines.extend(body);
+            (Text::from(lines), n)
+        }
         other => (unsniffed(other, shared), 0),
     }
 }
@@ -173,7 +187,9 @@ fn unsniffed(plan: PreviewPlan, shared: &Shared) -> Text<'static> {
         PreviewPlan::Text(s) => dim(&s),
         PreviewPlan::Run(cmd) => shown(run(&[cmd], shared)),
         PreviewPlan::Pipe(first, second) => shown(run(&[first, second], shared)),
-        PreviewPlan::Sniff { .. } => unreachable!("handled by produce"),
+        PreviewPlan::Sniff { .. } | PreviewPlan::Numbered { .. } => {
+            unreachable!("handled by produce")
+        }
     }
 }
 
@@ -205,6 +221,51 @@ fn sniffed(
                 }
                 Err(e) => red_lines(&e),
             },
+        },
+    }
+}
+
+/// Content's matches under "Match #N": a text file's with lines around them, any other's as `binary`
+/// shows them.
+fn numbered(
+    path: &Path,
+    is_text: &io::Result<bool>,
+    lines: Cmd,
+    binary: Cmd,
+    shared: &Shared,
+) -> Vec<Line<'static>> {
+    match is_text {
+        Err(e) => red_lines(&format!("{}: {e}", path.display())).lines,
+        Ok(true) => {
+            let out = match run(&[lines], shared) {
+                Ok(out) => out,
+                Err(e) => return red_lines(&e).lines,
+            };
+            let mut file = match read_file(path) {
+                Ok(file) => file,
+                Err(e) => return red_lines(&format!("{}: {e}", path.display())).lines,
+            };
+            if file.len() == MAX_OUTPUT {
+                // only whole lines around the matches
+                let end = file.iter().rposition(|&b| b == b'\n').map_or(0, |i| i + 1);
+                file.truncate(end);
+            }
+            let mut shown = numbered_blocks(&out.stdout, &file);
+            shown.extend(notes(&out));
+            shown
+        }
+        Ok(false) => match run(&[binary], shared) {
+            Ok(out) => {
+                let stdout = out.stdout.strip_suffix(b"\n").unwrap_or(&out.stdout);
+                let mut shown = if stdout.is_empty() {
+                    Vec::new()
+                } else {
+                    numbered_lines(ansi_text(stdout))
+                };
+                shown.extend(notes(&out));
+                shown
+            }
+            Err(e) => red_lines(&e).lines,
         },
     }
 }
@@ -309,23 +370,23 @@ fn shown(result: Result<Output, String>) -> Text<'static> {
     } else {
         ansi_text(stdout)
     };
-    if out.capped {
-        text.lines.push(Line::from(Span::styled(
-            "… preview cut at 4 MiB",
-            Style::new().fg(theme::DIM),
-        )));
-    }
-    text.lines
-        .extend(red_lines(&String::from_utf8_lossy(&out.stderr)).lines);
+    text.lines.extend(notes(&out));
     text
+}
+
+/// What goes under an output: that it was cut, and its errors in red.
+fn notes(out: &Output) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    if out.capped {
+        lines.push(dim_line("… preview cut at 4 MiB"));
+    }
+    lines.extend(red_lines(&String::from_utf8_lossy(&out.stderr)).lines);
+    lines
 }
 
 /// A text file as it is, for when bat is missing: no colours, nothing interpreted.
 fn file_text(path: &Path) -> Text<'static> {
-    let bytes = match File::open(path).and_then(|f| {
-        let mut v = Vec::new();
-        f.take(MAX_OUTPUT as u64).read_to_end(&mut v).map(|_| v)
-    }) {
+    let bytes = match read_file(path) {
         Ok(v) => v,
         Err(e) => return red_lines(&format!("{}: {e}", path.display())),
     };
@@ -340,6 +401,15 @@ fn file_text(path: &Path) -> Text<'static> {
             })
             .collect::<Vec<_>>(),
     )
+}
+
+/// The file's first MAX_OUTPUT bytes.
+fn read_file(path: &Path) -> io::Result<Vec<u8>> {
+    let mut v = Vec::new();
+    File::open(path)?
+        .take(MAX_OUTPUT as u64)
+        .read_to_end(&mut v)?;
+    Ok(v)
 }
 
 fn dim(s: &str) -> Text<'static> {
@@ -378,6 +448,151 @@ fn kill_group(pgid: Option<u32>) {
     }
 }
 
+/// The matching lines of `stdout` (ugrep's records), each with lines around it from `file`, under
+/// "Match #N".
+fn numbered_blocks(stdout: &[u8], file: &[u8]) -> Vec<Line<'static>> {
+    let file = file.strip_suffix(b"\n").unwrap_or(file);
+    let file_lines: Vec<&[u8]> = file.split(|&b| b == b'\n').collect();
+    let records: Vec<(usize, &[u8])> = stdout
+        .split(|&b| b == b'\n')
+        .filter_map(|record| {
+            // path NUL line 0x1f text
+            let rest = &record[record.iter().position(|&b| b == 0)? + 1..];
+            let sep = rest.iter().position(|&b| b == 0x1f)?;
+            let line = std::str::from_utf8(&rest[..sep]).ok()?.parse().ok()?;
+            Some((line, &rest[sep + 1..]))
+        })
+        .collect();
+    let last = records.iter().map(|(n, _)| n + AROUND).max().unwrap_or(0);
+    let width = (last.to_string().len() + 1).max(4);
+    let mut lines = Vec::new();
+    let mut number = 1;
+    for (i, &(line, text)) in records.iter().enumerate() {
+        if i == MAX_BLOCKS {
+            lines.push(dim_line(&format!(
+                "… and {} more matching lines",
+                records.len() - MAX_BLOCKS
+            )));
+            break;
+        }
+        if i > 0 {
+            lines.push(rule());
+        }
+        let count = text.iter().filter(|&&b| b == MATCH_START).count().max(1);
+        let label = if count == 1 {
+            format!("Match #{number}")
+        } else {
+            format!("Match #{number}–{}", number + count - 1)
+        };
+        number += count;
+        lines.push(Line::from(Span::styled(
+            label,
+            Style::new().fg(theme::GREEN).add_modifier(Modifier::BOLD),
+        )));
+        let numbered = |n: usize, mark: &'static str| {
+            vec![
+                Span::styled(format!("{n:>width$}"), Style::new().fg(theme::DIM)),
+                Span::styled(mark, Style::new().fg(theme::FAINT)),
+            ]
+        };
+        for n in line.saturating_sub(AROUND).max(1)..line {
+            let Some(&content) = file_lines.get(n - 1) else {
+                break;
+            };
+            let mut spans = numbered(n, "  ");
+            spans.push(Span::raw(shown_line(content)));
+            lines.push(Line::from(spans));
+        }
+        let mut spans = numbered(line, ": ");
+        spans.extend(marked_spans(text));
+        lines.push(Line::from(spans));
+        for n in line + 1..=line + AROUND {
+            let Some(&content) = file_lines.get(n - 1) else {
+                break;
+            };
+            let mut spans = numbered(n, "  ");
+            spans.push(Span::raw(shown_line(content)));
+            lines.push(Line::from(spans));
+        }
+    }
+    lines
+}
+
+/// Each line of `text` (one match a line) under "Match #N".
+fn numbered_lines(text: Text<'static>) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    for (i, line) in text.lines.into_iter().enumerate() {
+        if i > 0 {
+            lines.push(rule());
+        }
+        lines.push(Line::from(Span::styled(
+            format!("Match #{}", i + 1),
+            Style::new().fg(theme::GREEN).add_modifier(Modifier::BOLD),
+        )));
+        lines.push(line);
+    }
+    lines
+}
+
+/// Lines around each numbered match.
+const AROUND: usize = 2;
+/// Numbered blocks shown at most; a file with more says how many it left out.
+const MAX_BLOCKS: usize = 300;
+/// A line's characters shown at most (a minified file's line would fill the preview).
+const MAX_LINE: usize = 1000;
+
+fn rule() -> Line<'static> {
+    Line::from(Span::styled("─".repeat(40), Style::new().fg(theme::FAINT)))
+}
+
+fn dim_line(text: &str) -> Line<'static> {
+    Line::from(Span::styled(text.to_string(), Style::new().fg(theme::DIM)))
+}
+
+/// A line of the file as text: tabs as spaces, no carriage return at its end, other control
+/// characters shown, cut at MAX_LINE characters.
+fn shown_line(bytes: &[u8]) -> String {
+    let bytes = bytes.strip_suffix(b"\r").unwrap_or(bytes);
+    let text = printable(&String::from_utf8_lossy(bytes).replace('\t', "    "));
+    match text.char_indices().nth(MAX_LINE) {
+        Some((at, _)) => format!("{}…", &text[..at]),
+        None => text,
+    }
+}
+
+/// A matching line's text with its matches (between MATCH_START and MATCH_END) red.
+fn marked_spans(text: &[u8]) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    let (mut in_match, mut piece) = (false, Vec::new());
+    let mut flush = |piece: &mut Vec<u8>, in_match: bool| {
+        if piece.is_empty() {
+            return;
+        }
+        let style = if in_match {
+            Style::new().fg(theme::RED).add_modifier(Modifier::BOLD)
+        } else {
+            Style::new().fg(theme::TEXT)
+        };
+        spans.push(Span::styled(shown_line(piece), style));
+        piece.clear();
+    };
+    for &b in text {
+        match b {
+            MATCH_START => {
+                flush(&mut piece, in_match);
+                in_match = true;
+            }
+            MATCH_END => {
+                flush(&mut piece, in_match);
+                in_match = false;
+            }
+            b => piece.push(b),
+        }
+    }
+    flush(&mut piece, in_match);
+    spans
+}
+
 /// A port of sub-functions/is_text_file.c: the first 8 KiB hold no NUL and at least 95 % of them are
 /// printable ASCII, white space or ≥ 0x80 (UTF-8). An empty file is no text.
 pub fn is_text(path: &Path) -> io::Result<bool> {
@@ -405,6 +620,88 @@ mod tests {
 
     fn sh(script: &str) -> Cmd {
         Cmd::new("/bin/sh").args(["-c", script])
+    }
+
+    fn texts(lines: &[Line]) -> Vec<String> {
+        lines
+            .iter()
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect())
+            .collect()
+    }
+
+    #[test]
+    fn matches_are_numbered_blocks_with_two_lines_around() {
+        let file = b"a\nb needle\nc\nd\ne needle needle\nf\ng\n";
+        // ugrep's records: path NUL line 0x1f text, every match between 0x01 and 0x02
+        let out = b"x\x002\x1fb \x01needle\x02\nx\x005\x1fe \x01needle\x02 \x01needle\x02\n";
+        let lines = numbered_blocks(out, file);
+        let rule = "─".repeat(40);
+        assert_eq!(
+            texts(&lines),
+            [
+                "Match #1",
+                "   1  a",
+                "   2: b needle",
+                "   3  c",
+                "   4  d",
+                &rule,
+                "Match #2–3",
+                "   3  c",
+                "   4  d",
+                "   5: e needle needle",
+                "   6  f",
+                "   7  g",
+            ]
+        );
+        let red = lines[8]
+            .spans
+            .iter()
+            .chain(&lines[9].spans)
+            .filter(|s| s.content == "needle" && s.style.fg == Some(theme::RED))
+            .count();
+        assert_eq!(red, 2, "both matches of line 5 are red, nothing else");
+    }
+
+    #[test]
+    fn numbered_lines_show_tabs_as_spaces_and_drop_carriage_returns() {
+        let file = b"\ta\r\n\tb needle\r\nc\r\n";
+        let out = b"x\x002\x1f\tb \x01needle\x02\r\n";
+        assert_eq!(
+            texts(&numbered_blocks(out, file)),
+            ["Match #1", "   1      a", "   2:     b needle", "   3  c"]
+        );
+    }
+
+    #[test]
+    fn the_last_line_is_context_without_a_final_newline() {
+        let out = b"x\x001\x1f\x01needle\x02\n";
+        assert_eq!(
+            texts(&numbered_blocks(out, b"needle\nlast")),
+            ["Match #1", "   1: needle", "   2  last"]
+        );
+    }
+
+    #[test]
+    fn a_flood_of_matches_is_cut() {
+        let file: Vec<u8> = (0..400)
+            .flat_map(|i| format!("x{i}\n").into_bytes())
+            .collect();
+        let out: Vec<u8> = (1..=400)
+            .flat_map(|i| format!("f\0{i}\x1f\x01x\x02{}\n", i - 1).into_bytes())
+            .collect();
+        let lines = numbered_blocks(&out, &file);
+        let last: String = texts(&lines).pop().unwrap();
+        assert!(last.contains("100 more"), "{last}");
+    }
+
+    #[test]
+    fn binary_matches_are_numbered_too() {
+        let text = Text::from(vec![Line::from("x needle y"), Line::from("z needle")]);
+        let rule = "─".repeat(40);
+        assert_eq!(
+            texts(&numbered_lines(text)),
+            ["Match #1", "x needle y", &rule, "Match #2", "z needle"]
+        );
     }
 
     fn plain(text: &Text) -> String {
@@ -573,6 +870,55 @@ mod tests {
             ]
         );
         assert_eq!(m.text.lines[2].spans[1].style.fg, Some(theme::PEACH));
+    }
+
+    #[test]
+    fn numbered_text_file_shows_the_header_then_the_blocks() {
+        let path = file("n.txt", b"a\nb needle\nc\n");
+        let m = msg(PreviewPlan::Numbered {
+            path,
+            // octal: \062 is "2", so the line number is not read as part of the NUL's digits
+            lines: sh("printf 'n.txt\\000\\062\\037b \\001needle\\002\\n'; echo oops >&2"),
+            binary: printf("never"),
+            header: header("n.txt", Some(printf("1\\n"))).unwrap(),
+        });
+        assert_eq!(
+            plain(&m.text),
+            "File     n.txt\nPattern  ne\nMatches  1\n\nMatch #1\n   1  a\n   2: b needle\n   3  c\noops"
+        );
+        assert_eq!(m.header_lines, 4);
+    }
+
+    #[test]
+    fn numbered_binary_file_numbers_each_line_of_its_output() {
+        let path = file("n.bin", b"x\0needle\0");
+        let m = msg(PreviewPlan::Numbered {
+            path,
+            lines: printf("never"),
+            binary: sh("printf 'x needle\\nneedle y\\n'; echo oops >&2"),
+            header: header("n.bin", None).unwrap(),
+        });
+        let rule = "─".repeat(40);
+        assert_eq!(
+            plain(&m.text),
+            format!("File     n.bin\n\nMatch #1\nx needle\n{rule}\nMatch #2\nneedle y\noops")
+        );
+    }
+
+    #[test]
+    fn numbered_without_the_engine_says_so() {
+        let path = file("n2.txt", b"needle\n");
+        let m = msg(PreviewPlan::Numbered {
+            path,
+            lines: Cmd::new("/nonexistent/ugrep"),
+            binary: printf("never"),
+            header: header("n2.txt", None).unwrap(),
+        });
+        assert!(
+            plain(&m.text).contains("/nonexistent/ugrep: No such file"),
+            "{}",
+            plain(&m.text)
+        );
     }
 
     #[test]

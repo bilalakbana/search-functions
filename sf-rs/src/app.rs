@@ -1171,16 +1171,18 @@ pub(crate) mod tests {
         assert_eq!(a.handle_key(ctrl('s'), now), []);
         assert_eq!(a.popup, Some(0));
         a.handle_key(key(KeyCode::Down), now);
-        assert_eq!(a.popup, Some(1));
+        a.handle_key(key(KeyCode::Down), now);
+        assert_eq!(a.popup, Some(2));
         assert_eq!(
             a.handle_key(key(KeyCode::Char(' ')), now),
             [Effect::RunList, Effect::SaveConfig]
         );
         assert!(a.options.content.archives);
         assert_eq!(a.query, "", "space in the popup is no typing");
-        a.handle_key(key(KeyCode::Up), now);
-        a.handle_key(key(KeyCode::Up), now);
-        assert_eq!(a.popup, Some(3), "the cursor wraps");
+        for _ in 0..3 {
+            a.handle_key(key(KeyCode::Up), now);
+        }
+        assert_eq!(a.popup, Some(4), "the cursor wraps");
         a.handle_key(key(KeyCode::Enter), now);
         assert!(!a.options.content.ignored, "on by default, so off now");
     }
@@ -1674,13 +1676,13 @@ pub(crate) mod tests {
         let (mut a, now) = app(Tab::Content);
         a.handle_key(ctrl('s'), now);
         drawn(&mut a);
-        let row = a.layout.popup_rows[1].1;
+        let row = a.layout.popup_rows[2].1; // Matching lines, Each match, Archives & documents
         assert_eq!(
             a.handle_mouse(click(row), now),
             [Effect::RunList, Effect::SaveConfig]
         );
         assert!(a.options.content.archives);
-        assert_eq!(a.popup, Some(1));
+        assert_eq!(a.popup, Some(2));
     }
 
     #[test]

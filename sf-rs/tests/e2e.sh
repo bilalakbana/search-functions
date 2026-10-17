@@ -116,7 +116,8 @@ expect 'tab: Search keeps the query'       'Content › main'
 expect 'search: one file'                  'src/main\.c'
 clear_query; type_ 'needle'
 expect 'search: files with needle'         '5/5'
-expect 'search: preview of the first file' '1:needle ignored'
+expect 'search: preview numbers the matches' 'Match #1'
+expect 'search: preview of the first file' '1: needle ignored'
 expect 'search: match count in the preview' 'Matches +1'
 expect 'search: file in the preview header' 'File +build/out\.txt'
 shot search
@@ -143,9 +144,19 @@ keys C-t
 expect 'lines: Ctrl-T keeps the pattern'   'In out\.txt › needle .* 1/1'
 keys Escape
 expect 'lines: Esc back to Content'        'Content › needle'
-keys C-s Down Space Escape
+keys C-s Down Space
+expect 'config: Each match on'             '\[x\] Each match'
+expect 'config: Matching lines goes off'   '\[ \] Matching lines'
+keys Escape
+expect 'each match: file:line:match'       'src/main\.c:1:needle in main'
+expect 'each match: hint changes'          'each match'
+clear_query; type_ 'needle|main'
+expect 'each match: a row per match'       'Content › needle\|main .* 6/6'
+clear_query; type_ 'needle'
+expect 'each match: back to needle'        'Content › needle .* 5/5'
+keys C-s Space Down Down Space Escape
 expect 'archives: zip member line'         'docs/arch\.zip\{inzip\.txt\}:1:needle inside zip'
-keys C-s Space Down Space Escape
+keys C-s Space Down Down Space Escape
 expect 'archives off, lines off'           '5/5'
 
 keys Tab

@@ -155,9 +155,12 @@ fn read_errors(generation: u64, stderr: impl Read, tx: &Sender<ListMsg>) {
 fn read_items(generation: u64, kind: ParseKind, stdout: impl Read, tx: &Sender<ListMsg>) {
     let delimiter = match kind {
         ParseKind::Files | ParseKind::Folders | ParseKind::SearchFiles { .. } => 0,
-        ParseKind::SearchLines | ParseKind::Git => b'\n',
+        ParseKind::SearchLines | ParseKind::SearchMatches | ParseKind::Git => b'\n',
     };
-    let streamed = matches!(kind, ParseKind::SearchFiles { .. } | ParseKind::SearchLines);
+    let streamed = matches!(
+        kind,
+        ParseKind::SearchFiles { .. } | ParseKind::SearchLines | ParseKind::SearchMatches
+    );
     let mut reader = BufReader::with_capacity(64 * 1024, stdout);
     let (mut record, mut batch, mut records) = (Vec::new(), Vec::new(), Vec::new());
     let mut seen = HashSet::new();
@@ -209,7 +212,7 @@ fn read_items(generation: u64, kind: ParseKind, stdout: impl Read, tx: &Sender<L
             items::sort_folders(&mut batch);
             batch.insert(0, items::parent());
         }
-        ParseKind::SearchFiles { .. } | ParseKind::SearchLines => {}
+        ParseKind::SearchFiles { .. } | ParseKind::SearchLines | ParseKind::SearchMatches => {}
     }
     if !batch.is_empty() {
         let _ = tx.send(ListMsg::Items(generation, batch));

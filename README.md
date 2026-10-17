@@ -53,7 +53,7 @@ character. The exit status is 0 when something was listed, 1 when nothing, 2 on 
 | Tab | Lists | Typing | Options (⚙ Config, defaults) |
 |-----|-------|--------|------------------------------|
 | Files | every file below the folder | filters the names | Hidden files ✗, Ignored files ✓ |
-| Content | the files that contain the pattern (ugrep); every text file while it is empty | the pattern, searched 150 ms after the last key; the preview shows the file, the pattern and how often it occurs | Matching lines ✗ (list the lines instead), Archives & documents ✗ (zip, tar, 7z, PDF, Office via `ugrep+`), Hidden files ✗, Ignored files ✓ |
+| Content | the files that contain the pattern (ugrep); every text file while it is empty | the pattern, searched 150 ms after the last key; the preview shows the file, the pattern, how often it occurs and each match numbered ("Match #1", …) with two lines around it | Matching lines ✗ (list the lines instead), Each match ✗ (a row for every match with the text around it, as `detailedsearch`), Archives & documents ✗ (zip, tar, 7z, PDF, Office via `ugrep+`), Hidden files ✗, Ignored files ✓ |
 | Folders | every folder, `..` first | filters the names; `Enter` goes inside | Hidden folders ✗, Ignored folders ✓ |
 | Git | the commit graph, numbered | filters the commits; `Enter` shows one | All branches ✓ |
 

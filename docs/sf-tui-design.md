@@ -19,8 +19,9 @@ fast tool he can ship and use on the Linux PC and on WSL.
    Changes apply at once and are remembered (`~/.config/sf/config.toml`).
 3. **Search** replaces Content, Lines, `ugrep-fzf`, `advancedsearch(_plus)`, `detailedsearch` and `ugf`: the query
    is a ugrep pattern; by default the list shows the files that contain it; the option **Matching lines** shows the
-   matching lines instead (file, line number, text); the option **Archives & documents** also searches inside
-   zip/tar/7z/gz/... archives and PDF/Office documents (`ugrep+ -z`).
+   matching lines instead (file, line number, text), **Each match** a row for every match with the text around
+   it (`detailedsearch`); the option **Archives & documents** also searches inside zip/tar/7z/gz/... archives and
+   PDF/Office documents (`ugrep+ -z`).
 4. The actions keep their keys and work on the selected item: **Enter** open with the default application,
    **Ctrl-O** nvim (at the line in Matching lines), **Ctrl-T** search inside the file, **Ctrl-U / Ctrl-G / Alt-G**
    git history / diff / short diff, **Alt-U** git log of the file, **Ctrl-E** show in the file manager,
@@ -53,7 +54,7 @@ fast tool he can ship and use on the Linux PC and on WSL.
 ```
  Files   Search   Folders   Git                                                       ⚙ Config
 ╭ ~/Projects/app ──────────────────────────────────────────────────────────────────────────────╮
-│ preview: the file (bat), the matches with context (ugrep), the commit (git show + delta)      │
+│ preview: the file (bat), the numbered matches (ugrep), the commit (git show + delta)          │
 │ ...                                                                                            │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭───────────────────────────────────────────────────────────────────────────────────────────────╮
@@ -90,7 +91,7 @@ Config popup (Search):
 | Tab | Lists | Typing | Options (default) |
 |---|---|---|---|
 | Files | `fd --type f`, sorted | filters the list (fuzzy) | Hidden files ✗, Ignored files ✓ (Bilal) |
-| Search | `ugrep -rl` (files) or matching lines (`ugrep -rn`); `ugrep+ -z` with archives | the ugrep pattern; runs after a short pause (150 ms) | Matching lines ✗ (Bilal), Archives & documents ✗, Hidden files ✗, Ignored files ✓ (Bilal) |
+| Search | `ugrep -rl` (files), matching lines (`ugrep -rn`) or each match (`ugrep -rno -B50 -A50`); `ugrep+ -z` with archives | the ugrep pattern; runs after a short pause (150 ms) | Matching lines ✗ (Bilal), Each match ✗, Archives & documents ✗, Hidden files ✗, Ignored files ✓ (Bilal) |
 | Folders | `fd --type d`, sorted by depth, `..` first | filters the list | Hidden folders ✗, Ignored folders ✓ (Bilal) |
 | Git | `git log --graph`, numbered | filters the list | All branches ✓ |
 
@@ -119,8 +120,9 @@ Details settled from the existing setup and the prototype:
 ## Previews
 
 - Files / Search-files: text through `bat` (`--theme ${BAT_THEME:-base16}`, the preview's width), binaries as
-  `file -b`; with a query in Search, ugrep's matches with 8 lines of context, matches red.
-- Search-lines: `bat` scrolled to the line, the line in a band.
+  `file -b`; with a query in Search, the matches numbered: "Match #N" over each matching line with 2 lines around
+  it, the line marked with `:` and its matches red, a thin rule between the blocks (Step 4).
+- Search-lines and Each match: `bat` scrolled to the line, the line in a band.
 - Folders: the folder's entries. Git: `git show` header, changed files, diff through delta (Catppuccin settings).
 - Coloured output is converted with `ansi-to-tui`; a preview is produced in the background, the newest request wins.
 
@@ -303,3 +305,23 @@ Step 3, the windows inside sf (v0.3.0, 2026-10-17):
   `git show | delta` are gone; Ctrl-T and the git keys reaching `actions` (Folders, Git) say "Not available here".
   The package drops fzf and `lib/sf/sub-functions` (12 MB instead of 14). The scripts stay in the repo for the fzf
   functions, tested by `tests/sub_functions.sh`.
+
+Step 4, advancedsearch and detailedsearch inside sf (2026-10-17):
+
+- `advancedsearch` (files, then the matches in the preview) is Content as it was. `detailedsearch` is the new
+  Content option **Each match** (Bilal: a new option, not a tab): a row for every match, `ugrep -rnoU -B50 -A50`,
+  so each match comes with up to 50 columns of its line around it (ugrep's `-o` with context fits the match and
+  its context in that many columns, `...` where it cut). The match is found in ugrep's colours: `--color=always`
+  with `GREP_COLORS=ms=7:mc=7` and every other colour empty, so only the match is in reverse video, which sf turns
+  into the same marks as Matching lines (red in the row). Matching lines and Each match are two ways to list the
+  matches: turning one on turns the other off. The row, Ctrl-O, Ctrl-T and the preview work as in Matching lines;
+  `--print` prints ugrep's own output.
+- Content's preview with a pattern numbers the matches as `detailedsearch` did, in the form Bilal chose ("with
+  context, numbered"): `File`, `Pattern`, `Matches` as before, then for each matching line "Match #N" (a line with
+  three matches "Match #2–4", so the numbers add up to `Matches`), the line with 2 lines above and below, its
+  number followed by `:` and its matches red, a thin rule between the blocks. The matching lines come from the
+  same `ugrep -nHU --null --separator=0x1f --replace=0x01%o0x02` records as Matching lines (with the options after
+  `--`); the lines around them are read from the file (its first 4 MiB, whole lines only), so a tab shows as
+  spaces and a CRLF file without its `\r`. At most 300 blocks, then "… and N more matching lines". A binary file,
+  an archive or a document shows each match on its own line with some bytes around it (`-znao -B200 -A200`),
+  numbered the same way.
