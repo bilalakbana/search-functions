@@ -1,0 +1,78 @@
+# sf's release: when a tag vX.Y.Z is pushed (X.Y.Z = sf-rs/Cargo.toml's version), build the package
+# (packaging/build.py), test it in clean Ubuntu 22.04, Debian 12 and Ubuntu 24.04 containers
+# (packaging/test_package.sh) and publish it with its sha256 as the tag's GitHub release. Started by hand
+# (Actions → release → Run workflow) it builds and tests the branch without publishing anything. The same
+# two scripts run locally.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    permissions:
+      contents: write # gh release create
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: The tag is sf's version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' sf-rs/Cargo.toml | head -n 1)
+          if [[ "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME, but sf-rs/Cargo.toml says version $version"
+            exit 1
+          fi
+
+      - name: Rust target for a static sf
+        run: rustup target add x86_64-unknown-linux-musl
+
+      - name: Unit tests
+        run: |
+          cargo test --locked --manifest-path sf-rs/Cargo.toml
+          python3 -I packaging/test_build.py
+
+      - name: Build the package
+        run: python3 -I packaging/build.py "$RUNNER_TEMP/out"
+
+      - name: Test the package on Ubuntu 22.04, Debian 12 and Ubuntu 24.04
+        run: packaging/test_package.sh "$RUNNER_TEMP/out/sf-linux-x86_64.tar.gz" "$RUNNER_TEMP/test"
+
+      - name: Logs of a failed package test
+        if: failure()
+        run: |
+          for log in "$RUNNER_TEMP"/test/*/log.txt; do
+            [[ -f $log ]] || continue
+            echo "::group::$log"
+            tail -n 80 "$log"
+            echo "::endgroup::"
+          done
+
+      - name: Publish
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP/out"
+          digest=$(cut -d ' ' -f 1 sf-linux-x86_64.tar.gz.sha256)
+          url="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/sf-linux-x86_64.tar.gz"
+          {
+            echo "Install on Linux or WSL (x86_64), into ~/.local:"
+            echo
+            echo "    mkdir -p ~/.local && curl -fsSL $url | tar -xz -C ~/.local"
+            echo
+            echo "Then \`sf doctor\` shows what it found. sha256 of the package: \`$digest\`"
+            echo "(also in sf-linux-x86_64.tar.gz.sha256). What it contains and the licenses:"
+            echo "\`~/.local/share/doc/sf/\`."
+          } > notes.md
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --title "sf $GITHUB_REF_NAME" --notes-file notes.md \
+            sf-linux-x86_64.tar.gz sf-linux-x86_64.tar.gz.sha256

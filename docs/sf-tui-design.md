@@ -141,8 +141,8 @@ Details settled from the existing setup and the prototype:
   the sub-functions `search_in_single_file`, `show_diffs`, `git_diff`, `git_diff_short`, `show_logs` from
   `~/.SearchFunctions/sub-functions`) in a new tmux window, or in the foreground with the TUI suspended.
 - Code in `~/.SearchFunctions/sf-rs` (crate and binary `sf`), installed with `cargo install --path sf-rs`
-  (`~/.cargo/bin/sf`); a static musl build for WSL is an option. The fzf prototype is retired only when this
-  version covers it.
+  (`~/.cargo/bin/sf`); the release package (see "Release package") has a static musl build for Linux and WSL.
+  The fzf prototype is retired only when this version covers it.
 
 ## Testing
 
@@ -220,3 +220,39 @@ Platform layer (Step 1 of `docs/sf-next-steps.md`, 2026-10-17):
   identical. `sf doctor` warns below 3.6.0 and below 5.0.0.
 - The tests write their stub programs through a child process: a stub written by the test process itself could
   be held open by a fork in another test thread, and running it then failed with "Text file busy" (ETXTBSY).
+
+Release package (Step 2 of `docs/sf-next-steps.md`, 2026-10-17):
+
+- `sf-linux-x86_64.tar.gz` unpacks into `~/.local` (no top folder): `bin/sf`, `lib/sf/{fzf,fd,bat,delta,ugrep,ug,
+  ugrep+}`, `lib/sf/sub-functions/` (the six scripts sf's keys run and `platform_action`), `share/doc/sf/`
+  (README with the source commit, THIRD-PARTY.md, licenses/). x86_64 only; git, tmux, nvim and less come from the
+  system (Bilal: no aarch64 for now).
+- sf finds the bundle as `lib/sf` beside the folder of its own executable (`/proc/self/exe`, so symlinks to it
+  work) and puts it first in its own `$PATH` before any thread starts: the engines are found there first, and
+  everything sf starts inherits it (ugrep+ runs `ug`, the scripts run fzf, bat, ugrep, delta). tmux windows get
+  sf's `PATH` with `-e PATH=…` (tmux would give them its server's). Sub-functions: `$SF_SUBFUNCTIONS`, else the
+  bundle's, else `~/.SearchFunctions/sub-functions`. A `cargo install`ed sf has no bundle and behaves as before.
+- The shipped scripts find each other beside themselves (`search_in_single_file` exports `SF_SUB`, its tmux
+  windows get `-e PATH=$PATH`; `platform_action` takes `open_in_file_manager` from its own folder). `show_diffs`
+  without git-split-diffs (npm, not shipped) shows `git log -p` through `delta --side-by-side` (Bilal's choice),
+  as a plain pipe: `core.pager` would only page on a terminal.
+- `packaging/bundle.toml` pins every download (URL + sha256): fzf, fd, bat, delta as their official static
+  releases, ugrep's source archive, the Alpine image (tag + digest), and the license texts of the libraries
+  linked into ugrep. `packaging/build.py` (stdlib Python, no shell strings) downloads and checks them, builds
+  ugrep in Alpine 3.24 with `--enable-static LIBS=-lbrotlicommon` (brotlicommon after brotlidec/enc makes the
+  static link work; ugrep's README would drop brotli instead) and stops when Alpine's library versions differ
+  from bundle.toml, builds sf for `x86_64-unknown-linux-musl`, strips, refuses any binary that `file` does not
+  call statically linked, and packs a deterministic tar (sorted, owner root, mtime of the commit, gzip mtime 0).
+- Licenses in the package: sf (GPL-3.0, the repo's LICENSE; the README names the source commit), the five
+  programs (fzf's from its tag, as its archive has none; bat's `--acknowledgements` for the syntaxes it
+  carries), ugrep's libraries (pcre2, zlib, bzip2, xz, lz4, zstd, brotli, musl, the GCC runtime exception), the
+  166 Rust crates sf links (their license files; three MIT crates without one get a NOTICE with their authors)
+  and Rust's standard library (`COPYRIGHT-library.html` and its license texts).
+- `packaging/test_package.sh` unpacks the package in clean Ubuntu 22.04, Debian 12 and Ubuntu 24.04 containers
+  (apt gives only the tests' own git, tmux, zip, python3, file, less; the image must have none of the engines),
+  checks that `sf doctor` names the bundled engines and sub-functions, and runs `tests/e2e.sh` against the
+  installed sf and `tests/sub_functions.sh` against the packaged scripts.
+- `.github/workflows/release.yml`: on a pushed tag `vX.Y.Z` (must equal Cargo.toml's version) unit tests, build,
+  package test, then `gh release create` with the package and its `.sha256`; started by hand it does all but
+  publish. Only `actions/checkout`, pinned by commit; `permissions: {}` at the top, `contents: write` for the
+  job; values reach the scripts as environment variables. No weekly version check for now (Bilal).

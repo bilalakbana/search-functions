@@ -7,7 +7,7 @@ was executed, the old handoff describes the state before that.
 How Bilal starts the next session (paste):
 
 > ~/.SearchFunctions'taki sf işine devam ediyoruz. Önce docs/sf-next-steps.md'yi oku, sonra sf-tui-design.md'yi.
-> "Next steps"teki Adım 2'yi (release paketi) uygula: inline, alt agent olmadan, testleriyle. Commit/push/silme için
+> "Next steps"teki Adım 3'ü (pencereler sf'nin içinde) uygula: inline, alt agent olmadan, testleriyle. Commit/push/silme için
 > her seferinde benden onay al. Bana Türkçe kısa ara raporlar ver.
 
 ## State
@@ -28,6 +28,9 @@ How Bilal starts the next session (paste):
     powershell.exe/wslpath, fresh `XDG_CONFIG_HOME`; WSL mode, OSC 52 through tmux, the commands, `sf doctor`.
   - `tests/platform_action.sh NEW_EMPTY_DIR` → 20/20: the fzf functions' wrapper (with sf, an old sf, no sf) and
     `sub-functions/file_list` in a private tmux server (`-L sfrs-platform-action`).
+  - Step 2 (same day): `cargo test` 243; `tests/e2e.sh` 86/86 (with a release package's layout);
+    `tests/sub_functions.sh NEW_EMPTY_DIR` 7/7 (`-L sfrs-sub-functions`); `python3 -I packaging/test_build.py` 7;
+    `packaging/test_package.sh PACKAGE NEW_EMPTY_DIR` all passed on Ubuntu 22.04, Debian 12, Ubuntu 24.04.
   - Look at screens: `python3 -I tests/tools/ansi2png.py screens/X.ansi X.png` and read the PNG (Intel One Mono has
     no ⚙ glyph; that box is the font, not sf).
 - Formatting: `cargo fmt` (Bilal OK'd it; his `format` skill has no Rust entry).
@@ -54,7 +57,7 @@ How Bilal starts the next session (paste):
 |---|---|
 | `model.rs` | `Tab` {Files, Content, Folders, Git} (`from_name("search")` still → Content), `Opt`, `Options` (serde; field `content` has `alias = "search"`), defaults |
 | `config.rs` | load/save `$XDG_CONFIG_HOME/sf/config.toml`; an invalid file is reported and never overwritten |
-| `engines.rs` | finds fd/fdfind, bat/batcat, ugrep, ugrep+, git, delta, file, ls in PATH; `$BAT_THEME` |
+| `engines.rs` | finds fd/fdfind, bat/batcat, ugrep, ugrep+, git, delta, file, ls in PATH; `$BAT_THEME`; `bundle_dir` / `with_bundle` (a release package's `lib/sf`, first in PATH) |
 | `commands.rs` | pure: `list_plan` (engine command per tab/options/query) and `preview_plan` (Sniff/Run/Pipe, Content `Header` with `ugrep -c -o` counts) |
 | `items.rs` | compact rows (`Look::{Path, Match, Styled}`, ~160 B/row), parsers, `path_spans` (folders blue, `/` yellow, name green), `printable`, `ansi_text` (no escape gets through) |
 | `filter.rs` | fzf `-i -e --no-sort` semantics, parallel from 50 000 rows |
@@ -103,28 +106,27 @@ functions go through it.
 This PC: KDE Plasma on Wayland, `org.freedesktop.FileManager1` activatable (running), `wl-copy` installed, no
 xclip/xsel; Docker usable (Bilal is in group `docker`).
 
-### Step 2: one release package (approved in principle, after Step 1)
+### Step 2: one release package — built and tested locally 2026-10-17
 
-- `bundle.toml` in the repo: pinned upstream versions + sha256 of their official static release assets.
-  Checked 2026-10-17: fzf 0.74.5 `fzf-0.74.5-linux_amd64.tar.gz` (MIT), fd 10.5.0
-  `fd-v10.5.0-x86_64-unknown-linux-musl.tar.gz` (MIT/Apache-2.0), bat 0.26.1
-  `bat-v0.26.1-x86_64-unknown-linux-musl.tar.gz` (MIT/Apache-2.0), delta 0.20.1
-  `delta-0.20.1-x86_64-unknown-linux-musl.tar.gz` (MIT). ugrep 7.8.5 (BSD-3-Clause) publishes **no Linux binaries**:
-  build it in CI with `./build.sh --enable-static` (README: may need `--without-brotli`); ship `ugrep`, `ug` and the
-  `ugrep+` script.
-- GitHub Actions: on a tag build sf for `x86_64-unknown-linux-musl` (static), build ugrep, download the others with
-  checksum checks, add all license texts and the sub-function scripts, publish
-  `sf-linux-x86_64.tar.gz` (layout `bin/sf`, `lib/sf/{fzf,fd,bat,delta,ugrep,ug,ugrep+,sub-functions/}`,
-  `share/doc/sf/licenses/`). A weekly workflow checks upstream releases, bumps `bundle.toml` and opens a PR.
-- sf looks for engines and sub-functions next to its own executable (`../lib/sf/`) first, then PATH / `$SF_SUBFUNCTIONS`.
-- README: one-line install `curl -fsSL https://github.com/bilalakbana/search-functions/releases/latest/download/sf-linux-x86_64.tar.gz | tar -xz -C ~/.local`;
-  optional `sudo apt install poppler-utils antiword pandoc` for PDF/Office; build-it-yourself
-  (`cargo install --git https://github.com/bilalakbana/search-functions sf` + install the engines) with links to
-  every upstream project.
-- Needs Bilal's OK: `rustup target add x86_64-unknown-linux-musl` (download), pushing the workflows, every tag.
-- Considered and rejected as the main way (keep in mind): forking/mirroring upstream repos (only ugrep needs a
-  build), embedding the binaries into sf (40 MB, writes executables at runtime), apt only (old versions on Ubuntu
-  LTS/WSL), Homebrew tap (possible extra channel later).
+What was built and why is in `docs/sf-tui-design.md` → "Release package". In short: `packaging/bundle.toml`
+(pinned downloads), `packaging/build.py` (builds `sf-linux-x86_64.tar.gz` + `.sha256`, ugrep static in Alpine,
+sf for musl, all licenses, static check, deterministic tar: two local builds gave the same sha256),
+`packaging/test_package.sh` (clean Ubuntu 22.04 / Debian 12 / Ubuntu 24.04: doctor, e2e 86/86, sub-functions 7/7
+on all three), `.github/workflows/release.yml` (tag `vX.Y.Z` → test, build, publish; run by hand → no publish),
+sf's bundle lookup (`engines::bundle_dir`, `with_bundle`, `main::use_bundle`), self-relative sub-functions,
+`show_diffs` → delta without git-split-diffs, README "sf in one line". No weekly version bump (Bilal: not now).
+
+Still open from Step 2 (each needs Bilal's OK):
+
+- Push `main` with the workflow, then a dry run: Actions → release → Run workflow (or
+  `gh workflow run release.yml --ref main` and `gh run watch`). It must pass on GitHub's runner before a tag.
+- Tag and release: `git tag v0.1.0 && git push origin v0.1.0` (the tag must equal `sf-rs/Cargo.toml`'s version);
+  the workflow publishes the release. Then try the one-line install from the README on WSL (it is also the
+  WSL checklist's easiest way to get sf there).
+- Docker images pulled on this PC for the package test: alpine:3.24.2 (= alpine:latest), ubuntu:22.04,
+  debian:12, ubuntu:24.04; removing them is his call.
+- Later, if wanted: a weekly workflow that bumps `bundle.toml` (would need "Allow GitHub Actions to create pull
+  requests" in the repo settings), aarch64 packages.
 
 ### Step 3: the terminal windows inside sf (later)
 

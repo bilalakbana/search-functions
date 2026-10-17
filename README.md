@@ -131,6 +131,23 @@ These shortcuts apply when using the interactive search tools (`fzf`, `ugrep-fzf
 
 ## 🔧 Installation
 
+### `sf` in one line (Linux and WSL, x86_64)
+
+```bash
+mkdir -p ~/.local && curl -fsSL https://github.com/bilalakbana/search-functions/releases/latest/download/sf-linux-x86_64.tar.gz | tar -xz -C ~/.local
+sf doctor   # what it found, how open / reveal / copy work here
+```
+
+The package brings its own fd, bat, ugrep (with `ug` and `ugrep+`), fzf and delta in `~/.local/lib/sf`; only sf
+uses them. If `sf` is not found, `~/.local/bin` is not in your `PATH` yet: log in again (Ubuntu and Debian add it
+once it exists) or add `export PATH="$HOME/.local/bin:$PATH"` to your shell's rc file. Taken from the system when
+wanted: git (Git tab, diffs), tmux (actions in windows of their own), nvim (`Ctrl-o`), and for PDF and Office files
+in Content `sudo apt install poppler-utils antiword pandoc`. Each release names the package's sha256 (also in
+`sf-linux-x86_64.tar.gz.sha256`); what is inside and the licenses: `~/.local/share/doc/sf/`. To update, run the
+line again.
+
+### The fzf functions
+
 1. Install required tools (latest versions recommended):
 
 ```bash
@@ -162,18 +179,29 @@ source ~/.SearchFunctions/sub-functions/git_logs          # gfzf* | logs* (need 
 alias sf-fzf=~/.SearchFunctions/sf                        # the fzf version of sf (a script, not a function)
 ```
 
-5. The `sf` app (Rust 1.88 or newer, as ratatui 0.30 needs; it runs fd, ugrep, bat, git and delta, and `ugrep+` for archives and documents):
+### `sf` from source
+
+Rust 1.88 or newer (ratatui 0.30 needs it); sf then runs the fd, ugrep, bat, git and delta it finds in `PATH`, and
+`ugrep+` for archives and documents ([fd](https://github.com/sharkdp/fd), [ugrep](https://github.com/Genivia/ugrep),
+[bat](https://github.com/sharkdp/bat), [delta](https://github.com/dandavison/delta), [fzf](https://github.com/junegunn/fzf)
+for `Ctrl-t`):
 ```bash
 cargo install --path ~/.SearchFunctions/sf-rs   # installs ~/.cargo/bin/sf
-sf doctor                                        # what it found, how open / reveal / copy work here
+sf doctor
 ```
 Content needs ugrep 3.6.0 or newer for Matching lines; before 5.0.0 only the first match of a line is marked red
 (Ubuntu 22.04 ships 3.7.2, Debian 12 3.11.2; Ubuntu 24.04 and Debian 13 are fine). With `sf` installed, `Enter`,
 `Ctrl-e` and `Ctrl-c` of the fzf functions go through it (`sub-functions/platform_action`), so they work on WSL too;
 without it they use xdg-open, `open_in_file_manager` and wl-copy.
 
-Its tests: `cargo test` in `sf-rs`, `sf-rs/tests/e2e.sh NEW_EMPTY_FOLDER` (runs it in a private tmux server) and
-`sf-rs/tests/platform_action.sh NEW_EMPTY_FOLDER` (the wrapper of the fzf functions).
+The release package is built by `python3 -I packaging/build.py NEW_EMPTY_FOLDER` from the versions pinned in
+`packaging/bundle.toml` (needs docker and `rustup target add x86_64-unknown-linux-musl`) and tested in clean
+Ubuntu 22.04, Debian 12 and Ubuntu 24.04 containers by `packaging/test_package.sh PACKAGE NEW_EMPTY_FOLDER`;
+`.github/workflows/release.yml` does both for a pushed tag `vX.Y.Z` and publishes the release.
+
+Tests: `cargo test` in `sf-rs`, `sf-rs/tests/e2e.sh NEW_EMPTY_FOLDER` (runs it in a private tmux server),
+`sf-rs/tests/platform_action.sh NEW_EMPTY_FOLDER` (the wrapper of the fzf functions),
+`sf-rs/tests/sub_functions.sh NEW_EMPTY_FOLDER` (the scripts sf's keys open) and `python3 -I packaging/test_build.py`.
 
 ---
 
