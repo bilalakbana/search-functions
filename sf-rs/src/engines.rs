@@ -41,14 +41,14 @@ pub fn discover(path_var: &OsStr) -> Engines {
 }
 
 /// The bundle of a release package: `lib/sf` beside the folder of `exe` (`~/.local/bin/sf` →
-/// `~/.local/lib/sf`), when it exists. It holds the engines and the sub-functions.
+/// `~/.local/lib/sf`), when it exists. It holds the engines.
 pub fn bundle_dir(exe: &Path) -> Option<PathBuf> {
     let dir = exe.parent()?.parent()?.join("lib/sf");
     dir.is_dir().then_some(dir)
 }
 
 /// `path_var` with `bundle` in front, so the bundled engines win and every program sf starts finds
-/// them too (ugrep+ runs `ug`, the sub-functions run fzf, bat and ugrep). A bundle path that cannot
+/// them too (ugrep+ runs `ug`, git runs delta when it is its pager). A bundle path that cannot
 /// stand in `$PATH` (it holds a `:`) leaves `path_var` as it is; `sf doctor` then shows the engines
 /// found without it.
 pub fn with_bundle(bundle: Option<&Path>, path_var: &OsStr) -> OsString {

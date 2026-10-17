@@ -52,7 +52,7 @@ const GIT_LOG_FORMAT: &str = "--format=format:%C(bold blue)%h%C(reset) %C(dim wh
      %C(white)%s%C(reset) %C(bold green)(%ar)%C(reset)%x1f%H";
 
 /// The header of a commit in the Git preview.
-const GIT_SHOW_FORMAT: &str = "--format=%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - \
+pub const GIT_SHOW_FORMAT: &str = "--format=%C(magenta)<%an>%C(reset) %C(green)(%ar)%C(reset) %C(cyan)%ad%C(reset) - \
      %C(yellow)%h%C(reset) %C(white dim)<%ae>%C(reset)%n%C(white)%s%C(reset)%n";
 
 #[derive(Clone, Debug, PartialEq)]
@@ -105,6 +105,29 @@ pub enum ListPlan {
     },
     /// Nothing to run; the list shows this line.
     Hint(String),
+}
+
+/// Ctrl-T: the lines of one file (`key`, as listed) that `pattern` matches, every line while it is
+/// empty, read as Matching lines are.
+pub fn in_file_plan(key: &std::ffi::OsStr, pattern: &str, e: &Engines) -> ListPlan {
+    let Some(ugrep) = &e.ugrep else {
+        return ListPlan::Hint("ugrep is not installed".into());
+    };
+    // -H: the name even for one file, so the rows read as Content's matching lines
+    let cmd = Cmd::new(ugrep)
+        .args([
+            "-nHU",
+            "--smart-case",
+            "--null",
+            "--separator=\x1f",
+            "--color=never",
+        ])
+        .args(["--replace=\x01%o\x02", "-e", pattern, "--"])
+        .arg(key);
+    ListPlan::Run {
+        cmd,
+        kind: ParseKind::SearchLines,
+    }
 }
 
 /// The list's command as the window starts it (the tests' shorthand).
@@ -434,31 +457,12 @@ pub fn preview_plan_with(
             let Some(hash) = item.key.to_str().filter(|h| is_hash(h)) else {
                 return PreviewPlan::Nothing;
             };
-            let Some(git) = &e.git else {
-                return PreviewPlan::Text("git is not installed".into());
+            // the same as the commit's view, at the preview's width
+            let commit = crate::views::ViewKind::Commit {
+                root: root.to_path_buf(),
+                hash: hash.to_string(),
             };
-            let show = Cmd::new(git).args([
-                "show",
-                "--color=always",
-                "--date=format:%Y-%m-%d %H:%M:%S",
-                GIT_SHOW_FORMAT,
-                "--patch-with-stat",
-                "--end-of-options",
-                hash,
-            ]);
-            match &e.delta {
-                Some(delta) => PreviewPlan::Pipe(
-                    show,
-                    Cmd::new(delta)
-                        .args([
-                            "--line-numbers".to_string(),
-                            "--paging=never".into(),
-                            format!("--width={width}"),
-                        ])
-                        .args(delta_args(&e.theme)),
-                ),
-                None => PreviewPlan::Run(show),
-            }
+            crate::views::view_plan(&commit, width, e)
         }
     }
 }
@@ -857,6 +861,32 @@ mod tests {
     }
 
     #[test]
+    fn in_file_lists_the_lines_of_one_file() {
+        let (cmd, kind) = run(in_file_plan("src/a b.c".as_ref(), "foo|bar", &engines()));
+        assert_eq!(kind, ParseKind::SearchLines);
+        assert_eq!(
+            cmd.args,
+            os(&[
+                "-nHU",
+                "--smart-case",
+                "--null",
+                "--separator=\x1f",
+                "--color=never",
+                "--replace=\x01%o\x02",
+                "-e",
+                "foo|bar",
+                "--",
+                "src/a b.c"
+            ])
+        );
+        let none = Engines::default();
+        assert_eq!(
+            in_file_plan("a".as_ref(), "", &none),
+            ListPlan::Hint("ugrep is not installed".into())
+        );
+    }
+
+    #[test]
     fn query_starting_with_dash_follows_e() {
         let (cmd, _) = run(list_plan(
             Tab::Content,
@@ -1217,6 +1247,11 @@ mod tests {
             panic!("{plan:?}")
         };
         assert_eq!(show.program, PathBuf::from("/bin/git"));
+        assert_eq!(
+            &show.args[..3],
+            &os(&["-C", "/r", "show"])[..],
+            "the root's repository"
+        );
         assert_eq!(show.args.last().unwrap(), hash);
         assert_eq!(show.args[show.args.len() - 2], "--end-of-options");
         assert_eq!(delta.program, PathBuf::from("/bin/delta"));

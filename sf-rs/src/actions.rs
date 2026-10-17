@@ -2,10 +2,9 @@
 //! come after `--`; the Search pattern reaches nvim through the environment, never as an Ex command.
 
 use std::ffi::OsString;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use crate::commands::{Cmd, delta_args, is_hash};
-use crate::engines::Engines;
+use crate::commands::{Cmd, is_hash};
 use crate::items::Item;
 use crate::model::Tab;
 use crate::platform::{Clipboard, Platform, launch};
@@ -21,18 +20,16 @@ pub enum ActionKind {
     Copy,
     /// Ctrl-O: nvim.
     Editor,
-    /// Ctrl-T: search inside the file.
+    /// Ctrl-T: search inside the file (sf narrows Content to it).
     InFile,
-    /// Ctrl-U: git diff side by side.
+    /// Ctrl-U: the file's history with its changes (a view of sf).
     DiffSplit,
-    /// Ctrl-G: git diff through delta.
+    /// Ctrl-G: the file against HEAD (a view of sf).
     Diff,
-    /// Alt-G: short git diff.
+    /// Alt-G: the same, shorter (a view of sf).
     DiffShort,
-    /// Alt-U: git log of the file.
+    /// Alt-U: the file's log (a view of sf).
     Log,
-    /// Enter in Git: the whole commit, paged.
-    ShowCommit,
 }
 
 #[derive(Debug, PartialEq)]
@@ -100,41 +97,20 @@ pub fn find_editor(
 pub struct Env {
     /// Linux or WSL, the session, tmux, `$PATH`.
     pub platform: Platform,
-    /// The sub-functions folder (see `sub_functions`).
-    pub sub: PathBuf,
     /// Ctrl-O's editor; None when there is none.
     pub editor: Option<Editor>,
 }
 
 impl Env {
-    /// `bundle`: the release package's `lib/sf`, if sf runs from one.
-    pub fn detect(bundle: Option<&Path>) -> Env {
-        let home = dirs::home_dir();
+    pub fn detect() -> Env {
         let platform = Platform::detect();
         let editor = find_editor(
             &platform.path,
             std::env::var_os("VISUAL"),
             std::env::var_os("EDITOR"),
         );
-        Env {
-            platform,
-            sub: sub_functions(std::env::var_os("SF_SUBFUNCTIONS"), bundle, home),
-            editor,
-        }
+        Env { platform, editor }
     }
-}
-
-/// The sub-functions folder: `$SF_SUBFUNCTIONS`, else the bundle's, else `~/.SearchFunctions/sub-functions`.
-fn sub_functions(var: Option<OsString>, bundle: Option<&Path>, home: Option<PathBuf>) -> PathBuf {
-    var.filter(|v| !v.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| {
-            bundle
-                .map(|b| b.join("sub-functions"))
-                .filter(|s| s.is_dir())
-        })
-        .or_else(|| home.map(|h| h.join(".SearchFunctions/sub-functions")))
-        .unwrap_or_else(|| PathBuf::from("sub-functions"))
 }
 
 /// `sh -c CD_AND_EXEC sf DIR PROGRAM ARGS...`: runs PROGRAM in DIR; the script itself holds no data.
@@ -146,7 +122,6 @@ pub fn perform(
     item: &Item,
     query: &str,
     root: &Path,
-    e: &Engines,
     env: &Env,
 ) -> Outcome {
     if !item.selectable {
@@ -158,7 +133,6 @@ pub fn perform(
             return Outcome::Failed("Not a commit".into());
         };
         return match kind {
-            ActionKind::ShowCommit | ActionKind::Open => show_commit(hash, e),
             ActionKind::Copy => copied(platform.copy_text(hash.as_bytes())),
             _ => Outcome::Failed("Not available in Git".into()),
         };
@@ -169,8 +143,9 @@ pub fn perform(
         ActionKind::Reveal => done(platform.reveal(&path)),
         // Linux: the path as listed (relative to the root); WSL: its Windows form
         ActionKind::Copy => copied(platform.copy_path(item.key.as_os_str(), &path)),
-        ActionKind::ShowCommit => Outcome::Failed("Not available here".into()),
-        _ => terminal(kind, tab, item, query, root, &path, env),
+        ActionKind::Editor => editor_window(tab, item, query, root, &path, env),
+        // sf answers these itself (a view, Content narrowed to the file); here they mean nothing
+        _ => Outcome::Failed("Not available here".into()),
     }
 }
 
@@ -186,24 +161,8 @@ fn copied(result: Result<Clipboard, String>) -> Outcome {
     done(result.map(|how| Some(how.note().unwrap_or("Copied to the clipboard").to_string())))
 }
 
-fn show_commit(hash: &str, e: &Engines) -> Outcome {
-    let Some(git) = &e.git else {
-        return Outcome::Failed("git is not installed".into());
-    };
-    match &e.delta {
-        Some(delta) => Outcome::Foreground(vec![
-            Cmd::new(git).args(["show", "--color=always", "--end-of-options", hash]),
-            Cmd::new(delta)
-                .arg("--paging=always")
-                .args(delta_args(&e.theme)),
-        ]),
-        None => Outcome::Foreground(vec![Cmd::new(git).args(["show", "--end-of-options", hash])]),
-    }
-}
-
-/// The programs that need a terminal: a tmux window of their own, else the foreground.
-fn terminal(
-    kind: ActionKind,
+/// Ctrl-O: the editor in a tmux window of its own, else in the foreground.
+fn editor_window(
     tab: Tab,
     item: &Item,
     query: &str,
@@ -211,33 +170,17 @@ fn terminal(
     path: &Path,
     env: &Env,
 ) -> Outcome {
-    let sub = |name: &str| Cmd::new(env.sub.join(name)).arg(path);
-    let (window, title, cmd) = match kind {
-        ActionKind::Editor => {
-            let Some(e) = &env.editor else {
-                return Outcome::Failed("No editor: install nvim or set $EDITOR".into());
-            };
-            // the window is named after the editor, "nvim" as the fzf functions name it
-            let name = Path::new(&e.program).file_name().unwrap_or(&e.program);
-            (
-                name.to_string_lossy().into_owned(),
-                "editor",
-                editor(e, tab, item, query, path),
-            )
-        }
-        ActionKind::InFile => {
-            let mut cmd = sub("search_in_single_file");
-            if tab == Tab::Content && !query.is_empty() {
-                cmd = cmd.arg(query);
-            }
-            ("infile".into(), "file-content", cmd)
-        }
-        ActionKind::DiffSplit => ("diff".into(), "git", sub("show_diffs")),
-        ActionKind::Diff => ("diff".into(), "git", sub("git_diff")),
-        ActionKind::DiffShort => ("diff".into(), "git", sub("git_diff_short")),
-        ActionKind::Log => ("logs".into(), "git", sub("show_logs")),
-        _ => return Outcome::Failed(format!("{kind:?} needs no terminal")),
+    let Some(e) = &env.editor else {
+        return Outcome::Failed("No editor: install nvim or set $EDITOR".into());
     };
+    // the window is named after the editor, "nvim" as the fzf functions name it
+    let window = Path::new(&e.program)
+        .file_name()
+        .unwrap_or(&e.program)
+        .to_string_lossy()
+        .into_owned();
+    let title = "editor";
+    let cmd = editor(e, tab, item, query, path);
     if !env.platform.tmux {
         return Outcome::Foreground(vec![cmd]);
     }
@@ -309,6 +252,7 @@ mod tests {
     use crate::testutil::{calls, envs, stub, temp_dir};
     use std::ffi::OsStr;
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
+    use std::path::PathBuf;
 
     struct Fixture {
         bin: PathBuf,
@@ -318,8 +262,8 @@ mod tests {
 
     fn fixture(name: &str, wsl: bool, tmux: bool) -> Fixture {
         let base = temp_dir(name);
-        let (bin, sub, root) = (base.join("bin"), base.join("sub"), base.join("root dir"));
-        for d in [&bin, &sub, &root] {
+        let (bin, root) = (base.join("bin"), base.join("root dir"));
+        for d in [&bin, &root] {
             std::fs::create_dir_all(d).unwrap();
         }
         for p in [
@@ -334,15 +278,6 @@ mod tests {
             stub(&bin, p);
         }
         std::fs::write(bin.join("wslpath.out"), "C:\\w\\a.txt\n").unwrap();
-        for p in [
-            "search_in_single_file",
-            "show_diffs",
-            "git_diff",
-            "git_diff_short",
-            "show_logs",
-        ] {
-            stub(&sub, p);
-        }
         let path = std::env::join_paths([
             bin.clone(),
             PathBuf::from("/usr/bin"),
@@ -360,7 +295,6 @@ mod tests {
             bin,
             env: Env {
                 platform,
-                sub,
                 editor: Some(Editor {
                     program: "nvim".into(),
                     args: Vec::new(),
@@ -379,21 +313,12 @@ mod tests {
         parse(ParseKind::Files, key, 0).unwrap()
     }
 
-    fn engines() -> Engines {
-        Engines {
-            git: Some("/usr/bin/git".into()),
-            delta: Some("/usr/bin/delta".into()),
-            theme: "base16".into(),
-            ..Engines::default()
-        }
-    }
-
     fn file(key: &str) -> Item {
         parse(ParseKind::Files, key.as_bytes(), 0).unwrap()
     }
 
     fn act(f: &Fixture, kind: ActionKind, tab: Tab, item: &Item, query: &str) -> Outcome {
-        perform(kind, tab, item, query, &f.root, &engines(), &f.env)
+        perform(kind, tab, item, query, &f.root, &f.env)
     }
 
     #[test]
@@ -660,6 +585,30 @@ mod tests {
     }
 
     #[test]
+    fn the_keys_sf_answers_itself_are_no_actions_here() {
+        // sf opens Ctrl-T, Ctrl-U, Ctrl-G, Alt-G and Alt-U itself; what reaches actions is a tab without them
+        let f = fixture("act_not_here", false, false);
+        for kind in [
+            ActionKind::InFile,
+            ActionKind::Diff,
+            ActionKind::DiffShort,
+            ActionKind::DiffSplit,
+            ActionKind::Log,
+        ] {
+            assert_eq!(
+                act(&f, kind, Tab::Folders, &file("src"), ""),
+                Outcome::Failed("Not available here".into()),
+                "{kind:?}"
+            );
+        }
+        assert_eq!(
+            act(&f, ActionKind::Open, Tab::Git, &git_item("abcdef1"), ""),
+            Outcome::Failed("Not available in Git".into()),
+            "sf shows a commit itself"
+        );
+    }
+
+    #[test]
     fn editor_in_files_has_no_pattern() {
         let f = fixture("act_editor_files", false, false);
         let out = act(&f, ActionKind::Editor, Tab::Files, &file("a.txt"), "a.t");
@@ -711,7 +660,7 @@ mod tests {
         let mut f = fixture("act_tmux_format", false, true);
         f.root = f.root.join("a#(touch PWNED)b");
         std::fs::create_dir_all(&f.root).unwrap();
-        act(&f, ActionKind::Log, Tab::Files, &file("x"), "");
+        act(&f, ActionKind::Editor, Tab::Files, &file("x"), "");
         let first = &calls(&f.bin, "tmux")[0];
         let at = first.iter().position(|a| a == "sf").unwrap();
         assert_eq!(
@@ -725,7 +674,7 @@ mod tests {
             [
                 "new-window",
                 "-n",
-                "logs",
+                "nvim",
                 "-e",
                 &path_var,
                 "sh",
@@ -752,76 +701,13 @@ mod tests {
     }
 
     #[test]
-    fn sub_functions_come_from_override_bundle_or_home() {
-        let bundle = temp_dir("sub_bundle");
-        let home = PathBuf::from("/home/u");
-        let repo = PathBuf::from("/home/u/.SearchFunctions/sub-functions");
-        assert_eq!(
-            sub_functions(Some("/x".into()), Some(&bundle), Some(home.clone())),
-            PathBuf::from("/x")
-        );
-        assert_eq!(
-            sub_functions(Some("".into()), None, Some(home.clone())),
-            repo,
-            "empty: unset"
-        );
-        assert_eq!(
-            sub_functions(None, Some(&bundle), Some(home.clone())),
-            repo,
-            "bundle without sub-functions"
-        );
-        std::fs::create_dir(bundle.join("sub-functions")).unwrap();
-        assert_eq!(
-            sub_functions(None, Some(&bundle), Some(home)),
-            bundle.join("sub-functions")
-        );
-        assert_eq!(
-            sub_functions(None, None, None),
-            PathBuf::from("sub-functions")
-        );
-    }
-
-    #[test]
     fn tmux_failure_is_reported() {
         let f = fixture("act_tmux_fail", false, true);
         std::fs::write(f.bin.join("tmux.exit"), "1").unwrap();
         assert!(matches!(
-            act(&f, ActionKind::Log, Tab::Files, &file("a"), ""),
+            act(&f, ActionKind::Editor, Tab::Files, &file("a"), ""),
             Outcome::Failed(_)
         ));
-    }
-
-    #[test]
-    fn infile_passes_query_in_search_only() {
-        let f = fixture("act_infile", false, false);
-        let script = f.env.sub.join("search_in_single_file");
-        let path = f.root.join("a");
-        let out = act(&f, ActionKind::InFile, Tab::Content, &file("a"), "nee dle");
-        assert_eq!(
-            out,
-            Outcome::Foreground(vec![Cmd::new(&script).arg(&path).arg("nee dle")])
-        );
-        let out = act(&f, ActionKind::InFile, Tab::Files, &file("a"), "nee");
-        assert_eq!(out, Outcome::Foreground(vec![Cmd::new(&script).arg(&path)]));
-    }
-
-    #[test]
-    fn git_keys_on_a_file_use_the_sub_functions() {
-        let f = fixture("act_git_file", false, false);
-        let path = f.root.join("a");
-        for (kind, name) in [
-            (ActionKind::DiffSplit, "show_diffs"),
-            (ActionKind::Diff, "git_diff"),
-            (ActionKind::DiffShort, "git_diff_short"),
-            (ActionKind::Log, "show_logs"),
-        ] {
-            let out = act(&f, kind, Tab::Files, &file("a"), "");
-            assert_eq!(
-                out,
-                Outcome::Foreground(vec![Cmd::new(f.env.sub.join(name)).arg(&path)]),
-                "{kind:?}"
-            );
-        }
     }
 
     fn git_item(hash: &str) -> Item {
@@ -837,27 +723,6 @@ mod tests {
             std::fs::read_to_string(f.bin.join("wl-copy.stdin")).unwrap(),
             "abcdef1"
         );
-    }
-
-    #[test]
-    fn git_show_commit_is_paged_through_delta() {
-        let f = fixture("act_git_show", false, true);
-        let Outcome::Foreground(cmds) = act(
-            &f,
-            ActionKind::ShowCommit,
-            Tab::Git,
-            &git_item("abcdef1"),
-            "",
-        ) else {
-            panic!()
-        };
-        assert_eq!(cmds.len(), 2);
-        assert_eq!(
-            cmds[0].args,
-            ["show", "--color=always", "--end-of-options", "abcdef1"].map(OsString::from)
-        );
-        assert_eq!(cmds[1].program, PathBuf::from("/usr/bin/delta"));
-        assert!(cmds[1].args.contains(&"--paging=always".into()));
     }
 
     #[test]

@@ -7,7 +7,7 @@ was executed, the old handoff describes the state before that.
 How Bilal starts the next session (paste):
 
 > ~/.SearchFunctions'taki sf işine devam ediyoruz. Önce docs/sf-next-steps.md'yi oku, sonra sf-tui-design.md'yi.
-> "Next steps"teki Adım 3'ü (pencereler sf'nin içinde) uygula: inline, alt agent olmadan, testleriyle. Commit/push/silme için
+> "Next steps"teki Adım 4'ü (advancedsearch/detailedsearch sf'de) uygula: inline, alt agent olmadan, testleriyle. Commit/push/silme için
 > her seferinde benden onay al. Bana Türkçe kısa ara raporlar ver.
 
 ## State
@@ -65,9 +65,12 @@ How Bilal starts the next session (paste):
 | `preview.rs` | preview worker (newest wins, kills the old), `is_text`, header lines |
 | `app.rs` | state machine: keys, mouse, effects; list fills bottom-up like fzf (Up → next row, Home → top) |
 | `ui.rs` | drawing: tab bar with the keys centred, preview, list (bottom-up, highlight of typed words, scrollbars), input |
-| `actions.rs` | Enter/^O/^T/^U/^G/Alt-G/Alt-U/^E/^C: open/reveal/copy through `platform.rs`, tmux windows via `sh -c 'cd -- "$1" && shift && exec "$@"'` (never `tmux -c DIR`: format injection), nvim pattern via `$SF_QUERY` |
+| `actions.rs` | Enter/^O/^E/^C: open/reveal/copy through `platform.rs`, the editor (`find_editor`) in a tmux window via `sh -c 'cd -- "$1" && shift && exec "$@"'` (never `tmux -c DIR`: format injection), nvim pattern via `$SF_QUERY` |
 | `platform.rs` | `Platform::detect()` / `from_parts()` (Linux or WSL, display, tmux, PATH), `open`, `reveal` (D-Bus FileManager1, fallback xdg-open on the folder; WSL Explorer), `copy_path`/`copy_text` (`Clipboard`: wl-copy, xclip, xsel, PowerShell, tmux OSC 52, OSC 52), `command()` for `sf open|reveal|copy-path|copy-text`, `launch()` |
 | `doctor.rs` | `sf doctor`: the report from injected `run` (versions, D-Bus questions), `run_program` with a timeout |
+| `cli.rs` | `sf [TAB] [QUERY] [--print] [-- ENGINE-OPTIONS]`, the commands, `doctor`; refuses output-changing engine options |
+| `print.rs` | `--print` / piped output (rows as the window draws them on a terminal, real bytes into a pipe) |
+| `views.rs` | the views' git/delta plans (diff, history, log, commit) |
 | `main.rs` | arguments (`args_os`: tabs, the commands, `doctor`), event loop, foreground programs (SIGINT ignored meanwhile), tmux window name |
 
 Outside sf-rs: `sub-functions/platform_action` (the fzf functions' Enter/^E/^C; sf when its usage names the
@@ -132,12 +135,26 @@ Still open:
   requests" in the repo settings), aarch64 packages. A new release: raise `version` in `sf-rs/Cargo.toml`,
   commit, push, then tag `vX.Y.Z` the same.
 
-### Step 3: the terminal windows inside sf (later)
+### Step 3: the terminal windows inside sf — done 2026-10-17 (not released yet)
 
-Ctrl-T (in-file search, today `search_in_single_file`, bash + fzf), Ctrl-U/Ctrl-G/Alt-G (diffs; `show_diffs` needs
-the Node tool git-split-diffs, replaceable by `delta --side-by-side`), Alt-U (log) as native views. Then the package
-drops fzf and the scripts. The engines (fd, ugrep, bat, git, delta) stay external on purpose: reimplementing them
-would change the regex dialect and lose ugrep+'s archive/PDF search.
+What and why: `docs/sf-tui-design.md` → "Step 3". Ctrl-U/Ctrl-G/Alt-G/Alt-U and Enter in Git are views inside sf
+(`views.rs`: git through delta side by side, `/` search, Esc back); Ctrl-T narrows Content to the file (any of the
+typed words); sf runs no script any more, the package drops fzf and the scripts (12 MB). Tests: `cargo test` 277,
+`tests/e2e.sh` 114/114 (real git and delta for the views). Release v0.3.0 needs Bilal's OK (version, commit,
+push, CI dry run, tag).
+
+The engines (fd, ugrep, bat, git, delta) stay external on purpose: reimplementing them would change the regex
+dialect and lose ugrep+'s archive/PDF search.
+
+### Step 4: advancedsearch / detailedsearch in sf (next, approved 2026-10-17)
+
+- detailedsearch's list (each match with ~50 characters around it, `ugrep -o -B50 -A50`, archives and documents
+  too) as a new Content option **Each match** beside Matching lines (Bilal's choice).
+- advancedsearch's preview numbering: "Match #N" before each match in Content's preview (Bilal: yes). Open
+  detail to settle with a mockup before building: keep the 8 lines of context around each numbered match, or
+  only the matching lines as advancedsearch shows them.
+- Already covered by Content: advancedsearch's file list (Archives & documents for `_plus`; `sf content P -- -i
+  --exclude=x` for its case-insensitivity and excludes).
 
 ## Deferred minors (known, not fixed)
 

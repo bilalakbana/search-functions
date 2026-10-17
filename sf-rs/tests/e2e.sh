@@ -14,8 +14,8 @@ SF=${SF_BIN:-$here/../target/debug/sf}
 SF=$(realpath -- "$SF") || exit 1
 mkdir -p "$W" && W=$(realpath -- "$W")
 [[ -z $(ls -A "$W") ]] || { echo "e2e: $W is not empty" >&2; exit 2; }
-T=$W/tree LOG=$W/actions.log STUBS=$W/stubs SUB=$W/sub XDG=$W/xdg SHOTS=$W/screens
-mkdir -p "$STUBS" "$SUB" "$XDG" "$SHOTS" "$W/nogit"
+T=$W/tree LOG=$W/actions.log STUBS=$W/stubs XDG=$W/xdg SHOTS=$W/screens
+mkdir -p "$STUBS" "$XDG" "$SHOTS" "$W/nogit"
 bash "$here/tools/make_fixture.sh" "$T" >/dev/null || { echo "e2e: fixture failed" >&2; exit 2; }
 : > "$LOG"
 
@@ -36,8 +36,6 @@ stub "$STUBS" xdg-open OPEN
 stub "$STUBS" wl-copy COPY
 stub "$STUBS" dbus-send REVEAL
 stub "$STUBS" nvim NVIM 1
-stub "$SUB" search_in_single_file INFILE 3
-for s in show_diffs git_diff git_diff_short show_logs; do stub "$SUB" "$s" "$s" 1; done
 # WSL: wslpath answers C:\e2e and the path with backslashes; powershell.exe logs $SF_VALUE, $WSLENV and
 # its last argument (the statement)
 cat > "$STUBS/wslpath" <<'EOF'
@@ -78,7 +76,7 @@ back_to_sf() {
 tm kill-server 2>/dev/null
 # \$TMUX and \$TMUX_PANE are the private server's (expanded inside the pane), never the caller's own tmux
 tm new-session -d -s e2e -x 160 -y 40 "env -i HOME=$HOME PATH=$STUBS:/usr/local/bin:/usr/bin:/bin TERM=xterm-256color \
-    COLORTERM=truecolor LANG=C.UTF-8 XDG_CONFIG_HOME=$XDG SF_SUBFUNCTIONS=$SUB LESS=-R WAYLAND_DISPLAY=wayland-e2e \
+    COLORTERM=truecolor LANG=C.UTF-8 XDG_CONFIG_HOME=$XDG LESS=-R WAYLAND_DISPLAY=wayland-e2e \
     TMUX=\$TMUX TMUX_PANE=\$TMUX_PANE bash --norc --noprofile"
 keys "PS1='READY> '; cd '$T'" Enter
 wait_pane '^READY>' || { echo "e2e: shell did not start" >&2; exit 2; }
@@ -101,7 +99,17 @@ keys C-c;    expect_log 'files: Ctrl-C copies'         'COPY <src/main.c>'
 expect 'files: copy shows a status'        'Copied to the clipboard'
 keys C-o;    expect_log 'files: Ctrl-O nvim in tmux'   "NVIM [--] [$T/src/main.c]"; back_to_sf
 keys C-e;    expect_log 'files: Ctrl-E reveals'        "REVEAL [--session] [--print-reply] [--dest=org.freedesktop.FileManager1] [--type=method_call] [/org/freedesktop/FileManager1] [org.freedesktop.FileManager1.ShowItems] [array:string:file://$uT/src/main.c] [string:]"
-keys C-g;    expect_log 'files: Ctrl-G git diff'       "git_diff [$T/src/main.c]"; back_to_sf
+keys C-g
+expect 'files: Ctrl-G a view of the diff'  'main\.c · changes against HEAD'
+expect 'files: an unchanged file says so'  'No local changes in .*main\.c'
+keys Escape
+expect 'files: Esc leaves the view'        "Files › main .* 1/$n_files"
+keys C-t
+expect "files: Ctrl-T the file's lines"    'In main\.c › .* 3/3'
+type_ 'second more'
+expect 'files: Ctrl-T any of the words'    'In main\.c › second more .* 2/2'
+keys Escape
+expect 'files: Esc back to Files'          "Files › main .* 1/$n_files"
 
 keys Tab
 expect 'tab: Search keeps the query'       'Content › main'
@@ -132,10 +140,9 @@ expect 'lines: hint changes'               'matching lines'
 shot lines
 keys C-o;    expect_log 'lines: Ctrl-O at the line'   "NVIM [+1] [--]"; back_to_sf
 keys C-t
-expect_log 'lines: Ctrl-T passes the pattern' "INFILE [$T/"
-grep -q "INFILE .*\[needle\]" "$LOG" && ok 'lines: Ctrl-T got the pattern' || bad 'lines: Ctrl-T pattern'
-tm list-windows -t e2e -F '#W' | grep -qx infile && ok 'tmux: infile window' || bad 'tmux: no infile window'
-back_to_sf
+expect 'lines: Ctrl-T keeps the pattern'   'In out\.txt › needle .* 1/1'
+keys Escape
+expect 'lines: Esc back to Content'        'Content › needle'
 keys C-s Down Space Escape
 expect 'archives: zip member line'         'docs/arch\.zip\{inzip\.txt\}:1:needle inside zip'
 keys C-s Space Down Space Escape
@@ -244,31 +251,64 @@ keys "clear; '$SF' files -- -l; echo rc-refused=\$?" Enter
 expect 'refused: the reason'               'sf files: -l is refused'
 expect 'refused: exit 2'                   '^rc-refused=2'
 
-# a release package's layout, bin/sf beside lib/sf: sf takes engines and sub-functions from lib/sf first and
-# puts lib/sf in front of the PATH of what it starts, tmux windows included
+# a release package's layout, bin/sf beside lib/sf: sf takes its engines from lib/sf first and puts
+# lib/sf in front of the PATH of what it starts, tmux windows included (here an nvim of the bundle)
 PKG=$W/pkg
-mkdir -p "$PKG/bin" "$PKG/lib/sf/sub-functions"
+mkdir -p "$PKG/bin" "$PKG/lib/sf"
 cp "$SF" "$PKG/bin/sf"
 for e in fd ugrep; do ln -s "$(command -v "$e")" "$PKG/lib/sf/$e"; done   # the pane's PATH may have neither
-cat > "$PKG/lib/sf/sub-functions/search_in_single_file" <<EOF
+cat > "$PKG/lib/sf/nvim" <<EOF
 #!/bin/bash
-printf 'BUNDLED-INFILE %s PATH=%s\n' "\$1" "\$PATH" >> "$LOG"
+printf 'BUNDLED-NVIM %s PATH=%s\n' "\${@: -1}" "\$PATH" >> "$LOG"
 sleep 1
 EOF
-chmod +x "$PKG/lib/sf/sub-functions/search_in_single_file"
-keys "clear; env -u SF_SUBFUNCTIONS '$PKG/bin/sf' doctor; echo rc-bundle=\$?" Enter
+chmod +x "$PKG/lib/sf/nvim"
+keys "clear; '$PKG/bin/sf' doctor; echo rc-bundle=\$?" Enter
 expect 'bundle: ugrep from lib/sf'         "  ugrep +$PKG/lib/sf/ugrep "
-expect 'bundle: its sub-functions'         "Sub-functions $PKG/lib/sf/sub-functions"
+expect 'bundle: the editor from lib/sf'    "  editor +$PKG/lib/sf/nvim "
 expect 'bundle: doctor exits 0'            '^rc-bundle=0'
-keys "clear; cd '$T' && env -u SF_SUBFUNCTIONS '$PKG/bin/sf'" Enter
+keys "clear; cd '$T' && '$PKG/bin/sf'" Enter
 expect 'bundle: sf starts'                 'Files › type to filter'
 type_ 'main'
 expect 'bundle: one file'                  "Files › main .* 1/$n_files"
-keys C-t
-expect_log 'bundle: Ctrl-T runs its sub-function, lib/sf first in PATH' "BUNDLED-INFILE $T/src/main.c PATH=$PKG/lib/sf:$STUBS:"
+keys C-o
+expect_log 'bundle: Ctrl-O in a window, lib/sf first in its PATH' "BUNDLED-NVIM $T/src/main.c PATH=$PKG/lib/sf:$STUBS:"
 back_to_sf
 keys Escape
 expect 'bundle: quit'                      '^READY>\s*$'
+
+# the views over real git and delta: a changed file's diff (and / searching it), its history, its log,
+# a commit; Esc or q goes back
+printf 'changed by e2e\n' >> "$T/empty.txt"
+keys "clear; '$SF' files empty" Enter
+expect 'views: sf starts'                  'Files › empty .* 1/'
+keys C-g
+expect 'views: Ctrl-G shows the change'    'changed by e2e'
+shot view_diff
+keys /
+type_ 'changed'
+expect 'views: / types the search'         '^/ changed'
+keys Enter
+expect 'views: the keys again'             'Esc back'
+keys Escape
+keys C-u
+expect 'views: Ctrl-U the history'         'empty\.txt · history with changes'
+keys Escape
+keys M-u
+expect 'views: Alt-U the log'              'first commit'
+keys q
+expect 'views: q goes back'                'Files › empty'
+keys Escape
+expect 'views: quit'                       '^READY>\s*$'
+keys "clear; '$SF' git" Enter
+expect 'views: the Git tab'                'second \(feat\)'
+keys Enter
+expect 'views: Enter shows the commit'     'commit [0-9a-f]{40}'
+shot view_commit
+keys Escape
+expect 'views: back in Git'                'Git › '
+keys Escape
+expect 'views: done'                       '^READY>\s*$'
 
 echo "pass=$PASS fail=$FAIL (screens in $SHOTS)"
 tm kill-server

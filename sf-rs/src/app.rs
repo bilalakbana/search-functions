@@ -18,6 +18,7 @@ use crate::items::{self, Item};
 use crate::model::{Opt, Options, Tab};
 use crate::preview::PreviewMsg;
 use crate::runner::ListMsg;
+use crate::views::ViewKind;
 
 /// Search runs this long after the last keystroke.
 pub const SEARCH_DELAY: Duration = Duration::from_millis(150);
@@ -38,7 +39,63 @@ pub enum Effect {
     SaveConfig,
     Act(ActionKind),
     ChangeRoot(PathBuf),
+    /// Request the open view's text for `view_gen`.
+    View,
     Quit,
+}
+
+/// Ctrl-T: Content narrowed to one file, the lines with any of the typed words; Esc goes back.
+#[derive(Clone, Debug)]
+pub struct Scope {
+    /// The file, as its row named it (relative to the root).
+    pub key: OsString,
+    /// The tab and the query to go back to.
+    back: (Tab, String),
+}
+
+/// A full-screen view (a diff, a history, a log, a commit) over the tabs; Esc goes back.
+#[derive(Debug)]
+pub struct View {
+    pub kind: ViewKind,
+    pub text: Text<'static>,
+    /// The first line shown.
+    pub scroll: usize,
+    pub loading: bool,
+    /// The width it was made for (delta lays out side by side to it).
+    pub width: u16,
+    /// What `/` looks for; `searching` while it is being typed.
+    pub search: String,
+    pub searching: bool,
+    /// The line the search found last; None when it found nothing.
+    pub found: Option<usize>,
+}
+
+impl View {
+    fn line_has(&self, i: usize, needle: &str) -> bool {
+        let line: String = self.text.lines[i]
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        line.to_lowercase().contains(needle)
+    }
+
+    /// The next line holding the search after `from` (forward) or before it, None when none does.
+    fn find(&self, from: Option<usize>, forward: bool) -> Option<usize> {
+        let needle = self.search.to_lowercase();
+        if needle.is_empty() {
+            return None;
+        }
+        let n = self.text.lines.len();
+        if forward {
+            let start = from.map_or(0, |f| f + 1);
+            (start..n).find(|&i| self.line_has(i, &needle))
+        } else {
+            (0..from.unwrap_or(n))
+                .rev()
+                .find(|&i| self.line_has(i, &needle))
+        }
+    }
 }
 
 /// Where things were drawn, for the mouse; filled by `ui::draw`.
@@ -52,6 +109,8 @@ pub struct ScreenLayout {
     pub preview: Rect,
     /// The popup with its border; empty when closed.
     pub popup: Rect,
+    /// The text area of an open view.
+    pub view: Rect,
     pub popup_rows: Vec<(Opt, Rect)>,
 }
 
@@ -64,6 +123,11 @@ pub struct App {
     pub extra: Option<(Tab, Vec<OsString>)>,
     /// The editor's name for the Ctrl-O key in the tab bar.
     pub editor: String,
+    /// A diff, history, log or commit shown over the tabs.
+    pub view: Option<View>,
+    /// Ctrl-T's file, while Content is narrowed to it.
+    pub scope: Option<Scope>,
+    pub view_gen: u64,
     pub options: Options,
     pub engines: Engines,
     pub filter: Filter,
@@ -108,6 +172,9 @@ impl App {
             query: String::new(),
             extra: None,
             editor: "nvim".into(),
+            view: None,
+            view_gen: 0,
+            scope: None,
             options,
             engines,
             filter: Filter::new(),
@@ -139,7 +206,18 @@ impl App {
         self.filter.get(self.selected)
     }
 
+    /// What ugrep searches for: the query, or in a file (Ctrl-T) any of its words.
+    pub fn pattern(&self) -> String {
+        match self.scope {
+            Some(_) => self.query.split_whitespace().collect::<Vec<_>>().join("|"),
+            None => self.query.clone(),
+        }
+    }
+
     pub fn list_plan(&self) -> ListPlan {
+        if let Some(scope) = &self.scope {
+            return commands::in_file_plan(&scope.key, &self.pattern(), &self.engines);
+        }
         commands::list_plan_with(
             self.tab,
             &self.options,
@@ -159,11 +237,17 @@ impl App {
     }
 
     pub fn preview_plan(&self) -> PreviewPlan {
+        // in a file (Ctrl-T) the rows are always lines: bat at the line, whatever the options say
+        let mut options = self.options.clone();
+        if self.scope.is_some() {
+            options.content.matching_lines = true;
+            options.content.archives = false;
+        }
         match self.current() {
             Some(item) => commands::preview_plan_with(
                 self.tab,
-                &self.options,
-                &self.query,
+                &options,
+                &self.pattern(),
                 item,
                 self.layout.preview.width.max(20),
                 &self.engines,
@@ -195,6 +279,18 @@ impl App {
     pub fn handle_key(&mut self, key: KeyEvent, now: Instant) -> Vec<Effect> {
         if key.kind == KeyEventKind::Release {
             return Vec::new();
+        }
+        if self.view.is_some() {
+            return self.view_key(key);
+        }
+        if self.scope.is_some() {
+            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+            match key.code {
+                KeyCode::Esc | KeyCode::Tab | KeyCode::BackTab => return self.leave_scope(),
+                // no options in a file; already in it
+                KeyCode::Char('s' | 't') if ctrl => return Vec::new(),
+                _ => {}
+            }
         }
         if self.popup.is_some() {
             return self.popup_key(key, now);
@@ -257,6 +353,19 @@ impl App {
     pub fn handle_mouse(&mut self, m: MouseEvent, now: Instant) -> Vec<Effect> {
         let at = Position::new(m.column, m.row);
         let left_click = m.kind == MouseEventKind::Down(MouseButton::Left);
+        if let Some(v) = self.view.as_mut() {
+            let last = v
+                .text
+                .lines
+                .len()
+                .saturating_sub(self.layout.view.height as usize);
+            match m.kind {
+                MouseEventKind::ScrollDown => v.scroll = (v.scroll + 3).min(last),
+                MouseEventKind::ScrollUp => v.scroll = v.scroll.saturating_sub(3),
+                _ => {}
+            }
+            return Vec::new();
+        }
         if self.popup.is_some() {
             if !left_click {
                 return Vec::new();
@@ -483,18 +592,152 @@ impl App {
                 )]
             }
             Tab::Folders => vec![Effect::ChangeRoot(self.root.join(&item.key))],
-            Tab::Git => vec![Effect::Act(ActionKind::ShowCommit)],
+            Tab::Git => match item.key.to_str().filter(|h| commands::is_hash(h)) {
+                Some(hash) => self.open_view(ViewKind::Commit {
+                    root: self.root.clone(),
+                    hash: hash.to_string(),
+                }),
+                None => {
+                    self.set_status("Not a commit", true, now);
+                    Vec::new()
+                }
+            },
             _ => vec![Effect::Act(ActionKind::Open)],
         }
     }
 
     fn act(&mut self, kind: ActionKind, now: Instant) -> Vec<Effect> {
-        if self.current().is_some_and(|i| i.selectable) {
-            vec![Effect::Act(kind)]
-        } else {
+        let Some(item) = self.current().filter(|i| i.selectable) else {
             self.set_status("Nothing selected", true, now);
-            Vec::new()
+            return Vec::new();
+        };
+        if kind == ActionKind::InFile && matches!(self.tab, Tab::Files | Tab::Content) {
+            let key = item.key.clone();
+            return self.enter_scope(key);
         }
+        let path = self.root.join(&item.key);
+        let view = match (self.tab, kind) {
+            (Tab::Git, _) => None, // the commit's keys; the others say they are not for Git
+            (_, ActionKind::Diff) => Some(ViewKind::Diff { path, full: true }),
+            (_, ActionKind::DiffShort) => Some(ViewKind::Diff { path, full: false }),
+            (_, ActionKind::DiffSplit) => Some(ViewKind::History { path }),
+            (_, ActionKind::Log) => Some(ViewKind::Log { path }),
+            _ => None,
+        };
+        match view {
+            Some(kind) => self.open_view(kind),
+            None => vec![Effect::Act(kind)],
+        }
+    }
+
+    fn enter_scope(&mut self, key: OsString) -> Vec<Effect> {
+        self.scope = Some(Scope {
+            key,
+            back: (self.tab, self.query.clone()),
+        });
+        if self.tab != Tab::Content {
+            self.query.clear(); // a filter of names is no pattern for the lines
+        }
+        self.tab = Tab::Content;
+        self.preview = Text::default();
+        self.preview_scroll = 0;
+        vec![self.run_list()]
+    }
+
+    fn leave_scope(&mut self) -> Vec<Effect> {
+        let Some(scope) = self.scope.take() else {
+            return Vec::new();
+        };
+        (self.tab, self.query) = scope.back;
+        self.preview = Text::default();
+        self.preview_scroll = 0;
+        vec![self.run_list()]
+    }
+
+    fn open_view(&mut self, kind: ViewKind) -> Vec<Effect> {
+        self.view_gen += 1;
+        self.view = Some(View {
+            kind,
+            text: Text::default(),
+            scroll: 0,
+            loading: true,
+            width: 0,
+            search: String::new(),
+            searching: false,
+            found: None,
+        });
+        vec![Effect::View]
+    }
+
+    /// A view's text arrived; an empty one says why.
+    pub fn on_view(&mut self, msg: PreviewMsg) {
+        let generation = self.view_gen;
+        let Some(v) = self.view.as_mut().filter(|_| msg.generation == generation) else {
+            return;
+        };
+        v.text = if msg.text.lines.is_empty() {
+            Text::styled(
+                v.kind.empty_note(),
+                ratatui::style::Style::new().fg(crate::theme::DIM),
+            )
+        } else {
+            msg.text
+        };
+        v.loading = false;
+    }
+
+    /// Keys while a view is open: they never reach the tabs.
+    fn view_key(&mut self, key: KeyEvent) -> Vec<Effect> {
+        let page = (self.layout.view.height as usize).max(1);
+        let Some(v) = self.view.as_mut() else {
+            return Vec::new();
+        };
+        if v.searching {
+            match key.code {
+                KeyCode::Esc => {
+                    v.searching = false;
+                    v.search.clear();
+                }
+                KeyCode::Enter => {
+                    v.searching = false;
+                    v.found = v.find(v.scroll.checked_sub(1), true);
+                }
+                KeyCode::Backspace => {
+                    v.search.pop();
+                }
+                KeyCode::Char(c) if !key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    v.search.push(c)
+                }
+                _ => {}
+            }
+            v.scroll = v.found.unwrap_or(v.scroll);
+            return Vec::new();
+        }
+        let last = v.text.lines.len().saturating_sub(page);
+        match key.code {
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.view = None;
+                return Vec::new();
+            }
+            KeyCode::Up | KeyCode::Char('k') => v.scroll = v.scroll.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => v.scroll = (v.scroll + 1).min(last),
+            KeyCode::PageUp | KeyCode::Char('b') => v.scroll = v.scroll.saturating_sub(page),
+            KeyCode::PageDown | KeyCode::Char(' ') => v.scroll = (v.scroll + page).min(last),
+            KeyCode::Home | KeyCode::Char('g') => v.scroll = 0,
+            KeyCode::End | KeyCode::Char('G') => v.scroll = last,
+            KeyCode::Char('/') => {
+                v.searching = true;
+                v.search.clear();
+            }
+            KeyCode::Char(c @ ('n' | 'N')) => {
+                if let Some(i) = v.find(v.found, c == 'n') {
+                    v.found = Some(i);
+                    v.scroll = i;
+                }
+            }
+            _ => {}
+        }
+        Vec::new()
     }
 
     fn popup_key(&mut self, key: KeyEvent, now: Instant) -> Vec<Effect> {
@@ -548,6 +791,7 @@ fn delete_word(q: &mut String) {
 pub(crate) mod tests {
     use super::*;
     use crate::commands::ParseKind;
+    use ratatui::text::Line;
 
     pub fn engines() -> Engines {
         let p = |n: &str| Some(PathBuf::from(format!("/bin/{n}")));
@@ -595,6 +839,152 @@ pub(crate) mod tests {
             panic!()
         };
         assert!(!cmd.args.contains(&"rs".into()), "{:?}", cmd.args);
+    }
+
+    /// A view's text of `n` lines "line 0" .. "line n-1", arrived for the current view.
+    fn view_text(a: &mut App, n: usize) {
+        let text = Text::from(
+            (0..n)
+                .map(|i| Line::from(format!("line {i}")))
+                .collect::<Vec<_>>(),
+        );
+        a.on_view(PreviewMsg {
+            generation: a.view_gen,
+            text,
+            header_lines: 0,
+        });
+    }
+
+    #[test]
+    fn git_keys_open_views_of_the_selected_file() {
+        let (mut a, now) = app(Tab::Files);
+        feed(&mut a, &["src/a.c"]);
+        let path = PathBuf::from("/r/p/src/a.c");
+        for (k, kind) in [
+            (
+                ctrl('g'),
+                ViewKind::Diff {
+                    path: path.clone(),
+                    full: true,
+                },
+            ),
+            (
+                alt(KeyCode::Char('g')),
+                ViewKind::Diff {
+                    path: path.clone(),
+                    full: false,
+                },
+            ),
+            (ctrl('u'), ViewKind::History { path: path.clone() }),
+            (
+                alt(KeyCode::Char('u')),
+                ViewKind::Log { path: path.clone() },
+            ),
+        ] {
+            a.view = None;
+            assert_eq!(a.handle_key(k, now), [Effect::View]);
+            let v = a.view.as_ref().unwrap();
+            assert_eq!((&v.kind, v.loading), (&kind, true));
+        }
+    }
+
+    #[test]
+    fn enter_in_git_views_the_commit() {
+        let (mut a, now) = app(Tab::Git);
+        a.on_list(ListMsg::Items(
+            a.list_gen,
+            rows(ParseKind::Git, &["* x\x1fabcdef1"]),
+        ));
+        assert_eq!(a.handle_key(key(KeyCode::Enter), now), [Effect::View]);
+        assert_eq!(
+            a.view.as_ref().unwrap().kind,
+            ViewKind::Commit {
+                root: "/r/p".into(),
+                hash: "abcdef1".into()
+            }
+        );
+    }
+
+    #[test]
+    fn a_view_scrolls_by_line_page_and_end_and_esc_closes_it() {
+        let (mut a, now) = app(Tab::Files);
+        feed(&mut a, &["a"]);
+        a.handle_key(ctrl('g'), now);
+        a.layout.view = Rect::new(1, 1, 80, 10);
+        view_text(&mut a, 100);
+        let scroll = |a: &App| a.view.as_ref().unwrap().scroll;
+        a.handle_key(key(KeyCode::Down), now);
+        assert_eq!(scroll(&a), 1);
+        a.handle_key(key(KeyCode::PageDown), now);
+        assert_eq!(scroll(&a), 11);
+        a.handle_key(key(KeyCode::End), now);
+        assert_eq!(scroll(&a), 90, "the last page");
+        a.handle_key(key(KeyCode::PageDown), now);
+        assert_eq!(scroll(&a), 90);
+        a.handle_key(key(KeyCode::Home), now);
+        assert_eq!(scroll(&a), 0);
+        assert!(
+            a.handle_key(key(KeyCode::Esc), now).is_empty(),
+            "Esc leaves the view, not sf"
+        );
+        assert!(a.view.is_none());
+    }
+
+    #[test]
+    fn slash_searches_the_view_and_n_goes_on() {
+        let (mut a, now) = app(Tab::Files);
+        feed(&mut a, &["a"]);
+        a.handle_key(ctrl('g'), now);
+        a.layout.view = Rect::new(1, 1, 80, 10);
+        view_text(&mut a, 100);
+        a.handle_key(key(KeyCode::Char('/')), now);
+        for c in "LINE 4".chars() {
+            a.handle_key(key(KeyCode::Char(c)), now);
+        }
+        a.handle_key(key(KeyCode::Enter), now);
+        let v = a.view.as_ref().unwrap();
+        assert_eq!(
+            (v.scroll, v.searching),
+            (4, false),
+            "case-insensitive, from the top"
+        );
+        a.handle_key(key(KeyCode::Char('n')), now);
+        assert_eq!(a.view.as_ref().unwrap().scroll, 40, "line 40 is the next");
+        a.handle_key(key(KeyCode::Char('N')), now);
+        assert_eq!(a.view.as_ref().unwrap().scroll, 4);
+        a.handle_key(key(KeyCode::Char('q')), now);
+        assert!(a.view.is_none(), "q also leaves");
+    }
+
+    #[test]
+    fn an_empty_view_says_why_and_old_results_are_dropped() {
+        let (mut a, now) = app(Tab::Files);
+        feed(&mut a, &["src/a.c"]);
+        a.handle_key(ctrl('g'), now);
+        let stale = a.view_gen;
+        a.handle_key(key(KeyCode::Esc), now);
+        a.handle_key(ctrl('g'), now);
+        a.on_view(PreviewMsg {
+            generation: stale,
+            text: Text::from("old"),
+            header_lines: 0,
+        });
+        assert!(
+            a.view.as_ref().unwrap().loading,
+            "an older view's text is dropped"
+        );
+        a.on_view(PreviewMsg {
+            generation: a.view_gen,
+            text: Text::default(),
+            header_lines: 0,
+        });
+        let v = a.view.as_ref().unwrap();
+        let shown: String = v.text.lines[0]
+            .spans
+            .iter()
+            .map(|s| s.content.as_ref())
+            .collect();
+        assert!(shown.contains("No local changes") && !v.loading, "{shown}");
     }
 
     pub fn rows(kind: ParseKind, raws: &[&str]) -> Vec<Item> {
@@ -869,21 +1259,12 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn enter_elsewhere_opens_or_shows_the_commit() {
+    fn enter_elsewhere_opens_the_file() {
         let (mut a, now) = app(Tab::Files);
         feed(&mut a, &["a"]);
         assert_eq!(
             a.handle_key(key(KeyCode::Enter), now),
             [Effect::Act(ActionKind::Open)]
-        );
-        let (mut g, now) = app(Tab::Git);
-        g.on_list(ListMsg::Items(
-            g.list_gen,
-            rows(ParseKind::Git, &["* x\x1fabcdef1"]),
-        ));
-        assert_eq!(
-            g.handle_key(key(KeyCode::Enter), now),
-            [Effect::Act(ActionKind::ShowCommit)]
         );
     }
 
@@ -891,13 +1272,10 @@ pub(crate) mod tests {
     fn action_keys() {
         let (mut a, now) = app(Tab::Files);
         feed(&mut a, &["a"]);
+        // Ctrl-U, Ctrl-G, Alt-G and Alt-U open views (git_keys_open_views_of_the_selected_file),
+        // Ctrl-T searches inside the file (ctrl_t_searches_inside_the_file_with_any_of_the_words)
         let cases = [
             (ctrl('o'), ActionKind::Editor),
-            (ctrl('t'), ActionKind::InFile),
-            (ctrl('u'), ActionKind::DiffSplit),
-            (ctrl('g'), ActionKind::Diff),
-            (alt(KeyCode::Char('g')), ActionKind::DiffShort),
-            (alt(KeyCode::Char('u')), ActionKind::Log),
             (ctrl('e'), ActionKind::Reveal),
             (ctrl('c'), ActionKind::Copy),
         ];
@@ -1192,6 +1570,69 @@ pub(crate) mod tests {
             [Effect::Act(ActionKind::Open)],
             "two clicks on two rows are no double click"
         );
+    }
+
+    #[test]
+    fn ctrl_t_searches_inside_the_file_with_any_of_the_words() {
+        let (mut a, now) = app(Tab::Files);
+        a.query = "a.c".into();
+        feed(&mut a, &["src/a.c"]);
+        assert_eq!(a.handle_key(ctrl('t'), now), [Effect::RunList]);
+        assert_eq!(
+            (a.tab, a.query.as_str()),
+            (Tab::Content, ""),
+            "a Files filter is no pattern"
+        );
+        let ListPlan::Run { cmd, kind } = a.list_plan() else {
+            panic!()
+        };
+        assert_eq!(kind, ParseKind::SearchLines);
+        assert_eq!(cmd.args.last(), Some(&OsString::from("src/a.c")));
+        for c in "foo  bar".chars() {
+            a.handle_key(key(KeyCode::Char(c)), now);
+        }
+        assert_eq!(a.pattern(), "foo|bar");
+        let ListPlan::Run { cmd, .. } = a.list_plan() else {
+            panic!()
+        };
+        assert!(cmd.args.contains(&"foo|bar".into()), "{:?}", cmd.args);
+        // Esc goes back to the tab and its filter; the next one quits
+        assert_eq!(a.handle_key(key(KeyCode::Esc), now), [Effect::RunList]);
+        assert_eq!(
+            (a.tab, a.query.as_str(), a.scope.is_none()),
+            (Tab::Files, "a.c", true)
+        );
+        assert_eq!(a.handle_key(key(KeyCode::Esc), now), [Effect::Quit]);
+    }
+
+    #[test]
+    fn ctrl_t_in_content_keeps_the_pattern() {
+        let (mut a, now) = app(Tab::Content);
+        a.query = "needle".into();
+        feed(&mut a, &["src/a.c"]);
+        a.handle_key(ctrl('t'), now);
+        assert_eq!(a.query, "needle");
+        assert_eq!(a.handle_key(ctrl('t'), now), [], "already in it");
+        assert_eq!(
+            a.handle_key(key(KeyCode::Tab), now),
+            [Effect::RunList],
+            "Tab leaves too"
+        );
+        assert_eq!(a.tab, Tab::Content);
+        assert!(a.scope.is_none());
+    }
+
+    #[test]
+    fn wheel_scrolls_an_open_view() {
+        let (mut a, now) = app(Tab::Files);
+        feed(&mut a, &["a"]);
+        a.handle_key(ctrl('g'), now);
+        a.layout.view = Rect::new(1, 1, 80, 10);
+        view_text(&mut a, 100);
+        a.handle_mouse(mouse(MouseEventKind::ScrollDown, a.layout.view), now);
+        assert_eq!(a.view.as_ref().unwrap().scroll, 3);
+        a.handle_mouse(mouse(MouseEventKind::ScrollUp, a.layout.view), now);
+        assert_eq!(a.view.as_ref().unwrap().scroll, 0);
     }
 
     #[test]

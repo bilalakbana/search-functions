@@ -3,7 +3,6 @@
 use std::ffi::OsStr;
 use std::fmt::Write as _;
 use std::io::Read;
-use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -23,15 +22,6 @@ pub type Run<'a> = &'a dyn Fn(&Path, &[&str]) -> Option<String>;
 /// needs `--replace` (3.6.0); before 5.0.0 (3.7.2, 3.11.2) only a line's first match is marked.
 const UGREP_REPLACE: (u32, u32, u32) = (3, 6, 0);
 const UGREP_ALL_MATCHES: (u32, u32, u32) = (5, 0, 0);
-
-/// The sub-functions the keys run.
-const SCRIPTS: [(&str, &str); 5] = [
-    ("search_in_single_file", "Ctrl-T"),
-    ("show_diffs", "Ctrl-U"),
-    ("git_diff", "Ctrl-G"),
-    ("git_diff_short", "Alt-G"),
-    ("show_logs", "Alt-U"),
-];
 
 const FILE_MANAGER: &str = "org.freedesktop.FileManager1";
 
@@ -167,28 +157,6 @@ pub fn report(env: &Env, engines: &Engines, config: Option<&Path>, run: Run) -> 
         row(&format!("  {name}"), &value);
     }
 
-    row("Sub-functions", &env.sub.display().to_string());
-    if env.sub.is_dir() {
-        let missing: Vec<String> = SCRIPTS
-            .iter()
-            .filter(|(name, _)| {
-                !env.sub
-                    .join(name)
-                    .metadata()
-                    .is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
-            })
-            .map(|(name, key)| format!("{name} ({key})"))
-            .collect();
-        if !missing.is_empty() {
-            row("  missing:", &missing.join(", "));
-        }
-    } else {
-        row(
-            "  missing:",
-            "the folder (Ctrl-T, Ctrl-U, Ctrl-G, Alt-G, Alt-U)",
-        );
-    }
-
     match config {
         None => row(
             "Config",
@@ -316,13 +284,11 @@ mod tests {
         config: PathBuf,
     }
 
-    /// A temp folder with the (empty, executable) programs, an empty sub-functions folder and a
-    /// config path that does not exist yet.
+    /// A temp folder with the (empty, executable) programs and a config path that does not exist yet.
     fn setup(name: &str, programs: &[&str], platform: Platform) -> Setup {
         let base = temp_dir(name);
-        let (bin, sub) = (base.join("bin"), base.join("sub"));
+        let bin = base.join("bin");
         std::fs::create_dir_all(&bin).unwrap();
-        std::fs::create_dir_all(&sub).unwrap();
         for p in programs {
             executable(&bin.join(p), "");
         }
@@ -333,7 +299,6 @@ mod tests {
             env: Env {
                 editor: crate::actions::find_editor(&path, None, None),
                 platform: Platform { path, ..platform },
-                sub,
             },
             engines,
             config: base.join("config.toml"),
@@ -498,18 +463,6 @@ mod tests {
         let s = setup("doctor_wsl_no_interop", &[], wsl);
         let r = report(&s.env, &s.engines, Some(&s.config), &answers);
         assert!(line(&r, "Windows").contains("interop"), "{r}");
-    }
-
-    #[test]
-    fn missing_sub_functions_are_named_with_their_keys() {
-        let s = setup("doctor_sub", &[], wayland_tmux());
-        executable(&s.env.sub.join("search_in_single_file"), "");
-        executable(&s.env.sub.join("show_logs"), "");
-        let r = report(&s.env, &s.engines, Some(&s.config), &answers);
-        assert_eq!(
-            line(&r, "missing:"),
-            "show_diffs (Ctrl-U), git_diff (Ctrl-G), git_diff_short (Alt-G)"
-        );
     }
 
     #[test]

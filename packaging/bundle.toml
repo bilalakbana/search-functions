@@ -1,26 +1,13 @@
 # What sf's release package (sf-linux-x86_64.tar.gz) holds besides sf itself; read by packaging/build.py.
 # Every download is pinned by URL and sha256, which the build checks. To move to a new version change the
-# version, the URL and the sha256 together (fzf publishes fzf_<version>_checksums.txt to compare with; fd,
-# bat and delta publish no checksums, so their sha256 is taken from the download itself).
+# version, the URL and the sha256 together (fd, bat and delta publish no checksums, so their sha256 is
+# taken from the download itself).
 
 # The container ugrep is built in: static, against musl. The tag is for people, the digest is what counts.
 alpine = "alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6"
 
 # Programs that go to lib/sf. `files` are paths inside the archive copied to lib/sf under their own name;
 # `licenses` are the license files inside the archive; `license_urls` license texts fetched separately.
-
-[[program]]
-name = "fzf"
-version = "0.74.5"
-license = "MIT"
-source = "https://github.com/junegunn/fzf"
-url = "https://github.com/junegunn/fzf/releases/download/v0.74.5/fzf-0.74.5-linux_amd64.tar.gz"
-sha256 = "d47d7f882972c7d674dbbba998ffa4116e68379616ffac7695d0671e9a722c5f"
-files = ["fzf"]
-licenses = []
-license_urls = [
-    { url = "https://raw.githubusercontent.com/junegunn/fzf/v0.74.5/LICENSE", sha256 = "a296f423c0d30ce3581435e78e7e36c5fe73984a882d8720c72e713b4593588b" },
-]
 
 [[program]]
 name = "fd"

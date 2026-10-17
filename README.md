@@ -127,8 +127,8 @@ These shortcuts apply when using the interactive search tools (`fzf`, `ugrep-fzf
 | `Ctrl-e` | Open file location in file manager       |
 | `Ctrl-c` | Copy relative path of selected file (on WSL its Windows path; use `Esc` to quit) |
 | `Ctrl-o` | Open the file in nvim in a new tmux window (`sf`: at the matching line, with nvim or else `$VISUAL`, `$EDITOR`, vim, vi; outside tmux in the same terminal) |
-| `Ctrl-t` | Search inside the selected file in a new tmux window (`sf`: with the Content pattern) |
-| `Ctrl-u` / `Ctrl-g` / `Alt-g` / `Alt-u` | git diff / diff (delta) / short diff / log of the file |
+| `Ctrl-t` | Search inside the selected file in a new tmux window (`sf`: inside its window, the lines with any of the typed words; `Esc` back) |
+| `Ctrl-u` / `Ctrl-g` / `Alt-g` / `Alt-u` | git diff / diff (delta) / short diff / log of the file (`sf`: history with changes / changes against HEAD / short / log, shown inside its window; `/` searches, `Esc` back; `Enter` in Git shows a commit so) |
 | `Alt-j` / `Ctrl-j` | Folder list / file list in a new tmux window |
 | `Ctrl-l` | Toggle the preview                       |
 
@@ -146,7 +146,7 @@ sf doctor   # what it found, how open / reveal / copy work here
 ```
 Without curl: `mkdir -p ~/.local && wget -qO- https://github.com/bilalakbana/search-functions/releases/latest/download/sf-linux-x86_64.tar.gz | tar -xz -C ~/.local`.
 
-The package brings its own fd, bat, ugrep (with `ug` and `ugrep+`), fzf and delta in `~/.local/lib/sf`; only sf
+The package brings its own fd, bat, ugrep (with `ug` and `ugrep+`) and delta in `~/.local/lib/sf`; only sf
 uses them. If `sf` is not found, `~/.local/bin` is not in your `PATH` yet: log in again (Ubuntu and Debian add it
 once it exists) or add `export PATH="$HOME/.local/bin:$PATH"` to your shell's rc file. Taken from the system when
 wanted: git (Git tab, diffs), tmux (actions in windows of their own), an editor for `Ctrl-o` (nvim, else
@@ -192,8 +192,7 @@ alias sf-fzf=~/.SearchFunctions/sf                        # the fzf version of s
 
 Rust 1.88 or newer (ratatui 0.30 needs it); sf then runs the fd, ugrep, bat, git and delta it finds in `PATH`, and
 `ugrep+` for archives and documents ([fd](https://github.com/sharkdp/fd), [ugrep](https://github.com/Genivia/ugrep),
-[bat](https://github.com/sharkdp/bat), [delta](https://github.com/dandavison/delta), [fzf](https://github.com/junegunn/fzf)
-for `Ctrl-t`):
+[bat](https://github.com/sharkdp/bat), [delta](https://github.com/dandavison/delta)):
 ```bash
 cargo install --path ~/.SearchFunctions/sf-rs   # installs ~/.cargo/bin/sf
 sf doctor

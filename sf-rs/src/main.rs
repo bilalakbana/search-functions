@@ -18,12 +18,13 @@ mod runner;
 mod testutil;
 mod theme;
 mod ui;
+mod views;
 
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::io::{IsTerminal, stdout};
 use std::os::unix::process::CommandExt;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, ExitCode, Stdio};
 use std::sync::mpsc::channel;
 use std::time::{Duration, Instant};
@@ -70,16 +71,15 @@ const FRAME: Duration = Duration::from_millis(30);
 const MESSAGES_PER_FRAME: usize = 2000;
 
 fn main() -> ExitCode {
-    let bundle = use_bundle();
-    let bundle = bundle.as_deref();
+    use_bundle();
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     let (tab, query, print, extra) = match cli::parse(&args) {
         Ok(Cli::Help) => {
             print!("{USAGE}");
             return ExitCode::SUCCESS;
         }
-        Ok(Cli::Doctor) => return doctor(bundle),
-        Ok(Cli::Command { name, value }) => return command(&name, &value, bundle),
+        Ok(Cli::Doctor) => return doctor(),
+        Ok(Cli::Command { name, value }) => return command(&name, &value),
         Ok(Cli::Run {
             tab,
             query,
@@ -97,9 +97,9 @@ fn main() -> ExitCode {
         }
     };
     if print || !std::io::stdout().is_terminal() {
-        return print_list(tab, &query, &extra, bundle);
+        return print_list(tab, &query, &extra);
     }
-    match run(tab, query, extra, bundle) {
+    match run(tab, query, extra) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("sf: {e:#}");
@@ -121,7 +121,7 @@ fn load_options() -> (Options, Option<String>) {
 }
 
 /// `sf --print`: the list instead of the window.
-fn print_list(tab: Tab, query: &str, extra: &[OsString], bundle: Option<&Path>) -> ExitCode {
+fn print_list(tab: Tab, query: &str, extra: &[OsString]) -> ExitCode {
     let root = match std::env::current_dir() {
         Ok(root) => root,
         Err(e) => {
@@ -129,7 +129,7 @@ fn print_list(tab: Tab, query: &str, extra: &[OsString], bundle: Option<&Path>) 
             return ExitCode::from(2);
         }
     };
-    let env = Env::detect(bundle);
+    let env = Env::detect();
     let engines = engines::discover(&env.platform.path);
     let (options, config_error) = load_options();
     if let Some(e) = config_error {
@@ -139,10 +139,10 @@ fn print_list(tab: Tab, query: &str, extra: &[OsString], bundle: Option<&Path>) 
 }
 
 /// `sf open|reveal|copy-path PATH`, `sf copy-text TEXT`: a note or the error on stderr; exit 1 on error.
-fn command(name: &str, value: &OsStr, bundle: Option<&Path>) -> ExitCode {
+fn command(name: &str, value: &OsStr) -> ExitCode {
     let result = std::env::current_dir()
         .map_err(|e| format!("reading the current folder: {e}"))
-        .and_then(|cwd| platform::command(name, value, &Env::detect(bundle).platform, &cwd));
+        .and_then(|cwd| platform::command(name, value, &Env::detect().platform, &cwd));
     match result {
         Ok(note) => {
             if let Some(note) = note {
@@ -157,8 +157,8 @@ fn command(name: &str, value: &OsStr, bundle: Option<&Path>) -> ExitCode {
     }
 }
 
-fn doctor(bundle: Option<&Path>) -> ExitCode {
-    let env = Env::detect(bundle);
+fn doctor() -> ExitCode {
+    let env = Env::detect();
     let engines = engines::discover(&env.platform.path);
     let run = |program: &Path, args: &[&str]| {
         doctor::run_program(&env.platform.path, program, args, Duration::from_secs(3))
@@ -172,18 +172,21 @@ fn doctor(bundle: Option<&Path>) -> ExitCode {
 
 /// A release package's `lib/sf` beside sf's folder, when there is one: it goes in front of sf's own
 /// `$PATH`, which every program sf starts inherits, so its engines are found first.
-fn use_bundle() -> Option<PathBuf> {
-    let exe = std::env::current_exe().ok()?;
-    let bundle = engines::bundle_dir(&exe)?;
+fn use_bundle() {
+    let Some(bundle) = std::env::current_exe()
+        .ok()
+        .and_then(|exe| engines::bundle_dir(&exe))
+    else {
+        return;
+    };
     let path = engines::with_bundle(Some(&bundle), &std::env::var_os("PATH").unwrap_or_default());
     // SAFETY: the first thing main does; no other thread exists yet that could read the environment.
     unsafe { std::env::set_var("PATH", path) };
-    Some(bundle)
 }
 
-fn run(tab: Tab, query: String, extra: Vec<OsString>, bundle: Option<&Path>) -> anyhow::Result<()> {
+fn run(tab: Tab, query: String, extra: Vec<OsString>) -> anyhow::Result<()> {
     let root = std::env::current_dir().context("reading the current folder")?;
-    let env = Env::detect(bundle);
+    let env = Env::detect();
     let engines = engines::discover(&env.platform.path);
     let config_path = config::default_path();
     let (options, config_error) = load_options();
@@ -231,8 +234,11 @@ fn event_loop(
 ) -> anyhow::Result<()> {
     let (list_tx, list_rx) = channel();
     let (preview_tx, preview_rx) = channel();
+    let (view_tx, view_rx) = channel();
     let mut runner = Runner::new(list_tx);
     let previewer = Previewer::new(preview_tx);
+    // the views' text comes from a worker of its own, so a preview never cancels a view
+    let viewer = Previewer::new(view_tx);
     let mut pending: VecDeque<Effect> = app.start().into();
     let mut preview_width = 0;
     loop {
@@ -261,15 +267,8 @@ fn event_loop(
                     let Some(item) = app.current().cloned() else {
                         continue;
                     };
-                    match perform(
-                        kind,
-                        app.tab,
-                        &item,
-                        &app.query,
-                        &app.root,
-                        &app.engines,
-                        env,
-                    ) {
+                    // the editor searches for what the list shows: in a file, any of the words
+                    match perform(kind, app.tab, &item, &app.pattern(), &app.root, env) {
                         Outcome::Done(Some(message)) => app.set_status(&message, false, now),
                         Outcome::Done(None) => {}
                         Outcome::Failed(e) => app.set_status(&e, true, now),
@@ -281,6 +280,18 @@ fn event_loop(
                     }
                 }
                 Effect::ChangeRoot(root) => pending.extend(app.set_root(root)),
+                Effect::View => {
+                    // the text area inside the view's border: the terminal's width less two
+                    let width = terminal.size().context("reading the terminal size")?.width;
+                    if let Some(v) = app.view.as_mut() {
+                        v.width = width.saturating_sub(2).max(20);
+                        v.loading = true;
+                        viewer.request(
+                            app.view_gen,
+                            views::view_plan(&v.kind, v.width, &app.engines),
+                        );
+                    }
+                }
                 Effect::Quit => return Ok(()),
             }
         }
@@ -294,6 +305,12 @@ fn event_loop(
         {
             preview_width = app.layout.preview.width; // resized: bat's line band needs the new width
             pending.extend(app.refresh_preview());
+        }
+        if let Some(v) = &app.view
+            && app.layout.view.width != 0
+            && app.layout.view.width != v.width
+        {
+            pending.push_back(Effect::View); // resized: delta lays the sides out to the new width
         }
 
         if event::poll(FRAME).context("reading the keyboard")? {
@@ -316,6 +333,9 @@ fn event_loop(
         }
         for msg in preview_rx.try_iter() {
             app.on_preview(msg);
+        }
+        for msg in view_rx.try_iter() {
+            app.on_view(msg);
         }
         pending.extend(app.tick(Instant::now()));
     }

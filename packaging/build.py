@@ -5,8 +5,7 @@ statically in an Alpine container, builds sf for x86_64-unknown-linux-musl, coll
 that each binary is statically linked, and packs the tree for `tar -xz -C ~/.local`:
 
     bin/sf
-    lib/sf/{fzf,fd,bat,delta,ugrep,ug,ugrep+}
-    lib/sf/sub-functions/{search_in_single_file,show_diffs,git_diff,git_diff_short,show_logs,platform_action}
+    lib/sf/{fd,bat,delta,ugrep,ug,ugrep+}
     share/doc/sf/{README.md,THIRD-PARTY.md,licenses/}
 
 Needs: python3 (3.11+), docker, cargo and rustc with the x86_64-unknown-linux-musl target, git, file, strip.
@@ -30,15 +29,6 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 TARGET = "x86_64-unknown-linux-musl"
 PACKAGE = "sf-linux-x86_64.tar.gz"
-# the sub-functions sf's keys run (Ctrl-T, Ctrl-U, Ctrl-G, Alt-G, Alt-U) and the one they use themselves
-SUB_FUNCTIONS = [
-    "search_in_single_file",
-    "show_diffs",
-    "git_diff",
-    "git_diff_short",
-    "show_logs",
-    "platform_action",
-]
 # what ugrep is built with in Alpine: the libraries' static archives
 ALPINE_PACKAGES = (
     "build-base pcre2-dev pcre2-static zlib-dev zlib-static bzip2-dev bzip2-static xz-dev xz-static "
@@ -249,8 +239,8 @@ https://github.com/bilalakbana/search-functions at commit {commit} (the source o
 `licenses/sf/LICENSE`).
 
 - `bin/sf` is the program; `sf doctor` shows what it finds and how open, reveal and copy work here.
-- `lib/sf/` holds the engines it runs (fd, bat, ugrep, ug, ugrep+, fzf, delta) and the scripts its keys open
-  (`lib/sf/sub-functions/`). sf uses these before any in `$PATH`; they are not put in `$PATH` otherwise.
+- `lib/sf/` holds the engines it runs (fd, bat, ugrep, ug, ugrep+, delta). sf uses these before any in
+  `$PATH`; they are not put in `$PATH` otherwise.
 - Not included, installed from the system when wanted: git (Git tab, diffs), tmux (actions in windows of
   their own), nvim (Ctrl-O), less; for PDF and Office files in Content: poppler-utils, antiword, pandoc.
 - Third-party software and licenses: `THIRD-PARTY.md`, `licenses/`.
@@ -295,8 +285,6 @@ def main(argv: list[str]) -> int:
     sf, meta = build_sf()
     copy(sf, root / "bin/sf", 0o755)
     run(["strip", str(root / "bin/sf")])
-    for name in SUB_FUNCTIONS:
-        copy(REPO / "sub-functions" / name, lib / "sub-functions" / name, 0o755)
 
     log("licenses")
     copy(REPO / "LICENSE", licenses / "sf/LICENSE", 0o644)

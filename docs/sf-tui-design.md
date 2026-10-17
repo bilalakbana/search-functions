@@ -21,11 +21,11 @@ fast tool he can ship and use on the Linux PC and on WSL.
    is a ugrep pattern; by default the list shows the files that contain it; the option **Matching lines** shows the
    matching lines instead (file, line number, text); the option **Archives & documents** also searches inside
    zip/tar/7z/gz/... archives and PDF/Office documents (`ugrep+ -z`).
-4. The actions keep their keys and work on the selected item, each in its own window: **Enter** open with the
-   default application, **Ctrl-O** nvim (at the line in Matching lines), **Ctrl-T** search inside the file,
-   **Ctrl-U / Ctrl-G / Alt-G** git diff (side by side / delta / short), **Alt-U** git log of the file,
-   **Ctrl-E** show in the file manager, **Ctrl-C** copy the path. Inside tmux "own window" is a new tmux window;
-   outside tmux the app steps aside (terminal handed over) and comes back when the program ends.
+4. The actions keep their keys and work on the selected item: **Enter** open with the default application,
+   **Ctrl-O** nvim (at the line in Matching lines), **Ctrl-T** search inside the file, **Ctrl-U / Ctrl-G / Alt-G**
+   git history / diff / short diff, **Alt-U** git log of the file, **Ctrl-E** show in the file manager,
+   **Ctrl-C** copy the path. Since Step 3 (v0.3.0) Ctrl-T and the git keys are shown inside sf; only the editor
+   gets a window of its own: a new tmux window, or outside tmux the terminal handed over until it ends.
 5. Understood without memorising: the input shows what typing does in this tab while it is empty, the active
    options are listed next to it, and a dim footer names the keys for the selected item.
 6. Look: Catppuccin Macchiato (as Ghostty, tmux, Obsidian and the prototype) drawn on the terminal's own
@@ -137,9 +137,8 @@ Details settled from the existing setup and the prototype:
   threads that send their lines over channels; a new query or tab cancels (kills) the running child.
 - Engines found at start (`fd`/`fdfind`, `bat`/`batcat`, `ugrep`, `ugrep+`, `git`, `delta`); a missing one is
   said in the window where it is needed.
-- Actions: the `platform` module (open, reveal, copy on Linux or WSL), and the terminal programs (nvim and
-  the sub-functions `search_in_single_file`, `show_diffs`, `git_diff`, `git_diff_short`, `show_logs` from
-  `~/.SearchFunctions/sub-functions`) in a new tmux window, or in the foreground with the TUI suspended.
+- Actions: the `platform` module (open, reveal, copy on Linux or WSL), the editor in a new tmux window or in
+  the foreground with the TUI suspended, and the views (`views.rs`) and Ctrl-T drawn by sf itself.
 - Code in `~/.SearchFunctions/sf-rs` (crate and binary `sf`), installed with `cargo install --path sf-rs`
   (`~/.cargo/bin/sf`); the release package (see "Release package") has a static musl build for Linux and WSL.
   The fzf prototype is retired only when this version covers it.
@@ -281,3 +280,26 @@ Command line (v0.2.0, 2026-10-17; Bilal asked for engine flags and a print mode)
   the pattern through `$SF_QUERY` and `--`, any other editor only `+LINE` and the absolute path. The tab bar
   names it (`^O nvim`, `^O nano`), the tmux window is named after it, `sf doctor` shows it.
 - README: `wget -qO- … | tar -xz -C ~/.local` beside the curl line (curl is not on every desktop).
+
+Step 3, the windows inside sf (v0.3.0, 2026-10-17):
+
+- Ctrl-U, Ctrl-G, Alt-G, Alt-U and Enter in Git open a view over the whole window (`views.rs`, drawn by
+  `ui::draw_view`): Ctrl-G `git -C DIR diff HEAD --unified=99999999 -- NAME` (the whole file), Alt-G the same with
+  10 lines, Ctrl-U `git log -p`, all through `delta --side-by-side --width=W`; Alt-U `git log --name-status` with
+  the old `show_logs` format; a commit `git show --patch-with-stat` through delta (top to bottom, as its preview,
+  which is now made by the same function and runs `git -C ROOT`: before it ran in sf's starting folder, wrong
+  after Folders went into another repository). git always runs with `-C` in the file's folder (a folder is
+  diffed from inside, `.`), so submodules work. The text comes from a second preview worker (the newest request
+  wins); nothing printed shows why ("No local changes in …, or git does not track it"); a resize asks again at
+  the new width. Keys: Esc or q back, ↑↓ j k, PgUp PgDn b space, Home End g G, the wheel, `/` search
+  (case-insensitive, Enter), n N next and previous; the found line in a band. Views are always inside sf, in tmux
+  too (Bilal).
+- Ctrl-T narrows Content to the file (`App::scope`): `ugrep -nHU --smart-case … -e PATTERN -- FILE` read as
+  Matching lines, PATTERN the typed words joined by `|` (any of them, as the old script; Bilal), every line while
+  empty; from Content it keeps the pattern, from Files it starts empty. The input reads "In NAME ›", Content's
+  options are hidden there and the preview always shows the line (bat). Esc or Tab goes back to the tab and its
+  query; Ctrl-O gets the same pattern.
+- sf no longer runs any script: `Env.sub`, `$SF_SUBFUNCTIONS`, doctor's Sub-functions and the foreground
+  `git show | delta` are gone; Ctrl-T and the git keys reaching `actions` (Folders, Git) say "Not available here".
+  The package drops fzf and `lib/sf/sub-functions` (12 MB instead of 14). The scripts stay in the repo for the fzf
+  functions, tested by `tests/sub_functions.sh`.

@@ -17,6 +17,13 @@ use crate::theme;
 const CONFIG: &str = "⚙ Config";
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    if app.view.is_some() {
+        app.layout = ScreenLayout {
+            view: draw_view(frame, app),
+            ..ScreenLayout::default()
+        };
+        return;
+    }
     let area = frame.area();
     let body = area.height.saturating_sub(2);
     let preview_h = if app.preview_visible {
@@ -158,6 +165,79 @@ fn root_title(app: &App) -> Line<'static> {
     spans.extend(crate::items::path_spans(&crate::items::printable(&path)));
     spans.push(Span::raw(" "));
     Line::from(spans)
+}
+
+/// A view over the whole screen: its text in a border titled with what it shows, the keys below (or
+/// the search being typed) and where the view is. Returns the text area.
+fn draw_view(frame: &mut Frame, app: &App) -> Rect {
+    let Some(v) = &app.view else {
+        return Rect::default();
+    };
+    let [body, footer] =
+        Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(frame.area());
+    let title = Line::from(vec![
+        Span::raw(" "),
+        Span::styled(crate::items::printable(&v.kind.title()), style(theme::TEXT)),
+        Span::raw(" "),
+    ]);
+    let block = bordered().title_top(title);
+    let inner = block.inner(body);
+    frame.render_widget(block, body);
+    let total = v.text.lines.len();
+    let from = v.scroll.min(total.saturating_sub(inner.height as usize));
+    let mut shown: Vec<Line> = v.text.lines[from..]
+        .iter()
+        .take(inner.height as usize)
+        .cloned()
+        .collect();
+    if v.loading && shown.is_empty() {
+        shown.push(Line::styled("…", style(theme::DIM)));
+    }
+    if let Some(i) = v
+        .found
+        .and_then(|f| f.checked_sub(from))
+        .filter(|&i| i < shown.len())
+    {
+        shown[i] = shown[i]
+            .clone()
+            .patch_style(Style::new().bg(theme::SURFACE));
+    }
+    frame.render_widget(Paragraph::new(Text::from(shown)), inner);
+    draw_scrollbar(frame, body, total, from, inner.height as usize);
+
+    let left = if v.searching {
+        Line::from(vec![
+            Span::styled("/ ", style(theme::MAUVE)),
+            Span::styled(crate::items::printable(&v.search), style(theme::TEXT)),
+            Span::styled("▏", style(theme::SUB)),
+        ])
+    } else if !v.search.is_empty() && v.found.is_none() {
+        Line::styled(
+            format!("not found: {}", crate::items::printable(&v.search)),
+            style(theme::RED),
+        )
+    } else {
+        Line::styled(
+            "Esc back · ↑↓ PgUp PgDn Home End · / search · n N next",
+            style(theme::DIM),
+        )
+    };
+    let position = if total == 0 {
+        String::new()
+    } else {
+        format!("{}/{total} ", from + 1)
+    };
+    let [left_area, right_area] = Layout::horizontal([
+        Constraint::Min(0),
+        Constraint::Length(position.chars().count() as u16),
+    ])
+    .areas(footer);
+    frame.render_widget(Paragraph::new(left), left_area);
+    frame.render_widget(
+        Paragraph::new(Span::styled(position, style(theme::DIM))),
+        right_area,
+    );
+    inner
 }
 
 fn draw_preview(frame: &mut Frame, app: &App, area: Rect, status: Option<Line<'static>>) -> Rect {
@@ -327,6 +407,9 @@ fn short(opt: Opt) -> &'static str {
 }
 
 fn placeholder(app: &App) -> &'static str {
+    if app.scope.is_some() {
+        return "type words · the lines with any of them";
+    }
     match app.tab {
         Tab::Files => "type to filter file names",
         Tab::Content if app.options.content.matching_lines => {
@@ -343,7 +426,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         .options
         .list(app.tab)
         .into_iter()
-        .filter(|(_, on)| *on)
+        .filter(|(_, on)| *on && app.scope.is_none()) // none applies inside one file
         .map(|(o, _)| short(o).to_string())
         .collect();
     let extra = app.extra_options();
@@ -365,11 +448,22 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     let [left_area, right_area] =
         Layout::horizontal([Constraint::Min(0), Constraint::Length(right_w)]).areas(area);
 
-    let title = app.tab.title();
+    let title = match &app.scope {
+        Some(scope) => {
+            let name = std::path::Path::new(&scope.key)
+                .file_name()
+                .unwrap_or(&scope.key);
+            format!("In {}", crate::items::printable(&name.to_string_lossy()))
+        }
+        None => app.tab.title().to_string(),
+    };
     let query = crate::items::printable(&app.query);
     let mut left = vec![
         Span::raw(" "),
-        Span::styled(title, style(theme::MAUVE).add_modifier(Modifier::BOLD)),
+        Span::styled(
+            title.clone(),
+            style(theme::MAUVE).add_modifier(Modifier::BOLD),
+        ),
         Span::styled(" › ", style(theme::FAINT)),
     ];
     let cursor_x = left_area.x
@@ -685,6 +779,79 @@ mod tests {
             assert!(left.abs_diff(right) <= 1, "{tab:?}: {left} vs {right}");
             assert!(!row(&buf, 23).contains("Esc quit"), "no footer any more");
         }
+    }
+
+    fn open_diff_view(a: &mut App, lines: usize) {
+        let now = std::time::Instant::now();
+        a.handle_key(ctrl('g'), now);
+        if lines > 0 {
+            let text: Vec<Line> = (0..lines)
+                .map(|i| Line::from(format!("line {i}")))
+                .collect();
+            a.on_view(crate::preview::PreviewMsg {
+                generation: a.view_gen,
+                text: Text::from(text),
+                header_lines: 0,
+            });
+        }
+    }
+
+    #[test]
+    fn a_view_covers_the_tabs_with_its_title_text_and_keys() {
+        let (mut a, _) = app(Tab::Files);
+        feed(&mut a, &["src/a.c"]);
+        open_diff_view(&mut a, 50);
+        let buf = render(&mut a, 80, 12);
+        assert!(
+            row(&buf, 0).contains("a.c · changes against HEAD"),
+            "{:?}",
+            row(&buf, 0)
+        );
+        assert!(!row(&buf, 0).contains("Content"), "no tab bar");
+        assert!(row(&buf, 1).contains("line 0"), "{:?}", row(&buf, 1));
+        let last = row(&buf, 11);
+        assert!(
+            last.contains("Esc back") && last.trim_end().ends_with("1/50"),
+            "{last:?}"
+        );
+        assert_eq!(a.layout.view, Rect::new(1, 1, 78, 9));
+    }
+
+    #[test]
+    fn a_view_shows_the_search_while_it_is_typed() {
+        let (mut a, now) = app(Tab::Files);
+        feed(&mut a, &["src/a.c"]);
+        open_diff_view(&mut a, 50);
+        a.handle_key(key(KeyCode::Char('/')), now);
+        a.handle_key(key(KeyCode::Char('x')), now);
+        let buf = render(&mut a, 80, 12);
+        assert!(row(&buf, 11).starts_with("/ x"), "{:?}", row(&buf, 11));
+    }
+
+    #[test]
+    fn a_view_says_while_it_is_made() {
+        let (mut a, _) = app(Tab::Files);
+        feed(&mut a, &["src/a.c"]);
+        open_diff_view(&mut a, 0);
+        let buf = render(&mut a, 80, 12);
+        assert!(row(&buf, 1).contains("…"), "{:?}", row(&buf, 1));
+    }
+
+    #[test]
+    fn the_input_names_the_file_searched_in() {
+        let (mut a, now) = app(Tab::Files);
+        feed(&mut a, &["src/a.c"]);
+        a.handle_key(ctrl('t'), now);
+        let buf = render(&mut a, 100, 24);
+        let input = row(&buf, 23);
+        assert!(
+            input.trim_start().starts_with("In a.c › type words"),
+            "{input:?}"
+        );
+        assert!(
+            !input.contains("ignored"),
+            "no Content option applies in a file: {input:?}"
+        );
     }
 
     #[test]
