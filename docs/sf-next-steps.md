@@ -86,8 +86,6 @@ was left as it is (to be retired).
 
 Still open from Step 1:
 
-- Bilal: reinstall sf so the fzf functions use it (`cargo install --path ~/.SearchFunctions/sf-rs`, replaces
-  `~/.cargo/bin/sf`). Until then `platform_action` sees the old build's usage and keeps using the Linux tools.
 - Bilal, on Windows/WSL (only he can): install sf there and go through this list:
   1. `sf doctor`: Platform `WSL (<distro>)`, Windows `powershell.exe /mnt/c/…`, Paths `wslpath /usr/bin/wslpath`.
   2. In `sf` (Files tab): `Enter` on a `.txt` opens it in its Windows application.
@@ -97,8 +95,10 @@ Still open from Step 1:
   6. A fzf function (`f`): `Enter`, `Ctrl-e`, `Ctrl-c` do the same through `platform_action`.
   7. A name with `"` and `Ctrl-E`: sf refuses with "Explorer cannot select a name containing '"' …".
   If all works, the WSL repo (`~/.SearchFunctionsWSL`, github bilalakbana/search-functions-wsl) can retire.
-- Bilal: whether a Dolphin window showed `sf reveal`'s test file selected (`scratchpad/reveal-test/a b,c/sf reveal
-  test é.txt` of the 2026-10-17 session): the only real check of the D-Bus path on this PC.
+
+Checked on this PC (2026-10-17): `sf reveal` on `a b,c/sf reveal test é.txt` opened Dolphin with the file selected
+(Bilal saw it), so the percent-encoded D-Bus path works; `~/.cargo/bin/sf` is the Step 1 build, so the fzf
+functions go through it.
 
 This PC: KDE Plasma on Wayland, `org.freedesktop.FileManager1` activatable (running), `wl-copy` installed, no
 xclip/xsel; Docker usable (Bilal is in group `docker`).
