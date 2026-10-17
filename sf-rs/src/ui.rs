@@ -10,7 +10,7 @@ use ratatui::widgets::{
     Block, BorderType, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 
-use crate::app::{App, ScreenLayout};
+use crate::app::{App, PopupRow, ScreenLayout};
 use crate::model::{Opt, Tab};
 use crate::theme;
 
@@ -442,6 +442,11 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         .filter(|(_, on)| *on && app.scope.is_none()) // none applies inside one file
         .map(|(o, _)| short(o).to_string())
         .collect();
+    match app.types_off_count() {
+        0 => {}
+        1 => active.push("1 type off".into()),
+        n => active.push(format!("{n} types off")),
+    }
     let extra = app.extra_options();
     if !extra.is_empty() {
         let words: Vec<_> = extra.iter().map(|a| a.to_string_lossy()).collect();
@@ -597,31 +602,68 @@ fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLayout) {
-    let opts = app.options.list(app.tab);
-    let rows: Vec<Line> = opts
+    let rows = app.popup_rows();
+    let check = |on: bool| {
+        Span::styled(
+            if on { "[x]" } else { "[ ]" },
+            style(if on { theme::MAUVE } else { theme::DIM }),
+        )
+    };
+    let type_name = |ty: &Option<String>| match ty {
+        Some(ext) => crate::items::printable(&format!(".{ext}")),
+        None => "(no extension)".to_string(),
+    };
+    let name_w = rows
         .iter()
-        .map(|&(opt, on)| {
-            Line::from(vec![
-                Span::styled(
-                    if on { "[x]" } else { "[ ]" },
-                    style(if on { theme::MAUVE } else { theme::DIM }),
-                ),
+        .filter_map(|r| match r {
+            PopupRow::Type(ty, _, _) => Some(type_name(ty).chars().count()),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(0);
+    // what is drawn: the rows (with their index) and, above the types, a rule naming them
+    let mut lines: Vec<(Option<usize>, Line)> = Vec::new();
+    for (i, row) in rows.iter().enumerate() {
+        let line = match row {
+            PopupRow::Opt(opt, on) => Line::from(vec![
+                check(*on),
                 Span::styled(format!(" {}", opt.label(app.tab)), style(theme::TEXT)),
                 Span::styled(format!("   {}", opt.hint()), style(theme::DIM)),
-            ])
-        })
-        .collect();
-    let help = "Space / click · Esc close";
+            ]),
+            PopupRow::AllTypes(on) => {
+                lines.push((
+                    None,
+                    Line::from(Span::styled("── File types ──", style(theme::FAINT))),
+                ));
+                Line::from(vec![
+                    check(*on),
+                    Span::styled(" All types", style(theme::TEXT)),
+                ])
+            }
+            PopupRow::Type(ty, n, on) => Line::from(vec![
+                check(*on),
+                Span::styled(format!(" {:<name_w$}", type_name(ty)), style(theme::TEXT)),
+                Span::styled(format!("  {n:>6}"), style(theme::DIM)),
+            ]),
+        };
+        lines.push((Some(i), line));
+    }
+    let has_types = rows.iter().any(|r| matches!(r, PopupRow::AllTypes(_)));
+    let help = if has_types {
+        "Space / click · a all types · Esc close"
+    } else {
+        "Space / click · Esc close"
+    };
     let title = format!(" {} options ", app.tab.title());
-    let content_w = rows
+    let content_w = lines
         .iter()
-        .map(Line::width)
+        .map(|(_, l)| l.width())
         .chain([help.chars().count(), title.chars().count()])
         .max()
         .unwrap_or(0);
     let area = frame.area();
     let w = (content_w as u16 + 4).min(area.width);
-    let h = (opts.len() as u16 + 4).min(area.height);
+    let h = (lines.len() as u16 + 4).min(area.height);
     let popup = Rect::new(
         area.x + (area.width - w) / 2,
         area.y + (area.height - h) / 2,
@@ -638,13 +680,17 @@ fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLa
         ));
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
-    for (i, (line, &(opt, _))) in rows.into_iter().zip(&opts).enumerate() {
-        let y = inner.y + i as u16;
-        if y >= inner.bottom() {
-            break;
-        }
+    // a long list of types scrolls so that the cursor's row stays in view
+    let room = inner.height.saturating_sub(2) as usize;
+    let at = lines
+        .iter()
+        .position(|(i, _)| *i == Some(cursor))
+        .unwrap_or(0);
+    let first = (at + 1).saturating_sub(room.max(1));
+    for (n, (index, line)) in lines.into_iter().skip(first).take(room).enumerate() {
+        let y = inner.y + n as u16;
         let rect = Rect::new(inner.x, y, inner.width, 1);
-        if i == cursor {
+        if index == Some(cursor) {
             frame
                 .buffer_mut()
                 .set_style(rect, Style::new().bg(theme::SURFACE));
@@ -653,7 +699,9 @@ fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLa
             Paragraph::new(line),
             Rect::new(inner.x + 1, y, inner.width.saturating_sub(1), 1),
         );
-        layout.popup_rows.push((opt, rect));
+        if let Some(i) = index {
+            layout.popup_rows.push((i, rect));
+        }
     }
     if inner.height > 0 {
         let help_area = Rect::new(
@@ -753,9 +801,76 @@ mod tests {
         assert!(find(&buf, "[ ] Hidden files").is_some());
         assert!(find(&buf, "[x] Ignored files").is_some());
         assert_eq!(a.layout.popup_rows.len(), 5);
-        assert_eq!(a.layout.popup_rows[0].0, Opt::MatchingLines);
+        assert_eq!(
+            a.layout.popup_rows[0].0, 0,
+            "Matching lines, the popup's first row"
+        );
         let (_, y) = find(&buf, "[ ] Matching lines").unwrap();
         assert_eq!(a.layout.popup_rows[0].1.y, y);
+    }
+
+    #[test]
+    fn popup_shows_the_file_types_under_the_options() {
+        let (mut a, now) = app(Tab::Files);
+        feed(&mut a, &["a.rs", "b.rs", "Makefile"]);
+        a.handle_key(ctrl('s'), now);
+        let buf = render(&mut a, 80, 24);
+        assert!(find(&buf, "── File types ──").is_some());
+        assert!(find(&buf, "[x] All types").is_some());
+        let rs = row(&buf, find(&buf, "[x] .rs").unwrap().1);
+        let after: Vec<&str> = rs
+            .split("[x] .rs")
+            .nth(1)
+            .unwrap()
+            .split_whitespace()
+            .collect();
+        assert_eq!(after.first(), Some(&"2"), "its count: {rs:?}");
+        assert!(find(&buf, "[x] (no extension)").is_some());
+        assert!(find(&buf, "a all types").is_some());
+    }
+
+    #[test]
+    fn the_input_line_says_how_many_types_are_off() {
+        let (mut a, now) = app(Tab::Files);
+        feed(&mut a, &["a.rs", "b.md", "c.dll"]);
+        a.handle_key(ctrl('s'), now);
+        a.popup = Some(3);
+        a.handle_key(key(KeyCode::Char(' ')), now);
+        a.handle_key(key(KeyCode::Esc), now);
+        a.loading = false;
+        let input = row(&render(&mut a, 100, 24), 23);
+        assert!(
+            input.trim_end().ends_with("ignored · 1 type off   2/3"),
+            "{input:?}"
+        );
+        a.handle_key(ctrl('s'), now);
+        a.popup = Some(4);
+        a.handle_key(key(KeyCode::Char(' ')), now);
+        let input = row(&render(&mut a, 100, 24), 23);
+        assert!(input.contains("2 types off"), "{input:?}");
+    }
+
+    #[test]
+    fn a_long_list_of_types_scrolls_to_the_cursor() {
+        let (mut a, now) = app(Tab::Files);
+        let names: Vec<String> = (0..40).map(|i| format!("f.t{i:02}")).collect();
+        feed(
+            &mut a,
+            &names.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
+        a.handle_key(ctrl('s'), now);
+        let last = a.popup_rows().len() - 1;
+        a.popup = Some(last);
+        let buf = render(&mut a, 80, 24);
+        assert!(
+            find(&buf, "[x] .t39").is_some(),
+            "the cursor's row is in view"
+        );
+        assert!(
+            find(&buf, "Hidden files").is_none(),
+            "the top scrolled away"
+        );
+        assert!(a.layout.popup_rows.iter().any(|&(i, _)| i == last));
     }
 
     #[test]

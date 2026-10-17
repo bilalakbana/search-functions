@@ -374,3 +374,20 @@ After v0.5.0 (2026-10-17):
   the filter). Esc or Ctrl-F again goes back to the pattern (Bilal); another tab or Ctrl-T ends it. A start
   with a pattern (`sf deep needle`) begins in the filter, as `advancedsearch needle` did (Bilal). Where Esc goes
   back (the filter, a file after Ctrl-T) the bar says "Esc back" instead of "Esc quit".
+
+File types in Ctrl-S (2026-10-17; Bilal asked for a key showing every file type, all on, to turn some off, then
+chose to put them into the Ctrl-S popup instead of a key of their own):
+
+- In Files, Content and Deep the popup lists, under the options and a rule, "All types" and every file type
+  (`items::file_type`: the extension as written, `a.tar.gz` → gz; none for `Makefile` and `.bashrc`) of the
+  rows listed, with how many rows have it, the most first, "(no extension)" last among equals. Space or a click
+  turns one off or on, `a` (or the "All types" row) all of them; the list scrolls with the cursor.
+- Off types leave the rows (`Filter::set_hidden_types`, any type, at once). In Content and Deep they also go to
+  ugrep as `--exclude=*.EXT` (`App::list_plan`, before the pattern) and the search runs again, so Deep never
+  reads them; an extension a glob would read otherwise (`[]*?{},!\`) is only left out of the rows. A type that
+  is off stays in the popup with the count it had, to be turned on again.
+- Each tab has its own (Bilal), none inside one file (Ctrl-T); they are not saved and a new root turns every
+  type on again (Bilal). The input line says "1 type off" / "N types off". The types are those of the rows
+  (Bilal: with a pattern, the files found; without one, every file listed), counted again only when the list
+  changed (`App::types_seen`).
+

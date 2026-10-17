@@ -1,7 +1,13 @@
 //! Filtering as Bilal's fzf does it (`-i -e --no-sort`): case-insensitive substrings, every word of
-//! the query must match, the input order is kept.
+//! the query must match, the input order is kept. File types turned off in Ctrl-S leave their items
+//! out too.
 
-use crate::items::Item;
+use std::collections::BTreeMap;
+
+use crate::items::{Item, file_type};
+
+/// How many items there are of each file type (`items::file_type`).
+pub type TypeCounts = BTreeMap<Option<String>, usize>;
 
 /// From this many candidates on, the filter runs on all cores.
 const PARALLEL: usize = 50_000;
@@ -10,7 +16,9 @@ const PARALLEL: usize = 50_000;
 pub struct Filter {
     items: Vec<Item>,
     words: Vec<String>,
-    /// Indices of the matching items, in input order; unused while there are no words.
+    /// File types whose items are left out (`file_type`: the extension, None for none).
+    hidden_types: Vec<Option<String>>,
+    /// Indices of the matching items, in input order; unused while nothing filters (`active`).
     matches: Vec<usize>,
 }
 
@@ -32,7 +40,7 @@ impl Filter {
         } else {
             self.items.extend(items);
         }
-        if !self.words.is_empty() {
+        if self.active() {
             let new: Vec<usize> = (first..self.items.len()).collect();
             let new = self.matching(&new);
             self.matches.extend(new);
@@ -56,11 +64,39 @@ impl Filter {
             (0..self.items.len()).collect()
         };
         self.words = words;
-        self.matches = if self.words.is_empty() {
-            Vec::new()
-        } else {
+        self.matches = if self.active() {
             self.matching(&candidates)
+        } else {
+            Vec::new()
         };
+    }
+
+    /// Leaves out the items of these file types.
+    pub fn set_hidden_types(&mut self, types: Vec<Option<String>>) {
+        if types == self.hidden_types {
+            return;
+        }
+        self.hidden_types = types;
+        let all: Vec<usize> = (0..self.items.len()).collect();
+        self.matches = if self.active() {
+            self.matching(&all)
+        } else {
+            Vec::new()
+        };
+    }
+
+    /// How many items of each file type there are, the hidden ones too.
+    pub fn types(&self) -> TypeCounts {
+        let mut counts = BTreeMap::new();
+        for item in &self.items {
+            *counts.entry(file_type(&item.key)).or_insert(0) += 1;
+        }
+        counts
+    }
+
+    /// Whether anything filters: words, or file types left out.
+    fn active(&self) -> bool {
+        !self.words.is_empty() || !self.hidden_types.is_empty()
     }
 
     /// The candidates that match, in their order; large lists split over the cores.
@@ -90,13 +126,17 @@ impl Filter {
     }
 
     fn is_match(&self, i: usize) -> bool {
-        let hay = self.items[i].haystack();
+        let item = &self.items[i];
+        if !self.hidden_types.is_empty() && self.hidden_types.contains(&file_type(&item.key)) {
+            return false;
+        }
+        let hay = item.haystack();
         self.words.iter().all(|w| hay.contains(w.as_str()))
     }
 
     /// The number of matching items.
     pub fn len(&self) -> usize {
-        if self.words.is_empty() {
+        if !self.active() {
             self.items.len()
         } else {
             self.matches.len()
@@ -110,7 +150,7 @@ impl Filter {
 
     /// The i-th matching item.
     pub fn get(&self, i: usize) -> Option<&Item> {
-        if self.words.is_empty() {
+        if !self.active() {
             self.items.get(i)
         } else {
             self.items.get(*self.matches.get(i)?)
@@ -136,6 +176,44 @@ mod tests {
         (0..f.len())
             .map(|i| f.get(i).unwrap().key.to_str().unwrap().to_string())
             .collect()
+    }
+
+    #[test]
+    fn hidden_types_leave_their_files_out() {
+        let mut f = Filter::new();
+        f.push(items(&["a.rs", "b.dll", "Makefile", "c.RS", "x/.bashrc"]));
+        f.set_hidden_types(vec![Some("dll".into()), None]);
+        assert_eq!(shown(&f), ["a.rs", "c.RS"], "no extension is a type too");
+        assert_eq!(f.total(), 5);
+        f.set_query("c");
+        assert_eq!(shown(&f), ["c.RS"], "with the words");
+        f.set_query("");
+        f.push(items(&["d.dll", "d.rs"]));
+        assert_eq!(shown(&f), ["a.rs", "c.RS", "d.rs"], "new items too");
+        f.set_hidden_types(Vec::new());
+        assert_eq!(f.len(), 7);
+    }
+
+    #[test]
+    fn types_count_every_item() {
+        let mut f = Filter::new();
+        f.push(items(&[
+            "a.rs",
+            "b.dll",
+            "Makefile",
+            "x/.bashrc",
+            "c.rs",
+            "d.tar.gz",
+        ]));
+        f.set_query("zzz");
+        f.set_hidden_types(vec![Some("rs".into())]);
+        let want: Vec<(Option<String>, usize)> = vec![
+            (None, 2),
+            (Some("dll".into()), 1),
+            (Some("gz".into()), 1),
+            (Some("rs".into()), 2),
+        ];
+        assert_eq!(f.types().into_iter().collect::<Vec<_>>(), want);
     }
 
     #[test]

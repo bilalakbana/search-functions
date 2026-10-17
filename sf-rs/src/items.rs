@@ -366,6 +366,14 @@ pub fn printable(s: &str) -> String {
         .collect()
 }
 
+/// A file's type for Ctrl-S: its extension as written (`a.tar.gz` → "gz"), None when it has none
+/// (`Makefile`, `.bashrc`).
+pub fn file_type(key: &std::ffi::OsStr) -> Option<String> {
+    std::path::Path::new(key)
+        .extension()
+        .map(|e| e.to_string_lossy().into_owned())
+}
+
 /// Coloured engine output as styled text: invalid UTF-8 replaced, tabs as spaces, carriage returns left
 /// out, other control characters as U+FFFD.
 pub fn ansi_text(bytes: &[u8]) -> Text<'static> {

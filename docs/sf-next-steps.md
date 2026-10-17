@@ -34,6 +34,7 @@ How Bilal starts the next session (paste):
   - v0.5.1 (Files without a preview, binary preview fixes, Deep preview speed): `cargo test` 316;
     `tests/e2e.sh` 132/132.
   - Ctrl-F filter and the key hints: `cargo test` 323; `tests/e2e.sh` 136/136.
+  - File types in Ctrl-S: `cargo test` 332; `tests/e2e.sh` 140/140.
   - Step 2 (same day): `cargo test` 243; `tests/e2e.sh` 86/86 (with a release package's layout);
     `tests/sub_functions.sh NEW_EMPTY_DIR` 7/7 (`-L sfrs-sub-functions`); `python3 -I packaging/test_build.py` 7;
     `packaging/test_package.sh PACKAGE NEW_EMPTY_DIR` all passed on Ubuntu 22.04, Debian 12, Ubuntu 24.04.

@@ -49,10 +49,10 @@ const USAGE: &str = "usage: sf [files|content|deep|folders|git] [QUERY...] [--pr
        sf doctor
 
 The search functions in one window: Files, Content (search inside text files), Deep (inside every file:
-binaries, archives, with Documents PDF and Office files), Folders and Git. Tab / Shift-Tab or
-a click switch the tab; ⚙ Config (or Ctrl-S) holds the tab's options; Esc quits. The keys for the
-selected item are listed at the bottom. Options are kept in $XDG_CONFIG_HOME/sf/config.toml
-(~/.config/sf/config.toml).
+binaries, archives, with Documents PDF and Office files), Folders and Git. Tab / Shift-Tab or a click
+switch the tab; ⚙ Config (or Ctrl-S) holds the tab's options and, in Files, Content and Deep, the file
+types of the list to turn off and on; Esc quits. The keys for the selected item are named in the middle
+of the tab bar. Options are kept in $XDG_CONFIG_HOME/sf/config.toml (~/.config/sf/config.toml).
 
 QUERY starts the tab with it: what filters the list in Files, Folders and Git, the pattern in Content and
 Deep, where typing then filters the files found by their names (Ctrl-F; Esc edits the pattern, as Ctrl-F

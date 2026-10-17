@@ -93,6 +93,14 @@ expect 'files: Ctrl-L shows bat with numbers' '│ *1 needle ignored'
 expect 'start: footer'                     'Enter open · \^S options · \^O nvim'
 [[ $(tm display-message -p -t e2e '#W') == search ]] && ok 'tmux: window named search' || bad 'tmux: window not renamed'
 shot files
+keys C-s
+expect 'types: under the options'          '── File types ──'
+keys Down Down Down Down Space
+expect 'types: .bin turned off'            '\[ \] \.bin'
+keys Escape
+expect 'types: the list without it'        "Files › .*1 type off +$((n_files - 1))/$n_files"
+keys C-s a Escape
+expect 'types: a turns all on again'       "Files › .*ignored +$n_files/$n_files"
 type_ 'main'
 expect 'files: query filters'              "Files › main .* 1/$n_files"
 red_on 'main' && ok 'files: typed text highlighted' || bad 'files: typed text not highlighted'

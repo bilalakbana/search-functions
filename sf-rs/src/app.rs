@@ -1,5 +1,6 @@
 //! The app's state and what keys do to it. Pure: it returns effects, the main loop carries them out.
 
+use std::cell::RefCell;
 use std::ffi::OsString;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
@@ -14,7 +15,7 @@ use ratatui::text::{Line, Span, Text};
 use crate::actions::ActionKind;
 use crate::commands::{self, ListPlan, PreviewPlan};
 use crate::engines::Engines;
-use crate::filter::Filter;
+use crate::filter::{Filter, TypeCounts};
 use crate::items::{self, Item};
 use crate::model::{Opt, Options, Tab};
 use crate::preview::PreviewMsg;
@@ -117,7 +118,19 @@ pub struct ScreenLayout {
     pub popup: Rect,
     /// The text area of an open view.
     pub view: Rect,
-    pub popup_rows: Vec<(Opt, Rect)>,
+    /// The popup's rows on screen: their index in `App::popup_rows` and where they are.
+    pub popup_rows: Vec<(usize, Rect)>,
+}
+
+/// A row of the Ctrl-S popup.
+#[derive(Clone, Debug, PartialEq)]
+pub enum PopupRow {
+    /// One of the tab's options, and whether it is on.
+    Opt(Opt, bool),
+    /// Every file type at once: on while none is off.
+    AllTypes(bool),
+    /// A file type of the rows: its extension (None: none), how many rows have it, whether they show.
+    Type(Option<String>, usize, bool),
 }
 
 /// A preview that is wanted and not here yet.
@@ -164,6 +177,11 @@ pub struct App {
     previews_hidden: Vec<Tab>,
     /// The current row's preview, while it is wanted and not here yet.
     preview_wait: Option<PreviewWait>,
+    /// File types turned off in Ctrl-S: the tab (each has its own), the type (`items::file_type`) and
+    /// how many rows had it then. Not saved; a new root turns every type on again (Bilal).
+    types_off: Vec<(Tab, Option<String>, usize)>,
+    /// `Filter::types` of the list run `.0` with `.1` rows: the popup asks for it every frame.
+    types_seen: RefCell<Option<(u64, usize, TypeCounts)>>,
     /// The Config popup's cursor, while it is open.
     pub popup: Option<usize>,
     /// A message for a moment: text, is an error, since.
@@ -210,6 +228,8 @@ impl App {
             preview_scroll: 0,
             previews_hidden: vec![Tab::Files],
             preview_wait: None,
+            types_off: Vec::new(),
+            types_seen: RefCell::new(None),
             popup: None,
             save_allowed: config_error.is_none(),
             status: config_error.map(|e| (e, true, now)),
@@ -243,12 +263,23 @@ impl App {
         if let Some(scope) = &self.scope {
             return commands::in_file_plan(&scope.key, &self.pattern(), &self.engines);
         }
+        let mut extra = self.extra_options().to_vec();
+        if self.tab.searches() {
+            // a type turned off is not searched; one whose name a glob would read otherwise is only
+            // left out of the rows
+            let special = |c: char| "[]*?{}\\,!".contains(c);
+            for (_, ty, _) in self.types_off.iter().filter(|(t, _, _)| *t == self.tab) {
+                if let Some(ext) = ty.as_ref().filter(|e| !e.contains(special)) {
+                    extra.push(format!("--exclude=*.{ext}").into());
+                }
+            }
+        }
         commands::list_plan_with(
             self.tab,
             &self.options,
             &self.query,
             &self.engines,
-            self.extra_options(),
+            &extra,
             false,
         )
     }
@@ -296,6 +327,7 @@ impl App {
 
     pub fn set_root(&mut self, root: PathBuf) -> Vec<Effect> {
         self.root = root;
+        self.types_off.clear();
         self.query.clear();
         self.preview = Text::default();
         vec![self.run_list()]
@@ -403,14 +435,9 @@ impl App {
             if !left_click {
                 return Vec::new();
             }
-            if let Some(i) = self
-                .layout
-                .popup_rows
-                .iter()
-                .position(|(_, r)| r.contains(at))
-            {
+            if let Some(&(i, _)) = self.layout.popup_rows.iter().find(|(_, r)| r.contains(at)) {
                 self.popup = Some(i);
-                return self.toggle_option(i, now);
+                return self.toggle_row(i, now);
             }
             if !self.layout.popup.contains(at) {
                 self.popup = None;
@@ -582,6 +609,7 @@ impl App {
             None if self.tab.searches() => "",
             None => &self.query,
         });
+        self.filter.set_hidden_types(self.hidden_types());
         self.notes.clear();
         self.selected = 0;
         self.offset = 0;
@@ -871,7 +899,7 @@ impl App {
         let Some(cursor) = self.popup else {
             return Vec::new();
         };
-        let n = self.options.list(self.tab).len();
+        let n = self.popup_rows().len();
         match key.code {
             KeyCode::Esc => self.popup = None,
             KeyCode::Char('s') if key.modifiers.contains(KeyModifiers::CONTROL) => {
@@ -879,10 +907,114 @@ impl App {
             }
             KeyCode::Up => self.popup = Some((cursor + n - 1) % n),
             KeyCode::Down => self.popup = Some((cursor + 1) % n),
-            KeyCode::Char(' ') | KeyCode::Enter => return self.toggle_option(cursor, now),
+            KeyCode::Char(' ') | KeyCode::Enter => return self.toggle_row(cursor, now),
+            KeyCode::Char('a') => {
+                if let Some(i) = self
+                    .popup_rows()
+                    .iter()
+                    .position(|r| matches!(r, PopupRow::AllTypes(_)))
+                {
+                    return self.toggle_row(i, now);
+                }
+            }
             _ => {}
         }
         Vec::new()
+    }
+
+    /// The popup's rows: the tab's options, then (Files, Content, Deep) every file type of the rows,
+    /// the most first, and those turned off.
+    pub fn popup_rows(&self) -> Vec<PopupRow> {
+        let mut rows: Vec<PopupRow> = self
+            .options
+            .list(self.tab)
+            .into_iter()
+            .map(|(opt, on)| PopupRow::Opt(opt, on))
+            .collect();
+        if !matches!(self.tab, Tab::Files | Tab::Content | Tab::Deep) || self.scope.is_some() {
+            return rows;
+        }
+        let mut counts = self.types_of_rows();
+        let off: Vec<(Option<String>, usize)> = self
+            .types_off
+            .iter()
+            .filter(|(t, _, _)| *t == self.tab)
+            .map(|(_, ty, n)| (ty.clone(), *n))
+            .collect();
+        for (ty, n) in &off {
+            counts.entry(ty.clone()).or_insert(*n); // searched no more: the count from before
+        }
+        if counts.is_empty() {
+            return rows;
+        }
+        let mut types: Vec<(Option<String>, usize)> = counts.into_iter().collect();
+        types.sort_by(|(a, n), (b, m)| m.cmp(n).then(a.is_none().cmp(&b.is_none())).then(a.cmp(b)));
+        rows.push(PopupRow::AllTypes(off.is_empty()));
+        rows.extend(types.into_iter().map(|(ty, n)| {
+            let on = !off.iter().any(|(o, _)| *o == ty);
+            PopupRow::Type(ty, n, on)
+        }));
+        rows
+    }
+
+    /// `Filter::types`, counted again only when the list changed.
+    fn types_of_rows(&self) -> TypeCounts {
+        let key = (self.list_gen, self.filter.total());
+        let mut seen = self.types_seen.borrow_mut();
+        match &*seen {
+            Some((g, n, types)) if (*g, *n) == key => types.clone(),
+            _ => {
+                let types = self.filter.types();
+                *seen = Some((key.0, key.1, types.clone()));
+                types
+            }
+        }
+    }
+
+    /// How many of the current tab's file types are turned off (the input line says so).
+    pub fn types_off_count(&self) -> usize {
+        self.hidden_types().len()
+    }
+
+    /// The current tab's file types turned off (none inside one file, Ctrl-T).
+    fn hidden_types(&self) -> Vec<Option<String>> {
+        if self.scope.is_some() {
+            return Vec::new();
+        }
+        self.types_off
+            .iter()
+            .filter(|(t, _, _)| *t == self.tab)
+            .map(|(_, ty, _)| ty.clone())
+            .collect()
+    }
+
+    /// Space or a click on the popup's row `index`.
+    pub fn toggle_row(&mut self, index: usize, now: Instant) -> Vec<Effect> {
+        let tab = self.tab;
+        match self.popup_rows().get(index).cloned() {
+            Some(PopupRow::Opt(..)) => return self.toggle_option(index, now),
+            Some(PopupRow::AllTypes(true)) => {
+                // every type off, each with its count
+                let rows = self.popup_rows();
+                for row in rows {
+                    if let PopupRow::Type(ty, n, true) = row {
+                        self.types_off.push((tab, ty, n));
+                    }
+                }
+            }
+            Some(PopupRow::AllTypes(false)) => self.types_off.retain(|(t, _, _)| *t != tab),
+            Some(PopupRow::Type(ty, n, true)) => self.types_off.push((tab, ty, n)),
+            Some(PopupRow::Type(ty, _, false)) => {
+                self.types_off.retain(|(t, o, _)| !(*t == tab && *o == ty))
+            }
+            None => return Vec::new(),
+        }
+        if self.tab.searches() {
+            return vec![self.run_list()]; // ugrep leaves them out (`list_plan`)
+        }
+        self.filter.set_hidden_types(self.hidden_types());
+        self.selected = 0;
+        self.preview_if_changed()
     }
 
     /// Toggles the current tab's option at `index` (popup order).
@@ -1652,6 +1784,110 @@ pub(crate) mod tests {
         let (mut a, _) = app(Tab::Content);
         a.start_query(String::new());
         assert_eq!(a.result_filter, None, "no pattern to keep");
+    }
+
+    fn ty(ext: Option<&str>, count: usize, on: bool) -> PopupRow {
+        PopupRow::Type(ext.map(str::to_string), count, on)
+    }
+
+    #[test]
+    fn ctrl_s_lists_the_file_types_of_the_rows() {
+        let (mut a, now) = app(Tab::Files);
+        feed(&mut a, &["a.rs", "b.rs", "c.dll", "Makefile", "d.md"]);
+        a.handle_key(ctrl('s'), now);
+        assert_eq!(
+            a.popup_rows(),
+            [
+                PopupRow::Opt(Opt::Hidden, false),
+                PopupRow::Opt(Opt::Ignored, true),
+                PopupRow::AllTypes(true),
+                ty(Some("rs"), 2, true),
+                ty(Some("dll"), 1, true),
+                ty(Some("md"), 1, true),
+                ty(None, 1, true),
+            ],
+            "the most first; no extension last among equals"
+        );
+        let (a, _) = app(Tab::Folders);
+        assert_eq!(a.popup_rows().len(), 2, "Folders: its options only");
+    }
+
+    #[test]
+    fn a_file_type_turned_off_leaves_the_list_and_stays_in_the_popup() {
+        let (mut a, now) = app(Tab::Files);
+        feed(&mut a, &["a.rs", "b.rs", "c.dll", "Makefile"]);
+        a.handle_key(ctrl('s'), now);
+        for _ in 0..4 {
+            a.handle_key(key(KeyCode::Down), now);
+        }
+        assert_eq!(a.popup_rows()[4], ty(Some("dll"), 1, true));
+        assert_eq!(
+            a.handle_key(key(KeyCode::Char(' ')), now),
+            [],
+            "Files: no new run, nothing saved"
+        );
+        assert_eq!(a.filter.len(), 3);
+        assert_eq!(a.popup_rows()[4], ty(Some("dll"), 1, false));
+        assert_eq!(a.popup_rows()[2], PopupRow::AllTypes(false));
+        a.handle_key(key(KeyCode::Char('a')), now);
+        assert_eq!(a.filter.len(), 4, "a: all on");
+        a.handle_key(key(KeyCode::Char('a')), now);
+        assert_eq!(a.filter.len(), 0, "a again: all off");
+        a.popup = Some(2);
+        a.handle_key(key(KeyCode::Enter), now);
+        assert_eq!(a.filter.len(), 4, "All types toggles them too");
+    }
+
+    #[test]
+    fn in_content_and_deep_a_type_turned_off_is_not_searched() {
+        for tab in [Tab::Content, Tab::Deep] {
+            let (mut a, now) = found(tab); // src/a.c, docs/b.md
+            let at = a
+                .popup_rows()
+                .iter()
+                .position(|r| *r == ty(Some("md"), 1, true))
+                .unwrap();
+            a.handle_key(ctrl('s'), now);
+            a.popup = Some(at);
+            assert_eq!(
+                a.handle_key(key(KeyCode::Char(' ')), now),
+                [Effect::RunList],
+                "{tab:?}"
+            );
+            let ListPlan::Run { cmd, .. } = a.list_plan() else {
+                panic!("{tab:?}")
+            };
+            assert!(
+                cmd.args.contains(&"--exclude=*.md".into()),
+                "{tab:?}: {:?}",
+                cmd.args
+            );
+            feed(&mut a, &["src/a.c"]);
+            assert!(
+                a.popup_rows().contains(&ty(Some("md"), 1, false)),
+                "kept with its count"
+            );
+        }
+    }
+
+    #[test]
+    fn each_tab_has_its_own_types_and_a_new_root_turns_them_on() {
+        let (mut a, now) = app(Tab::Files);
+        feed(&mut a, &["a.rs", "c.dll"]);
+        a.handle_key(ctrl('s'), now);
+        a.popup = Some(3); // .dll: one each, so by name
+        assert_eq!(a.popup_rows()[3], ty(Some("dll"), 1, true));
+        a.handle_key(key(KeyCode::Char(' ')), now);
+        a.handle_key(key(KeyCode::Esc), now);
+        a.handle_key(key(KeyCode::Tab), now);
+        feed(&mut a, &["a.rs", "c.dll"]);
+        assert_eq!(a.filter.len(), 2, "Content has its own");
+        a.handle_key(key(KeyCode::BackTab), now);
+        feed(&mut a, &["a.rs", "c.dll"]);
+        assert_eq!(a.filter.len(), 1, "Files keeps its own");
+        a.set_root(PathBuf::from("/elsewhere"));
+        feed(&mut a, &["a.rs", "c.dll"]);
+        assert_eq!(a.filter.len(), 2, "another folder: all on again");
     }
 
     #[test]
