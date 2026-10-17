@@ -56,7 +56,13 @@ else
     fi
 fi
 
-# Now show git diff
+# Now show git diff: through git-split-diffs (npm) when it is installed, else delta side by side, which a
+# release package of sf ships
+if ! command -v git-split-diffs >/dev/null 2>&1; then
+    git log -p --unified=3 -- "$relative_path" \
+        | delta --side-by-side --paging=never --width="${COLUMNS}" | less -R -i --mouse -+F
+    exit
+fi
 (
     git log --color=always --format=$'commit %Cblue%h%Creset%n%Cred→ Author:%Creset %an%n%Cgreen→ Date:%Creset %ad \033[33m(%ar)\033[0m%n%Cred→ Message:%Creset %s%n'"$HR" \
         --date=format:'%Y-%m-%d %H:%M:%S' -p --no-prefix --unified=3 "$relative_path"

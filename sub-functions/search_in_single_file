@@ -8,6 +8,10 @@ QUERY="$2"
 # fzf runs the preview, bind and reload commands through $SHELL -c; FILE and QUERY reach them via the
 # environment, so their contents are never spliced into a command string.
 export FILE QUERY
+# The scripts its keys open lie beside it (the repo's sub-functions, or a release package's lib/sf/sub-functions);
+# the tmux windows get this PATH, which in a package starts with lib/sf (fzf, bat, ugrep, delta).
+SF_SUB=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd) || exit 1
+export SF_SUB
 
 # Look: Catppuccin Macchiato on the terminal's own background, as in sf. The list's matches red, its line
 # numbers dim; the preview is bat with the base16 theme (the terminal's Catppuccin colours, the selected
@@ -51,15 +55,15 @@ fzf -i --ansi "${gutter[@]}" \
     --bind "alt-down:preview-page-down" \
     --bind 'home:first,end:last' \
     --bind "ctrl-l:toggle-preview" \
-    --bind 'enter:execute-silent(~/.SearchFunctions/sub-functions/platform_action open "$FILE")' \
-    --bind 'ctrl-c:execute-silent(~/.SearchFunctions/sub-functions/platform_action copy-path "$FILE")' \
-    --bind 'ctrl-o:execute-silent(tmux new-window -n nvim  nvim "$FILE"; tmux select-pane -T editor)' \
-    --bind 'ctrl-e:execute-silent(~/.SearchFunctions/sub-functions/platform_action reveal "$FILE")' \
-    --bind 'ctrl-t:execute-silent(tmux new-window -n infile ~/.SearchFunctions/sub-functions/search_in_single_file "$FILE"; tmux select-pane -T file-content)' \
-    --bind 'ctrl-u:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/show_diffs "$FILE"; tmux select-pane -T git)' \
-	--bind 'ctrl-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff "$FILE"; tmux select-pane -T git)' \
-	--bind 'alt-g:execute-silent(tmux new-window -n diff ~/.SearchFunctions/sub-functions/git_diff_short "$FILE"; tmux select-pane -T git)' \
-    --bind 'alt-u:execute-silent(tmux new-window -n logs ~/.SearchFunctions/sub-functions/show_logs "$FILE"; tmux select-pane -T git)' \
+    --bind 'enter:execute-silent("$SF_SUB"/platform_action open "$FILE")' \
+    --bind 'ctrl-c:execute-silent("$SF_SUB"/platform_action copy-path "$FILE")' \
+    --bind 'ctrl-o:execute-silent(tmux new-window -n nvim -e "PATH=$PATH"  nvim "$FILE"; tmux select-pane -T editor)' \
+    --bind 'ctrl-e:execute-silent("$SF_SUB"/platform_action reveal "$FILE")' \
+    --bind 'ctrl-t:execute-silent(tmux new-window -n infile -e "PATH=$PATH" "$SF_SUB"/search_in_single_file "$FILE"; tmux select-pane -T file-content)' \
+    --bind 'ctrl-u:execute-silent(tmux new-window -n diff -e "PATH=$PATH" "$SF_SUB"/show_diffs "$FILE"; tmux select-pane -T git)' \
+	--bind 'ctrl-g:execute-silent(tmux new-window -n diff -e "PATH=$PATH" "$SF_SUB"/git_diff "$FILE"; tmux select-pane -T git)' \
+	--bind 'alt-g:execute-silent(tmux new-window -n diff -e "PATH=$PATH" "$SF_SUB"/git_diff_short "$FILE"; tmux select-pane -T git)' \
+    --bind 'alt-u:execute-silent(tmux new-window -n logs -e "PATH=$PATH" "$SF_SUB"/show_logs "$FILE"; tmux select-pane -T git)' \
     --bind "ctrl-alt-h:unix-line-discard" \
     --bind "alt-bs:unix-word-rubout" \
     --bind "ctrl-h:backward-kill-word" \

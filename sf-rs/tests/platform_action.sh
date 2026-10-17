@@ -1,19 +1,20 @@
 #!/bin/bash
 # Test of sub-functions/platform_action, the open/reveal/copy wrapper of the fzf functions: with sf-rs in PATH it
-# hands over to sf, without it uses xdg-open / open_in_file_manager / wl-copy. Every program is a stub that
-# logs its arguments; HOME is a fake one, so ~/.SearchFunctions/sub-functions/open_in_file_manager is a stub
-# too, and tmux is a stub (never a real server).
+# hands over to sf, without it uses xdg-open / open_in_file_manager (beside it) / wl-copy. The script runs as a
+# copy in WORKDIR, so its open_in_file_manager is a stub; every program is a stub that logs its arguments,
+# HOME is a fake one, and tmux is a stub (never a real server).
 #
 # usage: tests/platform_action.sh WORKDIR   (WORKDIR: a new, empty folder; nothing in it is ever deleted)
 #        SF_BIN=path/to/sf tests/platform_action.sh WORKDIR   (default: target/debug/sf)
 set -u
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-ACTION=$(realpath -- "$here/../../sub-functions/platform_action") || exit 2
 W=${1:?usage: platform_action.sh WORKDIR}
 mkdir -p "$W" && W=$(realpath -- "$W")
 [[ -z $(ls -A "$W") ]] || { echo "platform_action.sh: $W is not empty" >&2; exit 2; }
-LOG=$W/log WITH=$W/with-sf OLD=$W/old-sf PLAIN=$W/plain FAKE_HOME=$W/home
-mkdir -p "$WITH" "$OLD" "$PLAIN" "$FAKE_HOME/.SearchFunctions/sub-functions"
+LOG=$W/log WITH=$W/with-sf OLD=$W/old-sf PLAIN=$W/plain FAKE_HOME=$W/home SUB=$W/sub
+mkdir -p "$WITH" "$OLD" "$PLAIN" "$FAKE_HOME" "$SUB"
+cp "$here/../../sub-functions/platform_action" "$SUB/" || exit 2
+ACTION=$SUB/platform_action
 
 # stub DIR NAME [HELP]: logs "NAME|arg|arg..." and "<stdin>" when there is any; prints $DIR/NAME.err to stderr
 # and exits with the code in $DIR/NAME.exit when those files are there. With HELP, --help prints it (unlogged).
@@ -36,7 +37,7 @@ stub "$WITH" sf "usage: sf [files|content|folders|git]
        sf open|reveal|copy-path PATH"
 # an sf from before the actions (or another program called sf): its usage does not name them
 stub "$OLD" sf "usage: sf [files|content|folders|git]"
-stub "$FAKE_HOME/.SearchFunctions/sub-functions" open_in_file_manager
+stub "$SUB" open_in_file_manager
 
 PASS=0 FAIL=0
 ok() { echo "PASS  $*"; PASS=$((PASS + 1)); }

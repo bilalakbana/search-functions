@@ -7,7 +7,8 @@
 #
 # With sf (the Rust app, sf-rs) in PATH, sf does it: on any Linux desktop (D-Bus file manager, wl-copy,
 # xclip, xsel, OSC 52) and on WSL (PowerShell, Explorer). Without it, the Linux tools do (xdg-open,
-# open_in_file_manager, wl-copy). The value is always one argument, never part of a command line.
+# open_in_file_manager beside this script, wl-copy). The value is always one argument, never part of a
+# command line.
 #
 # fzf's execute-silent shows nothing, so a failure goes to stderr and, inside tmux, to the status line.
 
@@ -37,7 +38,8 @@ case $action in
     open)
         nohup xdg-open "$value" </dev/null >/dev/null 2>&1 || fail "xdg-open failed (exit $?): $value" ;;
     reveal)
-        ~/.SearchFunctions/sub-functions/open_in_file_manager "$value" || fail "open_in_file_manager failed: $value" ;;
+        here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd) || fail "cannot find my own folder"
+        "$here/open_in_file_manager" "$value" || fail "open_in_file_manager failed: $value" ;;
     copy-path|copy-text)
         printf '%s' "$value" | wl-copy >/dev/null 2>&1 || fail "wl-copy failed (exit $?)" ;;
 esac
