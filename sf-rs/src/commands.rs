@@ -604,6 +604,7 @@ pub fn preview_plan_with(
             let commit = crate::views::ViewKind::Commit {
                 root: root.to_path_buf(),
                 hash: hash.to_string(),
+                whole: opts.git.whole_files,
             };
             crate::views::view_plan(&commit, width, e)
         }
@@ -1776,6 +1777,29 @@ mod tests {
         assert_eq!(show.args[show.args.len() - 2], "--end-of-options");
         assert_eq!(delta.program, PathBuf::from("/bin/delta"));
         assert!(delta.args.contains(&"--width=90".into()));
+    }
+
+    #[test]
+    fn preview_git_shows_whole_files_when_asked() {
+        let mut o = Options::default();
+        o.toggle(Tab::Git, Opt::WholeFiles);
+        let plan = preview_plan(
+            Tab::Git,
+            &o,
+            "",
+            &item("abcdef1", None),
+            90,
+            &engines(),
+            Path::new("/r"),
+        );
+        let PreviewPlan::Pipe(show, _) = plan else {
+            panic!("{plan:?}")
+        };
+        assert!(
+            show.args.contains(&"--unified=99999999".into()),
+            "{:?}",
+            show.args
+        );
     }
 
     #[test]

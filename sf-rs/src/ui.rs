@@ -225,7 +225,7 @@ fn draw_view(frame: &mut Frame, app: &App) -> Rect {
         )
     } else {
         Line::styled(
-            "Esc back · ↑↓ PgUp PgDn Home End · / search · n N next",
+            "Esc back · ↑↓ PgUp PgDn Home End · / or ^T search · n N next",
             style(theme::DIM),
         )
     };
@@ -289,11 +289,26 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect, status: Option<Line<'s
     frame.render_widget(block, area);
     // Only the lines that can be on screen: a preview can have hundreds of thousands.
     let from = (app.preview_scroll as usize).min(app.preview.lines.len());
-    let shown: Vec<Line> = app.preview.lines[from..]
+    let mut shown: Vec<Line> = app.preview.lines[from..]
         .iter()
         .take(inner.height as usize)
         .cloned()
         .collect();
+    // Alt-F: the line it found, in a band over whatever colour its parts have (delta's diff colours)
+    if let Some(i) = app
+        .preview_find
+        .as_ref()
+        .and_then(|f| f.found)
+        .and_then(|f| f.checked_sub(from))
+        .filter(|&i| i < shown.len())
+    {
+        let band = Style::new().bg(theme::SURFACE);
+        let line = &mut shown[i];
+        line.style = line.style.patch(band);
+        for span in &mut line.spans {
+            span.style = span.style.patch(band);
+        }
+    }
     frame.render_widget(
         Paragraph::new(Text::from(shown)).wrap(Wrap { trim: false }),
         inner,
@@ -464,11 +479,15 @@ fn short(opt: Opt) -> &'static str {
         Opt::WordsOnALine => "words on a line",
         Opt::WordsInTheFile => "words in the file",
         Opt::MatchCase => "match case",
+        Opt::WholeFiles => "whole files",
         Opt::AllBranches => "all branches",
     }
 }
 
 fn placeholder(app: &App) -> &'static str {
+    if app.preview_find.is_some() {
+        return "type to find · Enter ↓ the next · ↑ the one before · Esc back";
+    }
     if app.scope.is_some() {
         let f = &app.options.in_file;
         return if f.words_on_a_line {
@@ -523,7 +542,14 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         count.push_str(" …");
     }
     let mut count_style = style(theme::DIM);
-    if app.tab == Tab::Help {
+    if let Some(f) = &app.preview_find {
+        // Alt-F: the line found, or that it is nowhere in the preview
+        if !f.text.is_empty() && f.found.is_none() {
+            (count, count_style) = ("not found".into(), style(theme::RED));
+        } else if let Some(i) = f.found {
+            count = format!("line {}/{}", i + 1, app.preview.lines.len());
+        }
+    } else if app.tab == Tab::Help {
         // the manual: where it is, or that the search is nowhere in it
         let h = &app.help;
         if !h.search.is_empty() && h.found.is_none() {
@@ -543,6 +569,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         Layout::horizontal([Constraint::Min(0), Constraint::Length(right_w)]).areas(area);
 
     let title = match &app.scope {
+        _ if app.preview_find.is_some() => "Find in preview".to_string(),
         Some(scope) => {
             let name = std::path::Path::new(&scope.key)
                 .file_name()
@@ -551,10 +578,10 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         }
         None => app.tab.title().to_string(),
     };
-    let typed = if app.tab == Tab::Help {
-        &app.help.search
-    } else {
-        &app.query
+    let typed = match &app.preview_find {
+        Some(f) => &f.text,
+        None if app.tab == Tab::Help => &app.help.search,
+        None => &app.query,
     };
     let query = crate::items::printable(typed);
     let mut left = vec![
@@ -636,6 +663,7 @@ fn footer_items(tab: Tab, editor: &str) -> Vec<String> {
         Tab::Git => &[
             "Enter show commit",
             "^S options",
+            "Alt-F find",
             "^C copy hash",
             "Esc quit",
         ],
@@ -657,8 +685,8 @@ fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
         items.iter().map(|i| i.chars().count()).sum::<usize>() + 3 * items.len().saturating_sub(1)
     };
     let mut items = footer_items(app.tab, &app.editor);
-    if app.result_filter.is_some() || app.scope.is_some() {
-        // Esc leaves the filter or the file, not sf
+    if app.result_filter.is_some() || app.scope.is_some() || app.preview_find.is_some() {
+        // Esc leaves the filter, the file or the finding, not sf
         if let Some(esc) = items.last_mut() {
             *esc = "Esc back".into();
         }
@@ -1308,7 +1336,7 @@ mod tests {
             ),
             (
                 Tab::Git,
-                "Enter show commit · ^S options · ^C copy hash · Esc quit",
+                "Enter show commit · ^S options · Alt-F find · ^C copy hash · Esc quit",
             ),
         ];
         for (tab, want) in cases {
@@ -1688,6 +1716,87 @@ mod tests {
         }
         let buf = render(&mut a, 120, 30);
         assert!(row(&buf, 29).contains("not found"), "{:?}", row(&buf, 29));
+    }
+
+    #[test]
+    fn alt_f_draws_what_it_finds() {
+        use crate::app::tests::alt;
+        let (mut a, now) = app_with_preview(Tab::Git);
+        feed(&mut a, &["abcdef1"]);
+        render(&mut a, 120, 30);
+        let lines: Vec<Line> = (0..40)
+            .map(|i| {
+                Line::raw(if i == 9 {
+                    "a Needle here".to_string()
+                } else {
+                    format!("line {i}")
+                })
+            })
+            .collect();
+        a.on_preview(crate::preview::PreviewMsg {
+            header_lines: 0,
+            generation: a.preview_gen,
+            text: Text::from(lines),
+        });
+        a.handle_key(alt(KeyCode::Char('f')), now);
+        let buf = render(&mut a, 120, 30);
+        assert!(
+            row(&buf, 29).contains("Find in preview › type"),
+            "{:?}",
+            row(&buf, 29)
+        );
+        assert!(row(&buf, 0).contains("Esc back"), "{:?}", row(&buf, 0));
+        for c in "needle".chars() {
+            a.handle_key(key(KeyCode::Char(c)), now);
+        }
+        let buf = render(&mut a, 120, 30);
+        assert!(
+            row(&buf, 29).contains("Find in preview › needle"),
+            "{:?}",
+            row(&buf, 29)
+        );
+        let (x, y) = find(&buf, "a Needle here").unwrap();
+        assert_eq!(buf[(x, y)].bg, theme::SURFACE, "the found line in a band");
+        for c in "zzz".chars() {
+            a.handle_key(key(KeyCode::Char(c)), now);
+        }
+        assert!(row(&render(&mut a, 120, 30), 29).contains("not found"));
+    }
+
+    #[test]
+    fn alt_f_bands_a_line_delta_coloured_too() {
+        use crate::app::tests::alt;
+        let (mut a, now) = app_with_preview(Tab::Git);
+        feed(&mut a, &["abcdef1"]);
+        render(&mut a, 120, 30);
+        let green = Style::new().bg(ratatui::style::Color::Rgb(0, 80, 0));
+        let lines = vec![
+            Line::raw("context"),
+            Line::from(vec![Span::styled("+ the new Needle", green)]),
+        ];
+        a.on_preview(crate::preview::PreviewMsg {
+            header_lines: 0,
+            generation: a.preview_gen,
+            text: Text::from(lines),
+        });
+        a.handle_key(alt(KeyCode::Char('f')), now);
+        for c in "needle".chars() {
+            a.handle_key(key(KeyCode::Char(c)), now);
+        }
+        let buf = render(&mut a, 120, 30);
+        let (x, y) = find(&buf, "+ the new Needle").unwrap();
+        assert_eq!(
+            buf[(x, y)].bg,
+            theme::SURFACE,
+            "the band over delta's own colour"
+        );
+    }
+
+    #[test]
+    fn git_names_alt_f() {
+        let (mut a, _) = app(Tab::Git);
+        let top = row(&render(&mut a, 200, 24), 0);
+        assert!(top.contains("Alt-F find"), "{top:?}");
     }
 
     #[test]

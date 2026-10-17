@@ -43,9 +43,11 @@ use crate::commands::{Cmd, ListPlan};
 use crate::model::{Options, Tab};
 use crate::preview::Previewer;
 use crate::runner::Runner;
+use crate::views::ViewKind;
 
 const USAGE: &str = "usage: sf [files|content|deep|folders|git|help] [QUERY...] [--print] [-- ENGINE-OPTIONS...]
        sf in FILE [WORDS...]
+       sf history|log|diff [--short] FILE
        sf open|reveal|copy-path PATH
        sf copy-text TEXT
        sf doctor
@@ -67,7 +69,9 @@ pipe the real paths (Content and Deep: ugrep's own path:line:text); exit status 
 listed, 1 when nothing, 2 on an error.
 
 sf in FILE [WORDS...] opens the window inside FILE, as Ctrl-T does (in tmux Ctrl-T opens it in a window
-of its own); the words are read as its options say (all on a line by default), Esc quits.
+of its own); the words are read as its options say (all on a line by default), Esc quits. sf history,
+log and diff [--short] FILE show the file's history with its changes, its log, its changes against HEAD
+(whole or short), as Ctrl-U, Alt-U, Ctrl-G and Alt-G do (in tmux in windows of their own); Esc quits.
 
 The other forms do one action as the window does, on Linux and on WSL alike: open PATH with its default
 application, reveal it in the file manager, copy PATH (on WSL its Windows form) or TEXT to the
@@ -84,7 +88,15 @@ fn main() -> ExitCode {
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     let (tab, query, print, extra) = match cli::parse(&args) {
         Ok(Cli::InFile { file, query }) => {
-            return report(run(Tab::Content, query, Vec::new(), Some(file)));
+            return report(run(Tab::Content, query, Vec::new(), Start::InFile(file)));
+        }
+        Ok(Cli::View { view, file }) => {
+            return report(run(
+                Tab::Files,
+                String::new(),
+                Vec::new(),
+                Start::View(view, file),
+            ));
         }
         Ok(Cli::Help) => {
             print!("{USAGE}");
@@ -111,7 +123,7 @@ fn main() -> ExitCode {
     if print || !std::io::stdout().is_terminal() {
         return print_list(tab, &query, &extra);
     }
-    report(run(tab, query, extra, None))
+    report(run(tab, query, extra, Start::Tab))
 }
 
 /// The window's end as sf's exit status; an error is said on stderr.
@@ -201,13 +213,18 @@ fn use_bundle() {
     unsafe { std::env::set_var("PATH", path) };
 }
 
-/// The window; with `in_file`, inside that file from the start (`sf in FILE`).
-fn run(
-    tab: Tab,
-    query: String,
-    extra: Vec<OsString>,
-    in_file: Option<OsString>,
-) -> anyhow::Result<()> {
+/// What the window starts with.
+enum Start {
+    /// The tab, with the query.
+    Tab,
+    /// `sf in FILE`: inside the file.
+    InFile(OsString),
+    /// `sf history|log|diff FILE`: only that view.
+    View(cli::View, OsString),
+}
+
+/// The window, started as `start` says.
+fn run(tab: Tab, query: String, extra: Vec<OsString>, start: Start) -> anyhow::Result<()> {
     let root = std::env::current_dir().context("reading the current folder")?;
     let env = Env::detect();
     let engines = engines::discover(&env.platform.path);
@@ -215,10 +232,23 @@ fn run(
     let (options, config_error) = load_options();
     let mut app = App::new(root, tab, options, engines, config_error, Instant::now());
     app.tmux = env.platform.tmux;
-    let started_in_file = in_file.is_some();
-    match in_file {
-        Some(file) => app.start_in_file(file, query),
-        None => app.start_query(query),
+    // a window of its own (Ctrl-T, the git keys in tmux) keeps its name: "infile", "diff", ...
+    let own_window = !matches!(start, Start::Tab);
+    match start {
+        Start::Tab => app.start_query(query),
+        Start::InFile(file) => app.start_in_file(file, query),
+        Start::View(view, file) => {
+            let path = app.root.join(file);
+            app.start_view(match view {
+                cli::View::Diff => ViewKind::Diff { path, full: true },
+                cli::View::ShortDiff => ViewKind::Diff { path, full: false },
+                cli::View::History => ViewKind::History {
+                    path,
+                    whole: app.options.git.whole_files,
+                },
+                cli::View::Log => ViewKind::Log { path },
+            });
+        }
     }
     if !extra.is_empty() {
         app.extra = Some((tab, extra));
@@ -229,8 +259,7 @@ fn run(
             .unwrap_or(&editor.program);
         app.editor = name.to_string_lossy().into_owned();
     }
-    // Ctrl-T's window keeps its name, "infile"
-    let window = if started_in_file {
+    let window = if own_window {
         None
     } else {
         TmuxWindow::rename(&env)

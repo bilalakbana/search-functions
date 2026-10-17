@@ -429,3 +429,22 @@ left when it is long"; he chose the reading order left to right):
 - Tried on real folders: /usr/lib/python3/dist-packages (55 types, two columns), /usr/share/doc (731 types,
   five columns at 200 × 50, the rest scrolling), 80 × 24 in Content (one column, at the right edge).
 
+The git keys in tmux, Whole files, Alt-F and Ctrl-T in views (2026-10-17, Bilal's four requests; his choices: all
+four git keys get windows, Alt-F for finding):
+
+- In tmux Ctrl-G, Alt-G, Ctrl-U and Alt-U open windows of their own, named as the fzf functions' ("diff",
+  "history", "log"; pane title "git"), running `sf diff [--short] FILE`, `sf history FILE`, `sf log FILE`
+  (new commands, `Cli::View`): sf starts on that view only (`App::start_view`), keeps the window's name and
+  quits on Esc or q. The window gets `WINDOW_ENV` as Ctrl-T's does. Outside tmux they stay views inside sf.
+  This reverses Step 3's "views always inside sf" for these four keys (Bilal, 2026-10-17); Enter in Git still
+  shows its commit inside sf.
+- Git's Whole files (off): a commit (preview and Enter's view) and a file's history (Ctrl-U, from any tab;
+  also in its tmux window, which reads the same config) show the changed files whole: git's `--unified` as
+  large as Ctrl-G's.
+- Alt-F finds in the preview, in every tab that has one (Bilal asked for Git, where typing filters the commits):
+  the input line becomes "Find in preview ›", typing looks for the text (case aside) and scrolls to the line
+  with two above it, Enter or ↓ the next, ↑ the one before (round), Esc or Alt-F back; a new row's preview is
+  searched from the top. The found line gets a band over every part of it, so delta's own diff colours do not
+  hide it. Without a visible preview it says that Ctrl-L shows it.
+- Ctrl-T in a view searches it, as `/` does (Bilal: a mode, not a window).
+

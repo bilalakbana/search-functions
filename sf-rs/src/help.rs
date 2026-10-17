@@ -54,11 +54,15 @@ const KEYS: &[(&str, &str)] = &[
     ),
     (
         "Ctrl-G  Alt-G",
-        "the file's changes against HEAD: whole file / short",
+        "the file's changes against HEAD: whole file / short (in tmux a window)",
     ),
     (
         "Ctrl-U  Alt-U",
-        "the file's history with its changes / its log",
+        "the file's history with its changes / its log (in tmux a window)",
+    ),
+    (
+        "  in a view",
+        "/ or Ctrl-T search, n N the next / the one before, Esc back",
     ),
     ("Ctrl-E", "show it in the file manager"),
     ("Ctrl-C", "copy the path (Git: the hash)"),
@@ -66,6 +70,10 @@ const KEYS: &[(&str, &str)] = &[
     (
         "Ctrl-F",
         "Content, Deep: keep the pattern, typing filters the files found",
+    ),
+    (
+        "Alt-F",
+        "find in the preview: Enter ↓ the next, ↑ the one before, Esc back",
     ),
     ("Ctrl-L", "hide or show the preview"),
     ("Ctrl-R", "run the list again"),
@@ -109,6 +117,10 @@ const OPTIONS: &[(&str, &str)] = &[
     (
         "All branches",
         "Git: every branch, not only the current one",
+    ),
+    (
+        "Whole files",
+        "Git, Ctrl-U: the changed files whole, not only around the changes",
     ),
     (
         "File types",
@@ -170,6 +182,10 @@ pub const EXAMPLES: &[(&str, &str)] = &[
         "a month of one author's commits",
     ),
     ("sf in src/main.rs 'ankara izmir'", "inside one file"),
+    (
+        "sf history src/main.rs",
+        "its commits with their changes (also: log, diff, diff --short)",
+    ),
     (
         "sf content TODO | wc -l",
         "into a pipe the list goes out: here counted",

@@ -81,6 +81,8 @@ pub enum Opt {
     WordsInTheFile,
     /// The case of what is typed counts (else smart case for a pattern, none for a filter).
     MatchCase,
+    /// Git: a commit and a file's history (Ctrl-U) show the changed files whole.
+    WholeFiles,
 }
 
 impl Opt {
@@ -100,6 +102,7 @@ impl Opt {
             Opt::WordsOnALine => "All words on a line",
             Opt::WordsInTheFile => "All words in the file",
             Opt::MatchCase => "Match case",
+            Opt::WholeFiles => "Whole files",
         }
     }
 
@@ -116,6 +119,7 @@ impl Opt {
             Opt::WordsOnALine => "a b: both on one line",
             Opt::WordsInTheFile => "a b: both in the file, any lines",
             Opt::MatchCase => "A is not a",
+            Opt::WholeFiles => "the changed files whole, not only around the changes",
         }
     }
 }
@@ -176,6 +180,7 @@ pub struct FoldersOpts {
 #[serde(default)]
 pub struct GitOpts {
     pub all_branches: bool,
+    pub whole_files: bool,
     pub match_case: bool,
 }
 
@@ -243,6 +248,7 @@ impl Default for GitOpts {
     fn default() -> Self {
         GitOpts {
             all_branches: true,
+            whole_files: false,
             match_case: false,
         }
     }
@@ -286,7 +292,7 @@ impl Options {
                 Opt::WordsInTheFile,
                 Opt::MatchCase,
             ],
-            Tab::Git => &[Opt::AllBranches, Opt::MatchCase],
+            Tab::Git => &[Opt::AllBranches, Opt::WholeFiles, Opt::MatchCase],
             Tab::Help => &[],
         };
         order.iter().map(|&o| (o, self.get(tab, o))).collect()
@@ -358,6 +364,7 @@ impl Options {
             (Tab::Deep, Opt::MatchCase) => Some(&mut self.deep.match_case),
             (Tab::Folders, Opt::MatchCase) => Some(&mut self.folders.match_case),
             (Tab::Git, Opt::MatchCase) => Some(&mut self.git.match_case),
+            (Tab::Git, Opt::WholeFiles) => Some(&mut self.git.whole_files),
             (Tab::Content, Opt::MatchingLines) => Some(&mut self.content.matching_lines),
             (Tab::Content, Opt::EachMatch) => Some(&mut self.content.each_match),
             (Tab::Content, Opt::Archives) => Some(&mut self.content.archives),
@@ -536,7 +543,11 @@ mod tests {
             opts(Tab::Folders),
             [Opt::Hidden, Opt::Ignored, Opt::MatchCase]
         );
-        assert_eq!(opts(Tab::Git), [Opt::AllBranches, Opt::MatchCase]);
+        assert_eq!(
+            opts(Tab::Git),
+            [Opt::AllBranches, Opt::WholeFiles, Opt::MatchCase]
+        );
+        assert!(!o.get(Tab::Git, Opt::WholeFiles), "off: as git shows it");
         for tab in Tab::ALL {
             assert!(!o.get(tab, Opt::MatchCase), "{tab:?}: off, as before");
         }

@@ -111,9 +111,14 @@ keys C-o;    expect_log 'files: Ctrl-O nvim in tmux'   "NVIM [--] [$T/src/main.c
 keys C-e;    expect_log 'files: Ctrl-E reveals'        "REVEAL [--session] [--print-reply] [--dest=org.freedesktop.FileManager1] [--type=method_call] [/org/freedesktop/FileManager1] [org.freedesktop.FileManager1.ShowItems] [array:string:file://$uT/src/main.c] [string:]"
 keys C-g
 expect 'files: Ctrl-G a view of the diff'  'main\.c · changes against HEAD'
+[[ $(tm display-message -p -t e2e '#W') == diff ]] && ok 'files: Ctrl-G in a tmux window, diff' || bad 'files: no diff window'
 expect 'files: an unchanged file says so'  'No local changes in .*main\.c'
+keys C-t
+expect 'view: Ctrl-T searches it'          '^/ ▏'
 keys Escape
-expect 'files: Esc leaves the view'        "Files › main .* 1/$n_files"
+expect 'view: Esc ends the search'         'Esc back'
+keys Escape; back_to_sf
+expect 'files: Esc closes the window'      "Files › main .* 1/$n_files"
 keys C-t
 expect "files: Ctrl-T the file's lines"    'In main\.c › .* 3/3'
 [[ $(tm display-message -p -t e2e '#W') == infile ]] && ok 'files: Ctrl-T in a tmux window, infile' || bad 'files: no infile window'
@@ -353,18 +358,25 @@ type_ 'changed'
 expect 'views: / types the search'         '^/ changed'
 keys Enter
 expect 'views: the keys again'             'Esc back'
-keys Escape
+keys Escape; back_to_sf
 keys C-u
 expect 'views: Ctrl-U the history'         'empty\.txt · history with changes'
-keys Escape
+[[ $(tm display-message -p -t e2e '#W') == history ]] && ok 'views: Ctrl-U in a window, history' || bad 'views: no history window'
+keys Escape; back_to_sf
 keys M-u
 expect 'views: Alt-U the log'              'first commit'
-keys q
-expect 'views: q goes back'                'Files › empty'
+[[ $(tm display-message -p -t e2e '#W') == log ]] && ok 'views: Alt-U in a window, log' || bad 'views: no log window'
+keys q; back_to_sf
+expect 'views: q closes the window'        'Files › empty'
 keys Escape
 expect 'views: quit'                       '^READY>\s*$'
 keys "clear; '$SF' git" Enter
 expect 'views: the Git tab'                'second \(feat\)'
+keys M-f
+type_ 'feat'
+expect 'git: Alt-F finds in the preview'   'Find in preview › feat .*line [0-9]+/[0-9]+'
+keys Escape
+expect 'git: Esc back to the list'         'Git › '
 keys Enter
 expect 'views: Enter shows the commit'     'commit [0-9a-f]{40}'
 shot view_commit

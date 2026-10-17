@@ -7,6 +7,15 @@ use std::ffi::OsString;
 use crate::model::Tab;
 use crate::platform::COMMANDS;
 
+/// The views `sf history|log|diff [--short] FILE` start with (Ctrl-U, Alt-U, Ctrl-G, Alt-G in tmux).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum View {
+    Diff,
+    ShortDiff,
+    History,
+    Log,
+}
+
 #[derive(Debug, PartialEq)]
 pub enum Cli {
     Help,
@@ -20,6 +29,11 @@ pub enum Cli {
     InFile {
         file: OsString,
         query: String,
+    },
+    /// `sf history|log|diff [--short] FILE`: a view of the file's git; Esc quits it.
+    View {
+        view: View,
+        file: OsString,
     },
     /// The window, or with `print` the list it would show.
     Run {
@@ -48,6 +62,22 @@ pub fn parse(args: &[OsString]) -> Result<Cli, String> {
                 value: value.clone(),
             }),
             _ => Err(format!("sf {name}: one {what} expected")),
+        };
+    }
+    if let Some(name) = first.filter(|n| ["history", "log", "diff"].contains(n)) {
+        let rest = &args[1..];
+        let (view, files) = match (name, rest.first().and_then(|a| a.to_str())) {
+            ("diff", Some("--short")) => (View::ShortDiff, &rest[1..]),
+            ("diff", _) => (View::Diff, rest),
+            ("history", _) => (View::History, rest),
+            _ => (View::Log, rest),
+        };
+        return match files {
+            [file] => Ok(Cli::View {
+                view,
+                file: file.clone(),
+            }),
+            _ => Err(format!("sf {name}: one FILE expected")),
         };
     }
     if first == Some("in") {
@@ -286,6 +316,33 @@ mod tests {
             print,
             extra: args(extra),
         }
+    }
+
+    #[test]
+    fn the_views_take_one_file() {
+        for (given, view) in [
+            (vec!["history", "src/a.c"], View::History),
+            (vec!["log", "src/a.c"], View::Log),
+            (vec!["diff", "src/a.c"], View::Diff),
+            (vec!["diff", "--short", "src/a.c"], View::ShortDiff),
+        ] {
+            assert_eq!(
+                parse(&args(&given)),
+                Ok(Cli::View {
+                    view,
+                    file: "src/a.c".into()
+                }),
+                "{given:?}"
+            );
+        }
+        assert_eq!(
+            parse(&args(&["log"])),
+            Err("sf log: one FILE expected".into())
+        );
+        assert_eq!(
+            parse(&args(&["diff", "a", "b"])),
+            Err("sf diff: one FILE expected".into())
+        );
     }
 
     #[test]

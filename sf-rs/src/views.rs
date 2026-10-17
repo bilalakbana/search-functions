@@ -13,12 +13,17 @@ use crate::engines::Engines;
 pub enum ViewKind {
     /// The working tree against HEAD: the whole file (`full`, Ctrl-G) or 10 lines around changes (Alt-G).
     Diff { path: PathBuf, full: bool },
-    /// Every commit of the file with its changes (Ctrl-U).
-    History { path: PathBuf },
+    /// Every commit of the file with its changes (Ctrl-U); `whole`: the file whole in each (Git's
+    /// Whole files).
+    History { path: PathBuf, whole: bool },
     /// Every commit of the file, the files each changed (Alt-U).
     Log { path: PathBuf },
-    /// One commit (Enter in Git).
-    Commit { root: PathBuf, hash: String },
+    /// One commit (Enter in Git); `whole`: the changed files whole.
+    Commit {
+        root: PathBuf,
+        hash: String,
+        whole: bool,
+    },
 }
 
 impl ViewKind {
@@ -35,7 +40,7 @@ impl ViewKind {
             ViewKind::Diff { path, full: false } => {
                 format!("{} · changes against HEAD, short", name(path))
             }
-            ViewKind::History { path } => format!("{} · history with changes", name(path)),
+            ViewKind::History { path, .. } => format!("{} · history with changes", name(path)),
             ViewKind::Log { path } => format!("{} · log", name(path)),
             ViewKind::Commit { hash, .. } => format!("commit {hash}"),
         }
@@ -48,7 +53,7 @@ impl ViewKind {
                 "No local changes in {}, or git does not track it",
                 path.display()
             ),
-            ViewKind::History { path } | ViewKind::Log { path } => {
+            ViewKind::History { path, .. } | ViewKind::Log { path } => {
                 format!("No commits of {}", path.display())
             }
             ViewKind::Commit { hash, .. } => format!("Nothing to show for {hash}"),
@@ -67,6 +72,9 @@ fn place(path: &Path) -> (PathBuf, OsString) {
 }
 
 /// The commands of a view `width` columns wide.
+/// git's context for a whole file: more lines than any file has.
+const WHOLE: &str = "--unified=99999999";
+
 pub fn view_plan(kind: &ViewKind, width: u16, e: &Engines) -> PreviewPlan {
     let Some(git_path) = &e.git else {
         return PreviewPlan::Text("git is not installed".into());
@@ -75,22 +83,19 @@ pub fn view_plan(kind: &ViewKind, width: u16, e: &Engines) -> PreviewPlan {
     let (cmd, side_by_side) = match kind {
         ViewKind::Diff { path, full } => {
             let (folder, name) = place(path);
-            let context = if *full {
-                "--unified=99999999"
-            } else {
-                "--unified=10"
-            };
+            let context = if *full { WHOLE } else { "--unified=10" };
             let cmd = git(&folder)
                 .args(["diff", "--color=always", "HEAD", context, "--"])
                 .arg(name);
             (cmd, true)
         }
-        ViewKind::History { path } => {
+        ViewKind::History { path, whole } => {
             let (folder, name) = place(path);
-            let cmd = git(&folder)
-                .args(["log", "--color=always", "-p", "--"])
-                .arg(name);
-            (cmd, true)
+            let mut cmd = git(&folder).args(["log", "--color=always", "-p"]);
+            if *whole {
+                cmd = cmd.arg(WHOLE);
+            }
+            (cmd.arg("--").arg(name), true)
         }
         ViewKind::Log { path } => {
             let (folder, name) = place(path);
@@ -106,17 +111,18 @@ pub fn view_plan(kind: &ViewKind, width: u16, e: &Engines) -> PreviewPlan {
                 .arg(name);
             return PreviewPlan::Run(cmd); // already coloured, nothing for delta to do
         }
-        ViewKind::Commit { root, hash } => {
-            let cmd = git(root).args([
+        ViewKind::Commit { root, hash, whole } => {
+            let mut cmd = git(root).args([
                 "show",
                 "--color=always",
                 "--date=format:%Y-%m-%d %H:%M:%S",
                 GIT_SHOW_FORMAT,
                 "--patch-with-stat",
-                "--end-of-options",
-                hash,
             ]);
-            (cmd, false)
+            if *whole {
+                cmd = cmd.arg(WHOLE);
+            }
+            (cmd.args(["--end-of-options", hash]), false)
         }
     };
     let Some(delta_path) = &e.delta else {
@@ -212,7 +218,10 @@ mod tests {
     fn history_log_and_commit() {
         let path = PathBuf::from("/r/src/main.c");
         let (git, delta) = pipe(view_plan(
-            &ViewKind::History { path: path.clone() },
+            &ViewKind::History {
+                path: path.clone(),
+                whole: false,
+            },
             100,
             &engines(),
         ));
@@ -234,6 +243,7 @@ mod tests {
         let commit = ViewKind::Commit {
             root: "/r".into(),
             hash: "abcdef1".into(),
+            whole: false,
         };
         let (git, delta) = pipe(view_plan(&commit, 100, &engines()));
         assert_eq!(&git.args[..3], &os(&["-C", "/r", "show"])[..]);
@@ -242,6 +252,28 @@ mod tests {
             !delta.args.contains(&"--side-by-side".into()),
             "a commit reads top to bottom"
         );
+    }
+
+    #[test]
+    fn whole_files_show_every_line_of_what_changed() {
+        let whole = "--unified=99999999".into();
+        let history = |whole| ViewKind::History {
+            path: "/r/a.c".into(),
+            whole,
+        };
+        let commit = |whole| ViewKind::Commit {
+            root: "/r".into(),
+            hash: "abcdef1".into(),
+            whole,
+        };
+        for kind in [history(true), commit(true)] {
+            let (git, _) = pipe(view_plan(&kind, 100, &engines()));
+            assert!(git.args.contains(&whole), "{kind:?}: {:?}", git.args);
+        }
+        for kind in [history(false), commit(false)] {
+            let (git, _) = pipe(view_plan(&kind, 100, &engines()));
+            assert!(!git.args.contains(&whole), "{kind:?}: as git shows it");
+        }
     }
 
     #[test]
@@ -277,6 +309,7 @@ mod tests {
         let commit = ViewKind::Commit {
             root: "/r".into(),
             hash: "abcdef1".into(),
+            whole: false,
         };
         assert!(commit.title().contains("abcdef1"));
     }

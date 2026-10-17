@@ -172,9 +172,11 @@ pub fn perform(
         // Linux: the path as listed (relative to the root); WSL: its Windows form
         ActionKind::Copy => copied(platform.copy_path(item.key.as_os_str(), &path)),
         ActionKind::Editor => editor_window(tab, item, query, root, &path, env),
+        // outside tmux sf answers these itself (Content narrowed to the file, a view)
         ActionKind::InFile => in_file_window(item, query, root, env),
-        // sf answers these itself (a view, Content narrowed to the file); here they mean nothing
-        _ => Outcome::Failed("Not available here".into()),
+        ActionKind::Diff | ActionKind::DiffShort | ActionKind::DiffSplit | ActionKind::Log => {
+            view_window(kind, &path, root, env)
+        }
     }
 }
 
@@ -239,6 +241,34 @@ fn in_file_window(item: &Item, query: &str, root: &Path, env: &Env) -> Outcome {
     tmux_window(
         "infile",
         "file-content",
+        root,
+        &env.window_env,
+        sf.as_os_str(),
+        &args,
+        env,
+    )
+}
+
+/// Ctrl-G, Alt-G, Ctrl-U, Alt-U in tmux (Bilal): sf on the view (`sf diff|history|log FILE`) in a
+/// window of its own, named as the fzf functions named theirs.
+fn view_window(kind: ActionKind, path: &Path, root: &Path, env: &Env) -> Outcome {
+    if !env.platform.tmux {
+        return Outcome::Failed("Not available here".into()); // sf opens the view itself
+    }
+    let Some(sf) = &env.sf else {
+        return Outcome::Failed("sf cannot find its own program".into());
+    };
+    let (window, view): (&str, &[&str]) = match kind {
+        ActionKind::Diff => ("diff", &["diff"]),
+        ActionKind::DiffShort => ("diff", &["diff", "--short"]),
+        ActionKind::DiffSplit => ("history", &["history"]),
+        _ => ("log", &["log"]),
+    };
+    let mut args: Vec<OsString> = view.iter().map(OsString::from).collect();
+    args.push(path.into());
+    tmux_window(
+        window,
+        "git",
         root,
         &env.window_env,
         sf.as_os_str(),
@@ -784,6 +814,35 @@ mod tests {
             Some("a.c"),
             "no empty word"
         );
+    }
+
+    #[test]
+    fn the_git_keys_in_tmux_run_sf_on_the_view_in_a_window() {
+        for (kind, name, view) in [
+            (ActionKind::Diff, "diff", vec!["diff"]),
+            (ActionKind::DiffShort, "diff", vec!["diff", "--short"]),
+            (ActionKind::DiffSplit, "history", vec!["history"]),
+            (ActionKind::Log, "log", vec!["log"]),
+        ] {
+            let f = fixture(&format!("act_view_{name}"), false, true);
+            assert_eq!(
+                act(&f, kind, Tab::Files, &file("src/a b.c"), "x"),
+                Outcome::Done(None),
+                "{kind:?}"
+            );
+            let calls = calls(&f.bin, "tmux");
+            let path = f.root.join("src/a b.c");
+            let mut tail: Vec<&str> = vec!["/opt/sf/bin/sf"];
+            tail.extend(view.iter().copied());
+            tail.push(path.to_str().unwrap());
+            assert_eq!(&calls[0][..3], ["new-window", "-n", name], "{kind:?}");
+            assert!(
+                calls[0].ends_with(&tail.iter().map(|s| s.to_string()).collect::<Vec<_>>()),
+                "{:?}",
+                calls[0]
+            );
+            assert_eq!(calls[1], ["select-pane", "-T", "git"]);
+        }
     }
 
     #[test]

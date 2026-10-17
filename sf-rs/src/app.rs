@@ -125,6 +125,13 @@ pub struct ScreenLayout {
     pub help: Rect,
 }
 
+/// Alt-F: what is looked for in the preview and the line it was found on.
+#[derive(Debug, Default)]
+pub struct Find {
+    pub text: String,
+    pub found: Option<usize>,
+}
+
 /// The Help tab: the manual, how far it is scrolled, what is looked for in it.
 pub struct Help {
     pub text: Text<'static>,
@@ -192,6 +199,12 @@ pub struct App {
     pub result_filter: Option<String>,
     /// sf runs inside tmux: Ctrl-T opens a window of its own.
     pub tmux: bool,
+    /// Alt-F: finding in the preview; typing goes there, not to the query.
+    pub preview_find: Option<Find>,
+    /// `sf history|log|diff FILE`: the view `start` opens instead of a list.
+    start_with: Option<ViewKind>,
+    /// sf is only that view (a tmux window of its own): Esc quits.
+    view_alone: bool,
     pub help: Help,
     /// Engine options from the command line (`sf TAB -- OPTIONS`), for that tab only.
     pub extra: Option<(Tab, Vec<OsString>)>,
@@ -254,6 +267,9 @@ impl App {
             query: String::new(),
             result_filter: None,
             tmux: false,
+            preview_find: None,
+            start_with: None,
+            view_alone: false,
             help: Help {
                 text: crate::help::text(),
                 scroll: 0,
@@ -292,7 +308,16 @@ impl App {
 
     /// The effects of starting up.
     pub fn start(&mut self) -> Vec<Effect> {
+        if let Some(kind) = self.start_with.take() {
+            self.view_alone = true;
+            return self.open_view(kind);
+        }
         vec![self.run_list()]
+    }
+
+    /// `sf history|log|diff FILE`: sf is that view, Esc quits.
+    pub fn start_view(&mut self, kind: ViewKind) {
+        self.start_with = Some(kind);
     }
 
     pub fn current(&self) -> Option<&Item> {
@@ -441,6 +466,11 @@ impl App {
             }
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if self.preview_find.is_some()
+            && let Some(effects) = self.find_key(key)
+        {
+            return effects;
+        }
         if self.tab == Tab::Help
             && let Some(effects) = self.help_key(key)
         {
@@ -498,6 +528,14 @@ impl App {
                 _ => Vec::new(),
             },
             KeyCode::Char(c) if alt => match c {
+                'f' => {
+                    if self.preview_visible() && self.tab != Tab::Help {
+                        self.preview_find = Some(Find::default());
+                    } else {
+                        self.set_status("No preview to find in: Ctrl-L shows it", true, now);
+                    }
+                    Vec::new()
+                }
                 'g' => self.act(ActionKind::DiffShort, now),
                 'u' => self.act(ActionKind::Log, now),
                 _ => Vec::new(),
@@ -617,6 +655,76 @@ impl App {
         effects
     }
 
+    /// Alt-F's keys: type to find, Enter or Down the next, Up the one before, Esc or Alt-F back to the
+    /// list; None for Tab and Shift-Tab, which end it and switch.
+    fn find_key(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let f = self.preview_find.as_mut()?;
+        match key.code {
+            KeyCode::Esc => self.preview_find = None,
+            KeyCode::Char('f') if alt => self.preview_find = None,
+            KeyCode::Tab | KeyCode::BackTab => {
+                self.preview_find = None;
+                return None;
+            }
+            KeyCode::Enter | KeyCode::Down => {
+                let from = f.found;
+                self.find_in_preview(from, true);
+            }
+            KeyCode::Up => {
+                let from = f.found;
+                self.find_in_preview(from, false);
+            }
+            KeyCode::Backspace => {
+                f.text.pop();
+                self.find_in_preview(None, true);
+            }
+            KeyCode::Char(c) if !ctrl && !alt => {
+                f.text.push(c);
+                self.find_in_preview(None, true);
+            }
+            _ => {}
+        }
+        Some(Vec::new())
+    }
+
+    /// The next line of the preview after `from` (forward, round to the top) or before it that holds
+    /// what Alt-F looks for, case aside; scrolled to with two lines above it.
+    fn find_in_preview(&mut self, from: Option<usize>, forward: bool) {
+        let Some(f) = self.preview_find.as_mut() else {
+            return;
+        };
+        let needle = f.text.to_lowercase();
+        let lines = &self.preview.lines;
+        let n = lines.len();
+        let holds = |i: usize| {
+            let line: String = lines[i].spans.iter().map(|s| s.content.as_ref()).collect();
+            line.to_lowercase().contains(&needle)
+        };
+        f.found = if needle.is_empty() || n == 0 {
+            None
+        } else {
+            let start = match (from, forward) {
+                (None, _) => 0,
+                (Some(i), true) => i + 1,
+                (Some(i), false) => i + n - 1,
+            };
+            (0..n)
+                .map(|k| {
+                    if forward {
+                        (start + k) % n
+                    } else {
+                        (start + n - k) % n
+                    }
+                })
+                .find(|&i| holds(i))
+        };
+        if let Some(i) = f.found {
+            self.preview_scroll = u16::try_from(i.saturating_sub(2)).unwrap_or(u16::MAX);
+        }
+    }
+
     /// The Help tab's keys: scroll, type to find, Enter the next one, Esc clears then quits; None for
     /// the keys every tab has (Tab, Shift-Tab).
     fn help_key(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
@@ -729,6 +837,12 @@ impl App {
             return;
         }
         self.preview_wait = None;
+        if self.preview_find.is_some() {
+            // another row's preview while finding: looked for in it from the top
+            self.preview = msg.text;
+            self.find_in_preview(None, true);
+            return;
+        }
         self.preview = msg.text;
         // a matching line about a third down the preview, below the header
         let third = 1 + self.layout.preview.height as usize / 3;
@@ -763,6 +877,7 @@ impl App {
 
     fn switch_tab(&mut self, tab: Tab) -> Vec<Effect> {
         self.tab = tab;
+        self.preview_find = None;
         self.result_filter = None;
         if tab == Tab::Help {
             return Vec::new(); // the manual: no list, no preview
@@ -869,6 +984,7 @@ impl App {
                 Some(hash) => self.open_view(ViewKind::Commit {
                     root: self.root.clone(),
                     hash: hash.to_string(),
+                    whole: self.options.git.whole_files,
                 }),
                 None => {
                     self.set_status("Not a commit", true, now);
@@ -896,11 +1012,15 @@ impl App {
             (Tab::Git, _) => None, // the commit's keys; the others say they are not for Git
             (_, ActionKind::Diff) => Some(ViewKind::Diff { path, full: true }),
             (_, ActionKind::DiffShort) => Some(ViewKind::Diff { path, full: false }),
-            (_, ActionKind::DiffSplit) => Some(ViewKind::History { path }),
+            (_, ActionKind::DiffSplit) => Some(ViewKind::History {
+                path,
+                whole: self.options.git.whole_files, // Git's option (Bilal)
+            }),
             (_, ActionKind::Log) => Some(ViewKind::Log { path }),
             _ => None,
         };
         match view {
+            Some(_) if self.tmux => vec![Effect::Act(kind)], // a window of its own (Bilal)
             Some(kind) => self.open_view(kind),
             None => vec![Effect::Act(kind)],
         }
@@ -1010,6 +1130,7 @@ impl App {
     /// Keys while a view is open: they never reach the tabs.
     fn view_key(&mut self, key: KeyEvent) -> Vec<Effect> {
         let page = (self.layout.view.height as usize).max(1);
+        let alone = self.view_alone;
         let Some(v) = self.view.as_mut() else {
             return Vec::new();
         };
@@ -1036,6 +1157,7 @@ impl App {
         }
         let last = v.text.lines.len().saturating_sub(page);
         match key.code {
+            KeyCode::Esc | KeyCode::Char('q') if alone => return vec![Effect::Quit],
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.view = None;
                 return Vec::new();
@@ -1046,6 +1168,11 @@ impl App {
             KeyCode::PageDown | KeyCode::Char(' ') => v.scroll = (v.scroll + page).min(last),
             KeyCode::Home | KeyCode::Char('g') => v.scroll = 0,
             KeyCode::End | KeyCode::Char('G') => v.scroll = last,
+            // Ctrl-T searches here as in a file's lines, in the view itself (Bilal)
+            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                v.searching = true;
+                v.search.clear();
+            }
             KeyCode::Char('/') => {
                 v.searching = true;
                 v.search.clear();
@@ -1330,7 +1457,13 @@ pub(crate) mod tests {
                     full: false,
                 },
             ),
-            (ctrl('u'), ViewKind::History { path: path.clone() }),
+            (
+                ctrl('u'),
+                ViewKind::History {
+                    path: path.clone(),
+                    whole: false,
+                },
+            ),
             (
                 alt(KeyCode::Char('u')),
                 ViewKind::Log { path: path.clone() },
@@ -1355,7 +1488,8 @@ pub(crate) mod tests {
             a.view.as_ref().unwrap().kind,
             ViewKind::Commit {
                 root: "/r/p".into(),
-                hash: "abcdef1".into()
+                hash: "abcdef1".into(),
+                whole: false
             }
         );
     }
@@ -1383,6 +1517,110 @@ pub(crate) mod tests {
             "Esc leaves the view, not sf"
         );
         assert!(a.view.is_none());
+    }
+
+    #[test]
+    fn in_tmux_the_git_keys_are_windows_of_their_own() {
+        for (k, kind) in [
+            (ctrl('u'), ActionKind::DiffSplit),
+            (alt(KeyCode::Char('u')), ActionKind::Log),
+            (ctrl('g'), ActionKind::Diff),
+            (alt(KeyCode::Char('g')), ActionKind::DiffShort),
+        ] {
+            let (mut a, now) = app(Tab::Files);
+            a.tmux = true;
+            feed(&mut a, &["a.c"]);
+            assert_eq!(a.handle_key(k, now), [Effect::Act(kind)], "{kind:?}");
+            assert!(a.view.is_none());
+        }
+    }
+
+    #[test]
+    fn sf_started_on_a_view_quits_with_it() {
+        let (mut a, now) = app(Tab::Files);
+        let kind = ViewKind::Log {
+            path: "/r/p/a.c".into(),
+        };
+        a.start_view(kind.clone());
+        assert_eq!(a.start(), [Effect::View], "the view, no list");
+        assert_eq!(a.view.as_ref().unwrap().kind, kind);
+        assert_eq!(a.handle_key(key(KeyCode::Esc), now), [Effect::Quit]);
+    }
+
+    #[test]
+    fn alt_f_finds_in_the_preview() {
+        let (mut a, now) = app_with_preview(Tab::Git);
+        feed(&mut a, &["abcdef1"]);
+        a.layout.preview = Rect::new(1, 2, 80, 10);
+        let lines: Vec<Line> = (0..60)
+            .map(|i| {
+                Line::raw(if i % 20 == 7 {
+                    format!("{i} Needle")
+                } else {
+                    format!("{i}")
+                })
+            })
+            .collect();
+        a.on_preview(PreviewMsg {
+            header_lines: 0,
+            generation: a.preview_gen,
+            text: Text::from(lines),
+        });
+        assert_eq!(a.handle_key(alt(KeyCode::Char('f')), now), []);
+        assert!(a.preview_find.is_some());
+        typed(&mut a, "needle", now);
+        assert_eq!(a.query, "", "the list's filter is left alone");
+        assert_eq!(a.preview_find.as_ref().unwrap().found, Some(7));
+        assert_eq!(a.preview_scroll, 5, "with two lines above it");
+        a.handle_key(key(KeyCode::Enter), now);
+        assert_eq!(
+            a.preview_find.as_ref().unwrap().found,
+            Some(27),
+            "Enter: the next"
+        );
+        a.handle_key(key(KeyCode::Down), now);
+        assert_eq!(a.preview_find.as_ref().unwrap().found, Some(47));
+        a.handle_key(key(KeyCode::Up), now);
+        assert_eq!(
+            a.preview_find.as_ref().unwrap().found,
+            Some(27),
+            "Up: the one before"
+        );
+        assert_eq!(
+            a.handle_key(key(KeyCode::Esc), now),
+            [],
+            "Esc: back to the list"
+        );
+        assert!(a.preview_find.is_none());
+        assert_eq!(a.handle_key(key(KeyCode::Esc), now), [Effect::Quit]);
+    }
+
+    #[test]
+    fn alt_f_without_a_preview_says_so() {
+        let (mut a, now) = app(Tab::Files); // Files starts without its preview
+        a.handle_key(alt(KeyCode::Char('f')), now);
+        assert!(a.preview_find.is_none());
+        assert!(
+            a.status.as_ref().unwrap().0.contains("Ctrl-L"),
+            "{:?}",
+            a.status
+        );
+    }
+
+    #[test]
+    fn ctrl_t_in_a_view_searches_it() {
+        for open in [ctrl('u'), alt(KeyCode::Char('u')), ctrl('g')] {
+            let (mut a, now) = app(Tab::Files);
+            feed(&mut a, &["a"]);
+            a.handle_key(open, now);
+            assert_eq!(
+                a.handle_key(ctrl('t'), now),
+                [],
+                "no window, no other effect"
+            );
+            let v = a.view.as_ref().unwrap();
+            assert!(v.searching, "{:?}: the view's search, as /", v.kind);
+        }
     }
 
     #[test]
