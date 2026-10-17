@@ -126,15 +126,18 @@ impl Item {
                     Span::raw(" "),
                 ];
                 spans.extend(path_spans(&printable(path)));
-                spans.extend([
-                    Span::styled(":", faint),
-                    Span::styled(
-                        self.line.unwrap_or(0).to_string(),
-                        Style::new().fg(theme::DIM),
-                    ),
-                    Span::styled(":", faint),
-                    Span::raw(text.to_string()),
-                ]);
+                // line 0: the file itself (every file's history), no line and no text
+                if self.line.is_some_and(|n| n > 0) {
+                    spans.extend([
+                        Span::styled(":", faint),
+                        Span::styled(
+                            self.line.unwrap_or(0).to_string(),
+                            Style::new().fg(theme::DIM),
+                        ),
+                        Span::styled(":", faint),
+                        Span::raw(text.to_string()),
+                    ]);
+                }
                 if *cut {
                     spans.push(Span::styled("…", Style::new().fg(theme::DIM)));
                 }
@@ -657,6 +660,19 @@ mod tests {
             None,
             "no line number"
         );
+    }
+
+    #[test]
+    fn a_versions_row_of_line_0_is_the_file_itself() {
+        let rev = "7b4ef6fd550f68d2d2bd2907c800fb95c06d973c";
+        let raw = format!("{rev}:src/a.c\x000\x00");
+        let it = parse(ParseKind::Versions, raw.as_bytes(), 0).unwrap();
+        assert_eq!(
+            text_of(&it.display()),
+            "7b4ef6f src/a.c",
+            "no :0: and no text"
+        );
+        assert_eq!(it.version(), Some((rev, "src/a.c")));
     }
 
     #[test]

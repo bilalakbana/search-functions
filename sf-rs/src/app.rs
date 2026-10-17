@@ -131,6 +131,10 @@ pub struct ScreenLayout {
     pub popup_rows: Vec<(usize, Rect)>,
     /// The text area of the Help tab.
     pub help: Rect,
+    /// The preview's and the list's scroll bars (their tracks), where a click or a drag scrolls to;
+    /// empty when everything fits.
+    pub preview_bar: Rect,
+    pub list_bar: Rect,
 }
 
 /// Ctrl-F: what is looked for in the preview, everywhere it was found and the current one.
@@ -754,7 +758,14 @@ impl App {
             }
             return Vec::new();
         }
-        if self.popup.is_some() {
+        if let Some(cursor) = self.popup {
+            // the wheel moves the cursor through the rows; the popup scrolls with it
+            let last = self.popup_rows().len().saturating_sub(1);
+            match m.kind {
+                MouseEventKind::ScrollDown => self.popup = Some((cursor + WHEEL).min(last)),
+                MouseEventKind::ScrollUp => self.popup = Some(cursor.saturating_sub(WHEEL)),
+                _ => {}
+            }
             if !left_click {
                 return Vec::new();
             }
@@ -766,6 +777,35 @@ impl App {
                 self.popup = None;
             }
             return Vec::new();
+        }
+        // a scroll bar clicked or dragged: there
+        let on_bar = matches!(
+            m.kind,
+            MouseEventKind::Down(MouseButton::Left) | MouseEventKind::Drag(MouseButton::Left)
+        );
+        if on_bar {
+            let fraction = |bar: Rect| {
+                f64::from(m.row.saturating_sub(bar.y))
+                    / f64::from(bar.height.saturating_sub(1).max(1))
+            };
+            if self.layout.preview_bar.contains(at) {
+                let last = self
+                    .preview
+                    .lines
+                    .len()
+                    .saturating_sub(self.layout.preview.height as usize);
+                let to =
+                    (fraction(self.layout.preview_bar).min(1.0) * last as f64).round() as usize;
+                self.preview_scroll = u16::try_from(to).unwrap_or(u16::MAX);
+                return Vec::new();
+            }
+            if self.layout.list_bar.contains(at) {
+                // the rows run upwards: the bar's top is the last row
+                let last = self.filter.len().saturating_sub(1);
+                let from_top =
+                    (fraction(self.layout.list_bar).min(1.0) * last as f64).round() as usize;
+                return self.select(last - from_top.min(last));
+            }
         }
         match m.kind {
             MouseEventKind::Down(MouseButton::Left) => {
@@ -2823,6 +2863,7 @@ pub(crate) mod tests {
             author: "T".into(),
             branch: "main".into(),
             subject: "s".into(),
+            name: "2026-10-17".into(),
         }
     }
 
@@ -2846,9 +2887,10 @@ pub(crate) mod tests {
             fx.contains(&Effect::LoadVersions) && fx.contains(&Effect::RunList),
             "{fx:?}"
         );
-        assert!(
-            matches!(a.list_plan(), ListPlan::Hint(_)),
-            "nothing typed yet"
+        assert_eq!(
+            versions_run(&a),
+            (String::new(), vec![]),
+            "nothing typed: every file's history"
         );
         typed(&mut a, "needle", now);
         assert_eq!(a.versions.as_ref().unwrap().query, "needle");
@@ -3700,6 +3742,71 @@ pub(crate) mod tests {
         );
         assert_eq!(a.tab, Tab::Content);
         assert!(a.scope.is_none());
+    }
+
+    #[test]
+    fn the_wheel_moves_through_an_open_popup() {
+        // Bilal: in Ctrl-P's list of files the wheel did nothing
+        let (mut a, now) = app(Tab::Content);
+        let names: Vec<String> = (0..20).map(|i| format!("f{i}.txt")).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        feed(&mut a, &names);
+        a.handle_key(ctrl('p'), now);
+        a.layout.popup = Rect::new(60, 2, 30, 10);
+        let over = |kind| mouse(kind, Rect::new(70, 5, 1, 1));
+        a.handle_mouse(over(MouseEventKind::ScrollDown), now);
+        assert_eq!(a.popup, Some(WHEEL));
+        a.handle_mouse(over(MouseEventKind::ScrollUp), now);
+        a.handle_mouse(over(MouseEventKind::ScrollUp), now);
+        assert_eq!(a.popup, Some(0), "not past the first row");
+        for _ in 0..20 {
+            a.handle_mouse(over(MouseEventKind::ScrollDown), now);
+        }
+        assert_eq!(
+            a.popup,
+            Some(20),
+            "nor past the last (All files and 20 files)"
+        );
+        assert!(a.popup_files, "the popup stays open");
+    }
+
+    #[test]
+    fn a_scroll_bar_dragged_or_clicked_scrolls_there() {
+        let (mut a, now) = app_with_preview(Tab::Content);
+        let names: Vec<String> = (0..50).map(|i| format!("f{i}.txt")).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        feed(&mut a, &names);
+        a.layout.list = Rect::new(1, 20, 80, 10);
+        a.layout.list_bar = Rect::new(81, 20, 1, 10);
+        a.layout.preview = Rect::new(1, 2, 80, 10);
+        a.layout.preview_bar = Rect::new(81, 2, 1, 10);
+        let lines: Vec<Line> = (0..100).map(|i| Line::raw(i.to_string())).collect();
+        a.on_preview(PreviewMsg {
+            found: None,
+            generation: a.preview_gen,
+            text: Text::from(lines),
+        });
+        let at = |kind, r: Rect, dy: u16| MouseEvent {
+            kind,
+            column: r.x,
+            row: r.y + dy,
+            modifiers: KeyModifiers::NONE,
+        };
+        let (down, drag) = (
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+        );
+        a.handle_mouse(at(down, a.layout.preview_bar, 9), now);
+        assert_eq!(a.preview_scroll, 90, "the bottom: the last page");
+        a.handle_mouse(at(drag, a.layout.preview_bar, 3), now);
+        assert_eq!(a.preview_scroll, 30, "dragged a third of the way");
+        a.handle_mouse(at(down, a.layout.list_bar, 0), now);
+        assert_eq!(
+            a.selected, 49,
+            "the top: the last row (the list runs upwards)"
+        );
+        a.handle_mouse(at(drag, a.layout.list_bar, 9), now);
+        assert_eq!(a.selected, 0, "the bottom: the first row");
     }
 
     #[test]

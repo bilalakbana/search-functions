@@ -53,9 +53,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
     let status = status_line(app);
     if app.preview_visible() {
-        layout.preview = draw_preview(frame, app, preview, status.clone());
+        (layout.preview, layout.preview_bar) = draw_preview(frame, app, preview, status.clone());
     }
-    layout.list = draw_list(
+    (layout.list, layout.list_bar) = draw_list(
         frame,
         app,
         list,
@@ -123,22 +123,31 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect, layout: &mut ScreenLay
 }
 
 /// A thin bar on the right border of `area` (a bordered block) when `total` rows do not fit.
-fn draw_scrollbar(frame: &mut Frame, area: Rect, total: usize, position: usize, visible: usize) {
+/// The scroll bar on `area`'s right border: a full block in the accent colour for the thumb (Bilal:
+/// the thin one was hard to see); returns its track, where the mouse scrolls, or an empty rect.
+fn draw_scrollbar(
+    frame: &mut Frame,
+    area: Rect,
+    total: usize,
+    position: usize,
+    visible: usize,
+) -> Rect {
     if total <= visible || area.height < 3 {
-        return;
+        return Rect::default();
     }
     let bar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
         .begin_symbol(None)
         .end_symbol(None)
         .track_symbol(Some("│"))
         .track_style(style(theme::FAINT))
-        .thumb_symbol("┃")
-        .thumb_style(style(theme::SUB));
+        .thumb_symbol("█")
+        .thumb_style(style(theme::MAUVE));
     let mut state = ScrollbarState::new(total - visible + 1)
         .position(position)
         .viewport_content_length(visible);
     let track = Rect::new(area.x, area.y + 1, area.width, area.height - 2);
     frame.render_stateful_widget(bar, track, &mut state);
+    Rect::new(track.right().saturating_sub(1), track.y, 1, track.height)
 }
 
 fn status_line(app: &App) -> Option<Line<'static>> {
@@ -284,7 +293,13 @@ fn draw_help(frame: &mut Frame, app: &App, area: Rect) -> Rect {
     inner
 }
 
-fn draw_preview(frame: &mut Frame, app: &App, area: Rect, status: Option<Line<'static>>) -> Rect {
+/// The preview; returns its text area and its scroll bar's track.
+fn draw_preview(
+    frame: &mut Frame,
+    app: &App,
+    area: Rect,
+    status: Option<Line<'static>>,
+) -> (Rect, Rect) {
     let mut block = bordered().title_top(root_title(app));
     // at the top right, so they stay while the text scrolls: Content's and Deep's pattern with its count,
     // then Ctrl-F's (the right titles line up from the right, the last one rightmost)
@@ -335,14 +350,14 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect, status: Option<Line<'s
         Paragraph::new(Text::from(shown)).wrap(Wrap { trim: false }),
         inner,
     );
-    draw_scrollbar(
+    let bar = draw_scrollbar(
         frame,
         area,
         app.preview.lines.len(),
         from,
         inner.height as usize,
     );
-    inner
+    (inner, bar)
 }
 
 /// Ctrl-F, at the preview's top right: what is looked for as typed, and which match of how many, or
@@ -432,7 +447,13 @@ fn mark_matches(line: Line<'static>, marks: &[(Range<usize>, bool)]) -> Line<'st
     Line { spans, ..line }
 }
 
-fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'static>>) -> Rect {
+/// The list; returns its rows' area and its scroll bar's track.
+fn draw_list(
+    frame: &mut Frame,
+    app: &mut App,
+    area: Rect,
+    status: Option<Line<'static>>,
+) -> (Rect, Rect) {
     let mut block = bordered();
     if !app.preview_visible() {
         block = block.title_top(root_title(app)); // else in the preview's border
@@ -473,6 +494,13 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
     let terms: Vec<Term> = query.shown_terms().cloned().collect();
     // a list of matches: the words found in a row's path red there too (ugrep marks the line's)
     let keeper = app.row_words().map(|w| w.keeper());
+    // searching versions: each version's name (its tag, else its date) beside its hash
+    let version_names: std::collections::HashMap<&str, &str> = app
+        .versions
+        .iter()
+        .flat_map(|v| v.list.iter())
+        .map(|r| (r.hash.as_str(), r.name.as_str()))
+        .collect();
     // searching versions: git grep marks nothing, so the pattern is found again in each row shown
     let versions_finder = app.versions.as_ref().and_then(|v| {
         let o = &app.options.versions;
@@ -497,14 +525,18 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
         let mut spans: Vec<Span> = [marker]
             .into_iter()
             .chain(
-                highlight(
-                    in_version(
-                        in_path(item, keeper.as_ref()),
-                        item,
-                        versions_finder.as_ref(),
+                named(
+                    highlight(
+                        in_version(
+                            in_path(item, keeper.as_ref()),
+                            item,
+                            versions_finder.as_ref(),
+                        ),
+                        &terms,
+                        match_case,
                     ),
-                    &terms,
-                    match_case,
+                    item,
+                    &version_names,
                 )
                 .spans,
             )
@@ -524,8 +556,23 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
     // the bar counts from the top, where the last rows are
     let total = app.filter.len();
     let from_top = total.saturating_sub(visible).saturating_sub(app.offset);
-    draw_scrollbar(frame, area, total, from_top, visible);
-    inner
+    let bar = draw_scrollbar(frame, area, total, from_top, visible);
+    (inner, bar)
+}
+
+/// A versions row with its version's name after the short hash (Bilal: the hash alone does not say
+/// which version it is); after the marks, whose places count from the row's start.
+fn named(
+    mut line: Line<'static>,
+    item: &crate::items::Item,
+    names: &std::collections::HashMap<&str, &str>,
+) -> Line<'static> {
+    if let Some(name) = item.version().and_then(|(rev, _)| names.get(rev)) {
+        let at = 1.min(line.spans.len());
+        line.spans
+            .insert(at, Span::styled(format!(" {name}"), style(theme::YELLOW)));
+    }
+    line
 }
 
 /// A versions row with what `finder` finds in its text red (not in its version, path or number).
@@ -667,7 +714,7 @@ fn placeholder(app: &App) -> &'static str {
         return "type to find · Enter ↓ the next · ↑ the one before · ^S options · Esc back";
     }
     if app.versions.is_some() {
-        return "type a pattern · searched in the files of every version · ^S options, versions";
+        return "type a pattern to search every version · listed: each file's every change · ^S options";
     }
     if app.scope.is_some() {
         let f = &app.options.in_file;
@@ -764,7 +811,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 
     let title = match &app.scope {
         _ if app.preview_find.is_some() => "Find in preview".to_string(),
-        _ if app.versions.is_some() => "Versions".to_string(),
+        _ if app.versions.is_some() => "Search in versions".to_string(),
         Some(scope) => {
             let name = std::path::Path::new(&scope.key)
                 .file_name()
@@ -865,7 +912,7 @@ fn footer_items(tab: Tab, editor: &str) -> Vec<String> {
             "Enter show commit",
             "^S options",
             "^F find",
-            "^Alt-F versions",
+            "^Alt-F search in versions",
             "^C copy hash",
             "Esc quit",
         ],
@@ -1089,7 +1136,7 @@ fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLa
     let title = match app.scope {
         _ if app.popup_files => " Files to search in ".to_string(),
         _ if app.preview_find.is_some() => " Find options ".to_string(),
-        _ if app.versions.is_some() => " Versions options ".to_string(),
+        _ if app.versions.is_some() => " Search in versions options ".to_string(),
         Some(_) => " In file options ".to_string(),
         None => format!(" {} options ", app.tab.title()),
     };
@@ -1621,7 +1668,7 @@ mod tests {
             ),
             (
                 Tab::Git,
-                "Enter show commit · ^S options · ^F find · ^Alt-F versions · ^C copy hash · Esc quit",
+                "Enter show commit · ^S options · ^F find · ^Alt-F search in versions · ^C copy hash · Esc quit",
             ),
         ];
         for (tab, want) in cases {
@@ -1739,7 +1786,7 @@ mod tests {
         let buf = render(&mut a, 80, 24);
         let l = a.layout.list;
         assert!(
-            column(&buf, l.right(), l.y, l.bottom()).contains('┃'),
+            column(&buf, l.right(), l.y, l.bottom()).contains('█'),
             "{:?}",
             column(&buf, l.right(), l.y, l.bottom())
         );
@@ -1751,7 +1798,7 @@ mod tests {
         feed(&mut a, &["a", "b", "c"]);
         let buf = render(&mut a, 80, 24);
         let l = a.layout.list;
-        assert!(!column(&buf, l.right(), l.y, l.bottom()).contains('┃'));
+        assert!(!column(&buf, l.right(), l.y, l.bottom()).contains('█'));
     }
 
     #[test]
@@ -1766,7 +1813,7 @@ mod tests {
         render(&mut a, 80, 24);
         let buf = render(&mut a, 80, 24);
         let p = a.layout.preview;
-        assert!(column(&buf, p.right(), p.y, p.bottom()).contains('┃'));
+        assert!(column(&buf, p.right(), p.y, p.bottom()).contains('█'));
     }
 
     #[test]
@@ -1999,7 +2046,7 @@ mod tests {
         let buf = render(&mut a, 80, 24);
         let l = a.layout.list;
         let col = column(&buf, l.right(), l.y, l.bottom());
-        assert!(col.ends_with('┃') && !col.starts_with('┃'), "{col:?}");
+        assert!(col.ends_with('█') && !col.starts_with('█'), "{col:?}");
     }
 
     #[test]
@@ -2168,7 +2215,7 @@ mod tests {
         let (mut a, now) = versions_found("needle");
         let buf = render(&mut a, 120, 30);
         assert!(
-            row(&buf, 29).contains("Versions › needle"),
+            row(&buf, 29).contains("Search in versions › needle"),
             "{:?}",
             row(&buf, 29)
         );
@@ -2183,10 +2230,11 @@ mod tests {
             author: "Bilal Akbana".into(),
             branch: "main".into(),
             subject: "sf 0.9.1".into(),
+            name: "v0.9.1".into(),
         }]);
         a.handle_key(ctrl('s'), now);
         let buf = render(&mut a, 120, 30);
-        assert!(find(&buf, " Versions options ").is_some());
+        assert!(find(&buf, " Search in versions options ").is_some());
         assert!(find(&buf, "── Versions ──").is_some());
         assert!(
             find(&buf, "a all versions").is_some(),
@@ -2202,7 +2250,10 @@ mod tests {
         );
         let (mut b, now) = versions_found("");
         let input = row(&render(&mut b, 120, 30), 29);
-        assert!(input.contains("Versions › type a pattern"), "{input:?}");
+        assert!(
+            input.contains("Search in versions › type a pattern"),
+            "{input:?}"
+        );
         let _ = now;
     }
 
@@ -2226,10 +2277,53 @@ mod tests {
     }
 
     #[test]
+    fn the_scroll_bars_are_plain_to_see_and_where_the_mouse_finds_them() {
+        let (mut a, _) = app_with_preview(Tab::Content);
+        let names: Vec<String> = (0..60).map(|i| format!("f{i}.txt")).collect();
+        let names: Vec<&str> = names.iter().map(String::as_str).collect();
+        feed(&mut a, &names);
+        render(&mut a, 120, 30);
+        let lines: Vec<Line> = (0..200).map(|i| Line::raw(i.to_string())).collect();
+        a.on_preview(crate::preview::PreviewMsg {
+            found: None,
+            generation: a.preview_gen,
+            text: Text::from(lines),
+        });
+        let buf = render(&mut a, 120, 30);
+        for bar in [a.layout.preview_bar, a.layout.list_bar] {
+            assert!(bar.height > 0, "{bar:?}");
+            let thumb = (bar.y..bar.bottom())
+                .map(|y| &buf[(bar.x, y)])
+                .find(|c| c.symbol() == "█")
+                .expect("a full block for the thumb");
+            assert_eq!(thumb.fg, theme::MAUVE, "the accent, not a dim line");
+        }
+    }
+
+    #[test]
+    fn a_versions_row_names_its_version_beside_the_hash() {
+        let (mut a, _) = versions_found("needle");
+        a.on_versions(vec![crate::versions::VersionRow {
+            hash: "0123456789abcdef0123456789abcdef01234567".into(),
+            date: "2026-10-17".into(),
+            author: "T".into(),
+            branch: "main".into(),
+            subject: "s".into(),
+            name: "v7.8.5~3".into(),
+        }]);
+        let buf = render(&mut a, 120, 30);
+        let r = "0123456 v7.8.5~3 src/a.c:9:the Needle here";
+        let (x, y) = find(&buf, r).expect(r);
+        assert_eq!(buf[(x + 8, y)].fg, theme::YELLOW, "the name, as a tag");
+        assert_eq!(buf[(x + 31, y)].fg, theme::RED, "N of Needle, still marked");
+        assert_ne!(buf[(x + 27, y)].fg, theme::RED, "t of the");
+    }
+
+    #[test]
     fn git_names_ctrl_alt_f_for_versions() {
         let (mut a, _) = app(Tab::Git);
         let top = row(&render(&mut a, 200, 24), 0);
-        assert!(top.contains("^Alt-F versions"), "{top:?}");
+        assert!(top.contains("^Alt-F search in versions"), "{top:?}");
     }
 
     #[test]

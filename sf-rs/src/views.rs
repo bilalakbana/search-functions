@@ -199,10 +199,14 @@ fn version_plan(
         format!("--theme={}", e.theme),
         format!("--terminal-width={width}"),
         format!("--file-name={path}"),
-        format!("--highlight-line={line}"),
-        "-".into(),
     ]);
-    PreviewPlan::Pipe(show, bat)
+    // line 0: the file itself (every file's history), no line to mark
+    let bat = if line > 0 {
+        bat.arg(format!("--highlight-line={line}"))
+    } else {
+        bat
+    };
+    PreviewPlan::Pipe(show, bat.arg("-"))
 }
 
 #[cfg(test)]
@@ -292,6 +296,28 @@ mod tests {
             a.contains(&"--label=doc/r.pdf".to_string())
                 && a.ends_with(&["-e".to_string(), String::new()]),
             "a document's text, every line: {a:?}"
+        );
+    }
+
+    #[test]
+    fn a_file_without_a_line_marks_none() {
+        let e = Engines {
+            bat: Some("/bin/bat".into()),
+            ..engines()
+        };
+        let kind = ViewKind::Version {
+            root: "/r".into(),
+            rev: "0123456789abcdef0123456789abcdef01234567".into(),
+            path: "a.c".into(),
+            line: 0,
+        };
+        let (_, bat) = pipe(view_plan(&kind, 80, &e));
+        assert!(
+            !bat.args
+                .iter()
+                .any(|a| a.to_string_lossy().starts_with("--highlight-line")),
+            "{:?}",
+            bat.args
         );
     }
 

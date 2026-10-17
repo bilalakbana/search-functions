@@ -429,16 +429,17 @@ find_saved=$(awk '/^\[/ { s = ($0 == "[find]") } s' "$XDG/sf/config.toml" 2>/dev
 keys Escape
 expect 'git: Esc back to the list'         'Git › '
 keys C-M-f
-expect 'versions: Ctrl-Alt-F, every version' 'Versions › type a pattern'
+expect 'versions: Ctrl-Alt-F, every version' 'Search in versions › type a pattern'
+expect 'versions: nothing typed, every file'"'"'s history' 'Search in versions › .* 12/12'
 type_ 'needle'
-expect 'versions: both commits, five files each' 'Versions › needle .* 10/10'
-expect 'versions: a row names the version'  '[0-9a-f]{7} src/main\.c:1:needle in main'
+expect 'versions: both commits, five files each' 'Search in versions › needle .* 10/10'
+expect 'versions: a row names the version'  '[0-9a-f]{7} [0-9]{4}-[0-9]{2}-[0-9]{2} src/main\.c:1:needle in main'
 keys C-s
-expect 'versions: its own options'          ' Versions options '
+expect 'versions: its own options'          ' Search in versions options '
 expect 'versions: the commits to choose'    '\[x\] [0-9a-f]{7}  [0-9-]{10}  T  [a-z]+  second \(feat\)'
 keys Down Down Down Space Escape
 expect 'versions: Documents, the zip member' 'docs/arch\.zip\{inzip\.txt\}:1:needle inside zip'
-expect 'versions: two rows more'            'Versions › needle .* 12/12'
+expect 'versions: two rows more'            'Search in versions › needle .* 12/12'
 keys C-s Down Down Down Space Escape
 keys Escape
 expect 'versions: Esc back to the commits'  'HEAD -> master\) second \(feat\)'

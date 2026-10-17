@@ -32,6 +32,28 @@ pub struct VersionRow {
     /// The branch (or tag) it was reached from (`git log --source`), without `refs/…/`.
     pub branch: String,
     pub subject: String,
+    /// What the rows call it beside the hash: the tag it is in (`v7.8.5`, `v7.8.5~3`: three commits
+    /// before it), else its date (Bilal).
+    pub name: String,
+}
+
+/// `git name-rev`'s arguments that name every version given on its stdin by the tag it is in.
+pub const NAME_REV_ARGS: [&str; 4] = ["name-rev", "--annotate-stdin", "--tags", "--name-only"];
+
+/// Each version's `name` from `git name-rev NAME_REV_ARGS`' output, a line for each hash given in the
+/// same order: the hash itself back means it is in no tag, so it keeps its date.
+pub fn name_versions(rows: &mut [VersionRow], name_rev: &[u8]) {
+    let text = String::from_utf8_lossy(name_rev);
+    let mut names = text.lines();
+    for row in rows {
+        let name = names.next().map(str::trim).unwrap_or("");
+        let name = name.strip_suffix("^0").unwrap_or(name);
+        row.name = if name.is_empty() || name == row.hash {
+            row.date.clone()
+        } else {
+            crate::items::printable(name)
+        };
+    }
 }
 
 /// `git log`'s arguments for the versions to choose from: every branch, the one each came from.
@@ -62,9 +84,87 @@ pub fn parse_log(out: &[u8]) -> Vec<VersionRow> {
                 author: shown(author),
                 branch: shown(branch),
                 subject: shown(subject),
+                name: shown(date),
             })
         })
         .collect()
+}
+
+/// `git log`'s arguments for every file's history (nothing typed): each commit's changes, oldest first,
+/// whole hashes, renames as a deletion and an addition, NUL-separated; `--all` or the versions after.
+pub const HISTORY_ARGS: [&str; 7] = [
+    "log",
+    "--reverse",
+    "--raw",
+    "--no-abbrev",
+    "--no-renames",
+    "--format=%x01%H",
+    "-z",
+];
+
+/// `git log HISTORY_ARGS`' output read: each content of each file (path and blob) once, with the version
+/// that brought it first, the newest first. A deletion brings nothing, nor a submodule.
+pub fn history_rows(log: &[u8]) -> Vec<(String, String)> {
+    let mut seen = std::collections::HashSet::new();
+    let mut rows = Vec::new();
+    let mut rev = String::new();
+    let mut tokens = log.split(|&b| b == 0);
+    while let Some(token) = tokens.next() {
+        let token = String::from_utf8_lossy(token);
+        let token = token.trim_start_matches('\n');
+        if let Some(hash) = token.strip_prefix('\x01') {
+            rev = hash.to_string();
+            continue;
+        }
+        let Some(meta) = token.strip_prefix(':') else {
+            continue;
+        };
+        let Some(path) = tokens.next() else {
+            break;
+        };
+        // :old_mode new_mode old_blob new_blob status
+        let fields: Vec<&str> = meta.split(' ').collect();
+        let [_, mode, _, blob, status] = fields[..] else {
+            continue;
+        };
+        if status.starts_with('D') || mode == "160000" || rev.is_empty() {
+            continue;
+        }
+        let path = String::from_utf8_lossy(path).into_owned();
+        if seen.insert((path.clone(), blob.to_string())) {
+            rows.push((rev.clone(), path));
+        }
+    }
+    rows.reverse();
+    rows
+}
+
+/// Nothing typed: every file's history as rows of their own (`REV:PATH`, line 0, no text).
+fn history(q: &Query, git: &Path, root: &Path, out: &mut impl Write, err: &mut impl Write) -> u8 {
+    let mut args: Vec<&str> = HISTORY_ARGS.to_vec();
+    if q.revs.is_empty() {
+        args.push("--all");
+    } else {
+        args.push("--no-walk");
+        args.extend(q.revs.iter().map(String::as_str));
+    }
+    let log = match git_output(git, root, &args) {
+        Ok(log) => log,
+        Err(e) => {
+            let _ = writeln!(err, "{e}");
+            return 2;
+        }
+    };
+    let rows = history_rows(&log);
+    for (rev, path) in &rows {
+        if out
+            .write_all(format!("{rev}:{path}\x000\x00\n").as_bytes())
+            .is_err()
+        {
+            return 2;
+        }
+    }
+    if rows.is_empty() { 1 } else { 0 }
 }
 
 /// A document's or archive's kind, by its name's extension.
@@ -297,6 +397,9 @@ pub fn search(
     out: &mut impl Write,
     err: &mut impl Write,
 ) -> u8 {
+    if q.pattern.is_empty() {
+        return history(q, git, root, out, err);
+    }
     let revs: Vec<String> = if q.revs.is_empty() {
         match git_output(git, root, &["rev-list", "--all"]) {
             Ok(list) => String::from_utf8_lossy(&list)
@@ -479,6 +582,7 @@ mod tests {
                     author: "Bilal Akbana".into(),
                     branch: "main".into(),
                     subject: "sf 0.9.1".into(),
+                    name: "2026-10-17".into(),
                 },
                 VersionRow {
                     hash: "bbb".into(),
@@ -486,10 +590,65 @@ mod tests {
                     author: "T".into(),
                     branch: "origin/dev".into(),
                     subject: "wip: a\u{fffd}b".into(),
+                    name: "2026-10-16".into(),
                 },
             ],
             "the branch without refs/…; a control character in a subject is not drawn"
         );
+    }
+
+    #[test]
+    fn a_version_is_named_by_the_tag_it_is_in_else_by_its_date() {
+        assert_eq!(
+            NAME_REV_ARGS,
+            ["name-rev", "--annotate-stdin", "--tags", "--name-only"]
+        );
+        let row = |hash: &str| VersionRow {
+            hash: hash.into(),
+            date: "2026-10-17".into(),
+            author: "T".into(),
+            branch: "main".into(),
+            subject: "s".into(),
+            name: String::new(),
+        };
+        let mut rows = vec![row("aaa"), row("bbb"), row("ccc"), row("ddd")];
+        name_versions(&mut rows, b"aaa\nv7.8.5\nv7.8.5~3\n");
+        let names: Vec<&str> = rows.iter().map(|r| r.name.as_str()).collect();
+        assert_eq!(
+            names,
+            ["2026-10-17", "v7.8.5", "v7.8.5~3", "2026-10-17"],
+            "in no tag (name-rev gives the hash back) or no answer: the date"
+        );
+        let mut rows = vec![row("eee")];
+        name_versions(&mut rows, b"v1.0^0\n");
+        assert_eq!(rows[0].name, "v1.0", "an annotated tag's ^0 left out");
+        assert_eq!(
+            parse_log(b"h\x1fd\x1fa\x1fb\x1fs\n")[0].name,
+            "d",
+            "the date until named"
+        );
+    }
+
+    #[test]
+    fn with_nothing_typed_each_content_of_each_file_comes_once_newest_first() {
+        let z = "0".repeat(40);
+        let (a, b, zip) = ("a".repeat(40), "b".repeat(40), "c".repeat(40));
+        let log = format!(
+            "\x01c1\x00\n:000000 100644 {z} {a} A\x00a.txt\x00:000000 100644 {z} {zip} A\x00b.zip\x00\
+             :000000 160000 {z} {b} A\x00sub\x00\
+             \x01c2\x00\n:100644 100644 {a} {b} M\x00a.txt\x00:100644 000000 {zip} {z} D\x00b.zip\x00\
+             \x01c3\x00\n:100644 100644 {b} {a} M\x00a.txt\x00"
+        );
+        assert_eq!(
+            history_rows(log.as_bytes()),
+            [
+                ("c2".to_string(), "a.txt".to_string()),
+                ("c1".to_string(), "b.zip".to_string()),
+                ("c1".to_string(), "a.txt".to_string()),
+            ],
+            "c3 brought back c1's a.txt: no new row; a deletion and a submodule bring none"
+        );
+        assert_eq!(&HISTORY_ARGS[..2], ["log", "--reverse"]);
     }
 
     #[test]
@@ -682,6 +841,23 @@ mod tests {
             &mut Vec::new(),
         );
         assert_eq!((none, out.is_empty()), (1, true), "nothing found");
+        let mut out = Vec::new();
+        let all = search(
+            &query(""),
+            Path::new("git"),
+            None,
+            "",
+            &dir,
+            &mut out,
+            &mut Vec::new(),
+        );
+        let rows = String::from_utf8(out).unwrap();
+        assert_eq!(all, 0);
+        assert_eq!(
+            rows,
+            format!("{second}:a.txt\x000\x00\n{first}:arch.zip\x000\x00\n{first}:a.txt\x000\x00\n"),
+            "nothing typed: every file's every content, as the file itself (line 0)"
+        );
         let _ = PathBuf::new();
     }
 }

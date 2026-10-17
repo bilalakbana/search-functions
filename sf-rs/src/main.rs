@@ -166,7 +166,34 @@ fn load_versions(app: &App) -> Result<Vec<versions::VersionRow>, String> {
         let message = String::from_utf8_lossy(&out.stderr);
         return Err(format!("git log: {}", message.trim()));
     }
-    Ok(versions::parse_log(&out.stdout))
+    let mut list = versions::parse_log(&out.stdout);
+    // each named by the tag it is in, all in one call; without an answer they keep their dates
+    let hashes: String = list.iter().map(|r| format!("{}\n", r.hash)).collect();
+    if let Ok(named) = name_rev(git, &app.root, hashes) {
+        versions::name_versions(&mut list, &named);
+    }
+    Ok(list)
+}
+
+/// `git name-rev` on `hashes` (one a line); its stdin is written by a thread of its own, so a long
+/// list never blocks on a full pipe.
+fn name_rev(git: &Path, root: &Path, hashes: String) -> std::io::Result<Vec<u8>> {
+    use std::io::Write;
+    let mut child = Command::new(git)
+        .args(versions::NAME_REV_ARGS)
+        .current_dir(root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()?;
+    let mut stdin = child.stdin.take().expect("stdin is piped");
+    let writer = std::thread::spawn(move || stdin.write_all(hashes.as_bytes()));
+    let out = child.wait_with_output()?;
+    writer.join().unwrap_or(Ok(()))?;
+    if !out.status.success() {
+        return Err(std::io::Error::other("git name-rev failed"));
+    }
+    Ok(out.stdout)
 }
 
 /// The window's end as sf's exit status; an error is said on stderr.

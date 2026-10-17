@@ -73,7 +73,7 @@ const KEYS: &[(&str, &str)] = &[
     ),
     (
         "Ctrl-Alt-F",
-        "Content, Deep: keep the pattern, typing filters the rows · Git: search every version",
+        "Content, Deep: keep the pattern, typing filters the rows · Git: Search in versions",
     ),
     (
         "Ctrl-P",

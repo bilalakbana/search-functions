@@ -278,11 +278,12 @@ impl Filter {
         };
     }
 
-    /// The files of the items (their keys), each once, in their order; hints and notes left out.
+    /// The files of the items shown (their keys: the words, the types and the files chosen applied),
+    /// each once, in their order; hints and notes left out.
     pub fn files(&self) -> Vec<std::ffi::OsString> {
         let mut seen = std::collections::HashSet::new();
-        self.items
-            .iter()
+        (0..self.len())
+            .filter_map(|i| self.get(i))
             .filter(|i| i.selectable && seen.insert(&i.key))
             .map(|i| i.key.clone())
             .collect()
@@ -505,6 +506,22 @@ mod tests {
         f.set_match_case(true);
         f.set_query("CODE");
         assert_eq!(shown(&f), ["CODE_OF_CONDUCT.md"]);
+    }
+
+    #[test]
+    fn the_files_are_those_the_list_shows() {
+        // Bilal: Ctrl-P listed every file although only .cpp was left on in Ctrl-S
+        let mut f = Filter::new();
+        f.push(items(&["a.cpp", "b.h", "c.cpp", "a.cpp"]));
+        assert_eq!(f.files(), ["a.cpp", "b.h", "c.cpp"], "each once");
+        f.set_hidden_types(vec![Some("h".into())]);
+        assert_eq!(
+            f.files(),
+            ["a.cpp", "c.cpp"],
+            "a type turned off is not shown"
+        );
+        f.set_query("c.");
+        assert_eq!(f.files(), ["c.cpp"], "nor what the filter leaves out");
     }
 
     #[test]

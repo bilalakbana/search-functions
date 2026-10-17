@@ -588,3 +588,24 @@ own files, every file key silent in Git):
   `--` instead of `.` (`App::list_plan`), so a new pattern looks only in them; a file turned on again, or All
   files, searches again (their rows were never looked for). Each tab its own (Bilal), not saved, a new root
   chooses every file again; the input line says "N files chosen"; `a` all files.
+
+After v0.11.0 (2026-10-17, Bilal's requests; his choices: each file's every change while nothing is typed,
+the tag a version is in beside its hash):
+
+- The Git tab's Ctrl-Alt-F is called "Search in versions" (input line, popup " Search in versions options ",
+  tab bar `^Alt-F search in versions`).
+- Nothing typed, it lists each content of each file once, with the version that brought it, newest first
+  (`git log --all --reverse --raw --no-abbrev --no-renames -z`, `versions::history_rows`; a deletion or a
+  submodule brings none): measured on Bilal's ugrep clone (1000 versions, 1473 files) 10 950 contents in
+  0.03 s, against 1.47 M rows (~235 MB) for every file of every version. Such a row is the file itself
+  (line 0: no `:N:`, no text; the preview and Enter show the file, no line marked).
+- A row names its version beside the hash: the tag it is in (`git name-rev --annotate-stdin --tags
+  --name-only`, one call for every version when the search starts; `v7.8.5`, `v7.8.5~3` three commits before
+  it), else its date (`VersionRow::name`, drawn in yellow after the marks are placed).
+- The wheel moves through an open popup (Ctrl-P's long list did not scroll); the scroll bars are a full block
+  in the accent colour and a click or a drag on one scrolls there (`ScreenLayout::preview_bar`, `list_bar`;
+  the list's bar selects the row there, as the list follows its selection).
+- Ctrl-P lists the files the list shows (`Filter::files` now takes the words, the types and the files
+  chosen into account: with only .cpp left on in Ctrl-S it listed every file).
+- Seen on Bilal's ugrep clone: `hello` gives over 1.25 M rows, as each version repeats the lines it did not
+  change (git grep over all of them, as chosen).

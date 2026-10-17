@@ -314,11 +314,6 @@ pub fn versions_plan(
     opts: &crate::model::VersionsOpts,
     chosen: Option<Vec<String>>,
 ) -> ListPlan {
-    if query.is_empty() {
-        return ListPlan::Hint(
-            "type a pattern · searched in the files of every version (^S options, versions)".into(),
-        );
-    }
     let revs = match chosen {
         Some(revs) if revs.is_empty() => {
             return ListPlan::Hint("No version chosen: ^S, All versions".into());
