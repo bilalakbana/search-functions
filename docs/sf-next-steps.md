@@ -17,7 +17,7 @@ How Bilal starts the next session (paste):
   `~/.cargo/bin/sf` (`cargo install --path ~/.SearchFunctions/sf-rs`); nothing else in PATH is named sf. The fzf
   prototype `~/.SearchFunctions/sf` still exists (README suggests `alias sf-fzf=…`).
 - Git: `origin` (github.com/bilalakbana/search-functions, public) has Steps 1 to 4, the Deep tab and the command
-  line; releases `v0.1.0` to `v0.10.0` (2026-10-17); later commits: `git log origin/main..main`.
+  line; releases `v0.1.0` to `v0.11.0` (2026-10-17); later commits: `git log origin/main..main`.
 - Bilal's config `~/.config/sf/config.toml` holds every option explicitly (sf writes all values); on 2026-10-17
   its hidden/ignored values were set to the new defaults (hidden false, ignored true) with his OK.
 - Tests, all green on 2026-10-17 after Step 1:
@@ -48,7 +48,7 @@ How Bilal starts the next session (paste):
     while finding (v0.9.1): `cargo test` 418; `tests/e2e.sh` 173/173.
   - Pattern/count top right, words in the path, Git versions search (v0.10.0): `cargo test` 445;
     `tests/e2e.sh` 185/185.
-  - After v0.10.0 (Git file keys silent, Smart case, Ctrl-P files): `cargo test` 453; `tests/e2e.sh` 191/191.
+  - Git file keys silent, Smart case, Ctrl-P files (v0.11.0): `cargo test` 453; `tests/e2e.sh` 191/191.
   - Step 2 (same day): `cargo test` 243; `tests/e2e.sh` 86/86 (with a release package's layout);
     `tests/sub_functions.sh NEW_EMPTY_DIR` 7/7 (`-L sfrs-sub-functions`); `python3 -I packaging/test_build.py` 7;
     `packaging/test_package.sh PACKAGE NEW_EMPTY_DIR` all passed on Ubuntu 22.04, Debian 12, Ubuntu 24.04.
