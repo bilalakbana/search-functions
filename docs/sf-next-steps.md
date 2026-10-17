@@ -16,7 +16,7 @@ How Bilal starts the next session (paste):
   `~/.cargo/bin/sf` (`cargo install --path ~/.SearchFunctions/sf-rs`); nothing else in PATH is named sf. The fzf
   prototype `~/.SearchFunctions/sf` still exists (README suggests `alias sf-fzf=…`).
 - Git: `origin` (github.com/bilalakbana/search-functions, public) has Steps 1 to 4, the Deep tab and the command
-  line; releases `v0.1.0` to `v0.5.1` (2026-10-17); later commits: `git log origin/main..main`.
+  line; releases `v0.1.0` to `v0.5.2` (2026-10-17); later commits: `git log origin/main..main`.
 - Bilal's config `~/.config/sf/config.toml` holds every option explicitly (sf writes all values); on 2026-10-17
   its hidden/ignored values were set to the new defaults (hidden false, ignored true) with his OK.
 - Tests, all green on 2026-10-17 after Step 1:
@@ -169,7 +169,7 @@ Content leaves out. What and why: `docs/sf-tui-design.md` → "The Deep tab". Fi
 Git; Deep = advancedsearch + `_plus` (option Documents) + detailedsearch (option Each match) under one Config,
 preview as Content's (numbered, with context; Bilal's choice); Content keeps its own Each match and Archives &
 documents (Bilal). Released as v0.5.0 (Bilal's OK). "^S options" in the tab bar and Ctrl-F (filter the
-results after a fixed pattern) followed after v0.5.1 (not committed yet), see the design doc's "After v0.5.0".
+results after a fixed pattern) followed in v0.5.2 (Bilal's OK), see the design doc's "After v0.5.0".
 
 ## Deferred minors (known, not fixed)
 
