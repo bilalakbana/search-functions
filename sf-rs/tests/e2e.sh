@@ -171,6 +171,16 @@ expect 'whole word: named on the input'    'Content › needl .*whole word'
 keys C-s Down Down Down Down Down Down Down Space Escape
 clear_query; type_ 'needle'
 expect 'search: back to needle'            '5/5'
+keys C-p
+expect 'files: Ctrl-P lists the files found' ' Files to search in '
+keys Down Space Escape
+expect 'files: one left out of the rows'   'Content › needle .*4 files chosen +4/5'
+clear_query; type_ 'ignored'
+expect 'files: searched in the chosen only' 'No match'
+keys C-p a Escape
+expect 'files: all files again'            'Content › ignored .* 1/1'
+clear_query; type_ 'needle'
+expect 'files: back to needle'             'Content › needle .* 5/5'
 keys C-s
 expect 'config: popup'                     'Content options'
 expect 'config: boxes'                     '\[ \] Matching lines'
@@ -245,8 +255,9 @@ keys Tab
 expect 'git: commits in a subfolder'       'second \(feat\)'
 shot git
 keys C-c;    expect_log 'git: Ctrl-C copies the hash'  "COPY <$(git -C "$T" rev-parse HEAD)>"
-keys C-e
-expect 'git: other keys not available'     'Not available in Git'
+keys C-e C-u M-u C-t
+expect_not 'git: a file'"'"'s keys do nothing'  'Not available|REVEAL|history|infile'
+[[ $(tm list-windows -t e2e | wc -l) -eq 1 ]] && ok 'git: no window opened' || bad 'git: a window opened'
 keys Tab
 expect 'help: the manual'                  'sf — the search functions in one window'
 type_ 'ctrl-f'
@@ -410,7 +421,7 @@ red_on 'feat' && ok 'git: Ctrl-F marks the match red' || bad 'git: Ctrl-F marks 
 keys C-s
 expect 'git: Ctrl-S while finding, Find'"'"'s options'  ' Find options .*'
 expect 'git: Find has a regular expression' 'Regular expression'
-keys Down Space Escape
+keys Space Escape
 expect 'git: Whole word on the input line' 'Find in preview › feat .*whole word'
 find_saved=$(awk '/^\[/ { s = ($0 == "[find]") } s' "$XDG/sf/config.toml" 2>/dev/null)
 [[ $find_saved == $'[find]\nmatch_case = false\nwhole_word = true\nregex = false'* ]] \

@@ -382,7 +382,7 @@ fn event_loop(
                     let query = if kind == ActionKind::InFile {
                         app.in_file_query().to_string()
                     } else {
-                        app.editor_pattern()
+                        app.editor_query()
                     };
                     match perform(kind, app.tab, &item, &query, &app.root, env) {
                         Outcome::Done(Some(message)) => app.set_status(&message, false, now),

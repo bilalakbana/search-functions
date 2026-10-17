@@ -570,3 +570,21 @@ line or in the path, pattern and count at the top right):
   branch, subject as Bilal asked; All versions on, Space chooses, `a` all; not saved). The preview and Enter's
   view show the file as it was (`git show REV:PATH | bat`, the line marked; a document as ugrep reads it),
   Ctrl-C copies `REV:PATH`, the commit's keys say they are not for these rows.
+
+After v0.10.0 (2026-10-17, Bilal's four requests; his choices: Smart case off by default, Ctrl-P, each tab its
+own files, every file key silent in Git):
+
+- Git binds no file key: Ctrl-T, Ctrl-U, Alt-U, Ctrl-G, Alt-G, Ctrl-O and Ctrl-E do nothing there and say
+  nothing (they said "Not available in Git"); Ctrl-C copies the hash, in a versions row its `REV:PATH` (it said
+  "Not a commit" there: fixed).
+- Smart case is an option of every pattern (Content, Deep, in a file, Ctrl-F, Git versions), off; Match case
+  and it turn each other off. Both off, a pattern is read case aside (`ugrep -i`, `git grep -i`, fancy-regex's
+  case-insensitive), which is what Bilal took for a bug in Ctrl-T: a word with an upper-case letter found only
+  that case (ugrep's `--smart-case`, which sf used to pass). Ctrl-O's vim gets `\c` (case aside) or `\C` (the
+  case counts) before the pattern; with Smart case nothing, so actions' own smart `\c` stays.
+  The filters (Files, Folders, Git, Ctrl-Alt-F) were case aside already.
+- Ctrl-P in Content and Deep: a popup of the files listed (`Filter::files`), All files and each one on. A file
+  turned off leaves the rows at once (`Filter::set_only`); the next searches give ugrep the chosen files after
+  `--` instead of `.` (`App::list_plan`), so a new pattern looks only in them; a file turned on again, or All
+  files, searches again (their rows were never looked for). Each tab its own (Bilal), not saved, a new root
+  chooses every file again; the input line says "N files chosen"; `a` all files.

@@ -25,8 +25,10 @@ impl Finder {
         } else {
             fancy_regex::escape(text).into_owned()
         };
+        // case aside, unless the case counts or (smart case) the text has an upper-case letter
+        let case = opts.match_case || (opts.smart_case && text.chars().any(char::is_uppercase));
         let re = RegexBuilder::new(&pattern)
-            .case_insensitive(!opts.match_case)
+            .case_insensitive(!case)
             .build()?;
         Ok(Some(Finder {
             re,
@@ -63,7 +65,8 @@ pub struct RowWords {
     pub words: Vec<String>,
     pub regex: bool,
     pub whole_word: bool,
-    /// Else smart case for each word, as ugrep's.
+    /// Smart case for each word, as ugrep's; else, without `match_case`, case aside.
+    pub smart_case: bool,
     pub match_case: bool,
 }
 
@@ -74,7 +77,8 @@ impl RowWords {
             .iter()
             .map(|w| {
                 let opts = FindOpts {
-                    match_case: self.match_case || w.chars().any(char::is_uppercase),
+                    match_case: self.match_case,
+                    smart_case: self.smart_case,
                     whole_word: self.whole_word,
                     regex: self.regex,
                 };
@@ -184,7 +188,32 @@ mod tests {
             match_case,
             whole_word,
             regex,
+            smart_case: false,
         }
+    }
+
+    #[test]
+    fn case_aside_unless_smart_case_finds_an_upper_case_letter_or_match_case() {
+        let line = "config Config CONFIG";
+        assert_eq!(
+            found("Config", &FindOpts::default(), line).len(),
+            3,
+            "case aside"
+        );
+        let smart = FindOpts {
+            smart_case: true,
+            ..FindOpts::default()
+        };
+        assert_eq!(
+            found("Config", &smart, line),
+            ["Config"],
+            "smart: the case counts"
+        );
+        assert_eq!(
+            found("config", &smart, line).len(),
+            3,
+            "smart: lower case finds all"
+        );
     }
 
     /// The parts of `line` found.
@@ -352,6 +381,7 @@ mod tests {
             regex,
             whole_word,
             match_case: false,
+            smart_case: false,
         }
     }
 
@@ -375,6 +405,12 @@ mod tests {
         assert!(k.keeps("x.md", "code and interest"), "both on the line");
         assert!(!k.keeps("x.md", "In the interest of"), "code nowhere");
         let k = row_words(&["Code"], true, false).keeper();
+        assert!(k.keeps("code.md", "x"), "case aside");
+        let k = RowWords {
+            smart_case: true,
+            ..row_words(&["Code"], true, false)
+        }
+        .keeper();
         assert!(
             !k.keeps("code.md", "code"),
             "smart case: an upper-case word counts its case"

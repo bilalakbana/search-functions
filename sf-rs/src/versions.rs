@@ -85,6 +85,7 @@ pub fn args(q: &Query) -> Vec<OsString> {
         (!o.regex, "--fixed"),
         (o.binary, "--binary"),
         (o.documents, "--documents"),
+        (o.smart_case, "--smart"),
         (o.match_case, "--case"),
     ];
     a.extend(
@@ -115,6 +116,7 @@ pub fn parse_args(rest: &[OsString]) -> Result<Query, String> {
             "--fixed" => opts.regex = false,
             "--binary" => opts.binary = true,
             "--documents" => opts.documents = true,
+            "--smart" => opts.smart_case = true,
             "--case" => opts.match_case = true,
             "-e" => {
                 i += 1;
@@ -136,9 +138,10 @@ pub fn parse_args(rest: &[OsString]) -> Result<Query, String> {
     })
 }
 
-/// Smart case, as ugrep's: a pattern without an upper-case letter finds both.
+/// Case aside unless the case counts or (smart case, as ugrep's) the pattern has an upper-case letter.
 fn ignore_case(q: &Query) -> bool {
-    !q.opts.match_case && !q.pattern.chars().any(char::is_uppercase)
+    let o = &q.opts;
+    !(o.match_case || (o.smart_case && q.pattern.chars().any(char::is_uppercase)))
 }
 
 /// `git grep`'s arguments for `revs`.
@@ -495,6 +498,7 @@ mod tests {
         q.opts.whole_word = true;
         q.opts.regex = false;
         q.opts.documents = true;
+        q.opts.smart_case = true;
         q.revs = vec!["abc".into(), "def".into()];
         let a = args(&q);
         assert_eq!(a[0], "grep-versions");
@@ -513,13 +517,21 @@ mod tests {
             [
                 "grep", "-n", "-z", "-i", "-P", "-I", "-e", "needle", "r1", "--"
             ],
-            "smart case: lower case finds both; Perl's syntax; binaries left out"
+            "case aside; Perl's syntax; binaries left out"
         );
         let a = git_grep_args(&query("Needle"), &revs);
         assert!(
-            !a.contains(&"-i".to_string()),
-            "an upper-case letter counts its case"
+            a.contains(&"-i".to_string()),
+            "case aside, an upper-case letter too"
         );
+        let mut smart = query("Needle");
+        smart.opts.smart_case = true;
+        assert!(
+            !git_grep_args(&smart, &revs).contains(&"-i".to_string()),
+            "smart case"
+        );
+        smart.pattern = "needle".into();
+        assert!(git_grep_args(&smart, &revs).contains(&"-i".to_string()));
         let mut q = query("a.b");
         q.opts.regex = false;
         q.opts.whole_word = true;

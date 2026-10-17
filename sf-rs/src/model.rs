@@ -89,6 +89,9 @@ pub enum Opt {
     Regex,
     /// Searching versions (Git, Ctrl-Alt-F): binary files are searched as text too.
     Binary,
+    /// A pattern with an upper-case letter counts the case (ugrep's smart case); off with Match case
+    /// off: case aside.
+    SmartCase,
 }
 
 impl Opt {
@@ -112,6 +115,7 @@ impl Opt {
             Opt::WholeWord => "Whole word",
             Opt::Regex => "Regular expression",
             Opt::Binary => "Binary files",
+            Opt::SmartCase => "Smart case",
         }
     }
 
@@ -132,6 +136,7 @@ impl Opt {
             Opt::WholeWord => "not inside a longer word",
             Opt::Regex => r"a.*b  \d+  (x|y)",
             Opt::Binary => "searched as text",
+            Opt::SmartCase => "an upper-case letter counts the case",
         }
     }
 }
@@ -160,6 +165,8 @@ pub struct ContentOpts {
     pub whole_word: bool,
     /// What is typed is a regular expression; off: the text as typed.
     pub regex: bool,
+    /// An upper-case letter counts the case; never on together with `match_case`.
+    pub smart_case: bool,
     pub match_case: bool,
 }
 
@@ -174,6 +181,7 @@ pub struct DeepOpts {
     pub words_in_the_file: bool,
     pub whole_word: bool,
     pub regex: bool,
+    pub smart_case: bool,
     pub match_case: bool,
 }
 
@@ -183,6 +191,7 @@ pub struct DeepOpts {
 pub struct InFileOpts {
     pub words_on_a_line: bool,
     pub words_in_the_file: bool,
+    pub smart_case: bool,
     pub match_case: bool,
 }
 
@@ -196,6 +205,7 @@ pub struct VersionsOpts {
     pub binary: bool,
     /// PDF, Office, e-books, archives: each version's file through ugrep(+), no copy on disk.
     pub documents: bool,
+    pub smart_case: bool,
     pub match_case: bool,
 }
 
@@ -206,6 +216,7 @@ impl Default for VersionsOpts {
             regex: true,
             binary: false,
             documents: false,
+            smart_case: false,
             match_case: false,
         }
     }
@@ -218,6 +229,7 @@ pub struct FindOpts {
     pub match_case: bool,
     pub whole_word: bool,
     pub regex: bool,
+    pub smart_case: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -258,6 +270,7 @@ impl Default for ContentOpts {
             words_in_the_file: false,
             whole_word: false,
             regex: true,
+            smart_case: false,
             match_case: false,
         }
     }
@@ -274,6 +287,7 @@ impl Default for DeepOpts {
             words_in_the_file: false,
             whole_word: false,
             regex: true,
+            smart_case: false,
             match_case: false,
         }
     }
@@ -285,6 +299,7 @@ impl Default for InFileOpts {
         InFileOpts {
             words_on_a_line: true,
             words_in_the_file: false,
+            smart_case: false,
             match_case: false,
         }
     }
@@ -341,6 +356,7 @@ impl Options {
                 Opt::WordsInTheFile,
                 Opt::WholeWord,
                 Opt::Regex,
+                Opt::SmartCase,
                 Opt::MatchCase,
             ],
             Tab::Deep => &[
@@ -352,6 +368,7 @@ impl Options {
                 Opt::WordsInTheFile,
                 Opt::WholeWord,
                 Opt::Regex,
+                Opt::SmartCase,
                 Opt::MatchCase,
             ],
             Tab::Git => &[Opt::AllBranches, Opt::WholeFiles, Opt::MatchCase],
@@ -375,6 +392,15 @@ impl Options {
         if !*v {
             return;
         }
+        // smart case and match case: one or the other
+        let other = match opt {
+            Opt::SmartCase => Some(Opt::MatchCase),
+            Opt::MatchCase => Some(Opt::SmartCase),
+            _ => None,
+        };
+        if let Some(other) = other.and_then(|o| self.slot(tab, o)) {
+            *other = false;
+        }
         match (tab, opt) {
             (Tab::Content, Opt::MatchingLines) => self.content.each_match = false,
             (Tab::Content, Opt::EachMatch) => self.content.matching_lines = false,
@@ -392,6 +418,7 @@ impl Options {
         vec![
             (Opt::WordsOnALine, f.words_on_a_line),
             (Opt::WordsInTheFile, f.words_in_the_file),
+            (Opt::SmartCase, f.smart_case),
             (Opt::MatchCase, f.match_case),
         ]
     }
@@ -408,7 +435,14 @@ impl Options {
                 f.words_in_the_file = !f.words_in_the_file;
                 f.words_on_a_line &= !f.words_in_the_file;
             }
-            Opt::MatchCase => f.match_case = !f.match_case,
+            Opt::SmartCase => {
+                f.smart_case = !f.smart_case;
+                f.match_case &= !f.smart_case;
+            }
+            Opt::MatchCase => {
+                f.match_case = !f.match_case;
+                f.smart_case &= !f.match_case;
+            }
             _ => {}
         }
     }
@@ -417,9 +451,10 @@ impl Options {
     pub fn find_list(&self) -> Vec<(Opt, bool)> {
         let f = &self.find;
         vec![
-            (Opt::MatchCase, f.match_case),
             (Opt::WholeWord, f.whole_word),
             (Opt::Regex, f.regex),
+            (Opt::SmartCase, f.smart_case),
+            (Opt::MatchCase, f.match_case),
         ]
     }
 
@@ -431,6 +466,7 @@ impl Options {
             (Opt::Regex, v.regex),
             (Opt::Binary, v.binary),
             (Opt::Documents, v.documents),
+            (Opt::SmartCase, v.smart_case),
             (Opt::MatchCase, v.match_case),
         ]
     }
@@ -443,17 +479,30 @@ impl Options {
             Opt::Regex => &mut v.regex,
             Opt::Binary => &mut v.binary,
             Opt::Documents => &mut v.documents,
+            Opt::SmartCase => &mut v.smart_case,
             Opt::MatchCase => &mut v.match_case,
             _ => return,
         };
         *slot = !*slot;
+        match opt {
+            Opt::SmartCase => v.match_case &= !v.smart_case,
+            Opt::MatchCase => v.smart_case &= !v.match_case,
+            _ => {}
+        }
     }
 
     /// Toggles one of Ctrl-F's options; another does nothing.
     pub fn toggle_find(&mut self, opt: Opt) {
         let f = &mut self.find;
         match opt {
-            Opt::MatchCase => f.match_case = !f.match_case,
+            Opt::MatchCase => {
+                f.match_case = !f.match_case;
+                f.smart_case &= !f.match_case;
+            }
+            Opt::SmartCase => {
+                f.smart_case = !f.smart_case;
+                f.match_case &= !f.smart_case;
+            }
             Opt::WholeWord => f.whole_word = !f.whole_word,
             Opt::Regex => f.regex = !f.regex,
             _ => {}
@@ -469,11 +518,13 @@ impl Options {
             (Tab::Content, Opt::WordsInTheFile) => Some(&mut self.content.words_in_the_file),
             (Tab::Content, Opt::WholeWord) => Some(&mut self.content.whole_word),
             (Tab::Content, Opt::Regex) => Some(&mut self.content.regex),
+            (Tab::Content, Opt::SmartCase) => Some(&mut self.content.smart_case),
             (Tab::Content, Opt::MatchCase) => Some(&mut self.content.match_case),
             (Tab::Deep, Opt::WordsOnALine) => Some(&mut self.deep.words_on_a_line),
             (Tab::Deep, Opt::WordsInTheFile) => Some(&mut self.deep.words_in_the_file),
             (Tab::Deep, Opt::WholeWord) => Some(&mut self.deep.whole_word),
             (Tab::Deep, Opt::Regex) => Some(&mut self.deep.regex),
+            (Tab::Deep, Opt::SmartCase) => Some(&mut self.deep.smart_case),
             (Tab::Deep, Opt::MatchCase) => Some(&mut self.deep.match_case),
             (Tab::Folders, Opt::MatchCase) => Some(&mut self.folders.match_case),
             (Tab::Git, Opt::MatchCase) => Some(&mut self.git.match_case),
@@ -541,6 +592,7 @@ mod tests {
                 Opt::WordsInTheFile,
                 Opt::WholeWord,
                 Opt::Regex,
+                Opt::SmartCase,
                 Opt::MatchCase
             ]
         );
@@ -595,6 +647,7 @@ mod tests {
                 (Opt::WordsInTheFile, false),
                 (Opt::WholeWord, false),
                 (Opt::Regex, true),
+                (Opt::SmartCase, false),
                 (Opt::MatchCase, false)
             ]
         );
@@ -616,6 +669,51 @@ mod tests {
         assert!(o.content.matching_lines && !o.content.each_match);
         o.toggle(Tab::Deep, Opt::Documents);
         assert!(o.deep.documents && !o.content.archives);
+    }
+
+    #[test]
+    fn smart_case_is_an_option_of_every_pattern_off_and_never_with_match_case() {
+        let mut o = Options::default();
+        let has = |list: Vec<(Opt, bool)>| list.contains(&(Opt::SmartCase, false));
+        assert!(
+            has(o.list(Tab::Content)) && has(o.list(Tab::Deep)),
+            "off by default"
+        );
+        assert!(has(o.in_file_list()) && has(o.find_list()) && has(o.versions_list()));
+        for tab in [Tab::Files, Tab::Folders, Tab::Git] {
+            assert!(
+                !o.list(tab).iter().any(|(opt, _)| *opt == Opt::SmartCase),
+                "{tab:?}: a filter"
+            );
+        }
+        let at = |list: Vec<(Opt, bool)>, opt| list.iter().position(|(x, _)| *x == opt).unwrap();
+        assert_eq!(
+            at(o.list(Tab::Content), Opt::SmartCase) + 1,
+            at(o.list(Tab::Content), Opt::MatchCase),
+            "right above Match case"
+        );
+        o.toggle(Tab::Content, Opt::MatchCase);
+        o.toggle(Tab::Content, Opt::SmartCase);
+        assert!(
+            o.content.smart_case && !o.content.match_case,
+            "one or the other"
+        );
+        o.toggle(Tab::Content, Opt::MatchCase);
+        assert!(!o.content.smart_case && o.content.match_case);
+        assert!(!o.deep.smart_case, "Deep's own");
+        o.toggle_in_file(Opt::SmartCase);
+        o.toggle_in_file(Opt::MatchCase);
+        assert!(o.in_file.match_case && !o.in_file.smart_case);
+        o.toggle_find(Opt::MatchCase);
+        o.toggle_find(Opt::SmartCase);
+        assert!(o.find.smart_case && !o.find.match_case);
+        o.toggle_versions(Opt::SmartCase);
+        assert!(o.versions.smart_case);
+        o.toggle_versions(Opt::MatchCase);
+        assert!(o.versions.match_case && !o.versions.smart_case);
+        let old: Options = toml::from_str("[content]\nmatch_case = false\n").unwrap();
+        assert!(!old.content.smart_case, "a config from before: case aside");
+        assert_eq!(Opt::SmartCase.label(Tab::Content), "Smart case");
     }
 
     #[test]
@@ -643,6 +741,7 @@ mod tests {
                 Opt::WordsInTheFile,
                 Opt::WholeWord,
                 Opt::Regex,
+                Opt::SmartCase,
                 Opt::MatchCase
             ]
         );
@@ -657,6 +756,7 @@ mod tests {
                 Opt::WordsInTheFile,
                 Opt::WholeWord,
                 Opt::Regex,
+                Opt::SmartCase,
                 Opt::MatchCase
             ]
         );
@@ -698,6 +798,7 @@ mod tests {
                 (Opt::Regex, true),
                 (Opt::Binary, false),
                 (Opt::Documents, false),
+                (Opt::SmartCase, false),
                 (Opt::MatchCase, false)
             ],
             "a pattern is Perl's regular expression, binaries and documents left out"
@@ -710,7 +811,7 @@ mod tests {
         o.toggle_versions(Opt::Hidden);
         assert_eq!(
             o.versions_list().len(),
-            5,
+            6,
             "an option it does not have does nothing"
         );
         let saved = toml::to_string(&o).unwrap();
@@ -726,9 +827,10 @@ mod tests {
         assert_eq!(
             o.find_list(),
             [
-                (Opt::MatchCase, false),
                 (Opt::WholeWord, false),
-                (Opt::Regex, false)
+                (Opt::Regex, false),
+                (Opt::SmartCase, false),
+                (Opt::MatchCase, false)
             ]
         );
         o.toggle_find(Opt::WholeWord);
@@ -743,7 +845,7 @@ mod tests {
         o.toggle_find(Opt::Hidden);
         assert_eq!(
             o.find_list().len(),
-            3,
+            4,
             "an option Find does not have does nothing"
         );
         let saved = toml::to_string(&o).unwrap();
@@ -767,6 +869,7 @@ mod tests {
             [
                 (Opt::WordsOnALine, true),
                 (Opt::WordsInTheFile, false),
+                (Opt::SmartCase, false),
                 (Opt::MatchCase, false)
             ]
         );

@@ -201,6 +201,16 @@ pub struct Versions {
     pub off: HashSet<String>,
 }
 
+/// Ctrl-P in Content and Deep: the files to search in, chosen from those listed; a tab without one
+/// searches every file.
+#[derive(Clone, Debug)]
+pub struct Chosen {
+    /// The files the popup lists (those listed when choosing began), in their order.
+    pub files: Vec<OsString>,
+    /// Those chosen.
+    pub on: HashSet<OsString>,
+}
+
 /// A row of the Ctrl-S popup.
 #[derive(Clone, Debug, PartialEq)]
 pub enum PopupRow {
@@ -214,6 +224,10 @@ pub enum PopupRow {
     AllVersions(bool),
     /// A version to search in, by its hash, and whether it is.
     Version(String, bool),
+    /// Ctrl-P: every file at once, on while none is left out.
+    AllFiles(bool),
+    /// Ctrl-P: a file of the list and whether it is searched in.
+    File(OsString, bool),
 }
 
 /// A preview that is wanted and not here yet.
@@ -241,6 +255,10 @@ pub struct App {
     pub preview_find: Option<Find>,
     /// Git, Ctrl-Alt-F: searching every version; typing is its pattern.
     pub versions: Option<Versions>,
+    /// Ctrl-P: each tab's files to search in (Content, Deep; Bilal: each its own).
+    pub chosen: Vec<(Tab, Chosen)>,
+    /// The popup is Ctrl-P's (the files), not Ctrl-S's.
+    pub popup_files: bool,
     /// sf itself, which the versions' search runs as its list (`sf grep-versions`).
     pub self_exe: PathBuf,
     /// `sf history|log|diff FILE`: the view `start` opens instead of a list.
@@ -313,6 +331,8 @@ impl App {
             tmux: false,
             preview_find: None,
             versions: None,
+            chosen: Vec::new(),
+            popup_files: false,
             self_exe: std::env::current_exe().unwrap_or_else(|_| PathBuf::from("sf")),
             start_with: None,
             view_alone: false,
@@ -438,6 +458,28 @@ impl App {
         terms.join("|")
     }
 
+    /// What the editor gets (Ctrl-O): `editor_pattern` with vim's case as the options say, `\c` case
+    /// aside or `\C` the case as typed; with smart case nothing (actions then gives `\c` to a pattern
+    /// without an upper-case letter).
+    pub fn editor_query(&self) -> String {
+        let pattern = self.editor_pattern();
+        let (match_case, smart_case) = match self.scope {
+            Some(_) => (
+                self.options.in_file.match_case,
+                self.options.in_file.smart_case,
+            ),
+            None => (
+                self.options.get(self.tab, Opt::MatchCase),
+                self.options.get(self.tab, Opt::SmartCase),
+            ),
+        };
+        if pattern.is_empty() || (smart_case && !match_case) {
+            return pattern;
+        }
+        let case = if match_case { "\\C" } else { "\\c" };
+        format!("{case}{pattern}")
+    }
+
     /// Content's and Deep's lists of matches: the words each row keeps on its line or in its path.
     pub fn row_words(&self) -> Option<RowWords> {
         if self.scope.is_some() {
@@ -489,14 +531,38 @@ impl App {
                 }
             }
         }
-        commands::list_plan_with(
+        let plan = commands::list_plan_with(
             self.tab,
             &self.options,
             &self.query,
             &self.engines,
             &extra,
             false,
-        )
+        );
+        // Ctrl-P: ugrep searches the files chosen instead of the folder (its last argument, ".")
+        match (
+            plan,
+            self.chosen_of(self.tab).filter(|_| self.tab.searches()),
+        ) {
+            (
+                ListPlan::Run {
+                    mut cmd,
+                    kind,
+                    keep,
+                },
+                Some(c),
+            ) if cmd.args.last().is_some_and(|a| a == ".") => {
+                if c.on.is_empty() {
+                    return ListPlan::Hint("No file chosen: ^P, All files".into());
+                }
+                cmd.args.pop();
+                cmd.args.push("--".into());
+                cmd.args
+                    .extend(c.files.iter().filter(|f| c.on.contains(*f)).cloned());
+                ListPlan::Run { cmd, kind, keep }
+            }
+            (plan, _) => plan,
+        }
     }
 
     /// The command line's engine options when they are the current tab's.
@@ -548,6 +614,7 @@ impl App {
     pub fn set_root(&mut self, root: PathBuf) -> Vec<Effect> {
         self.root = root;
         self.types_off.clear();
+        self.chosen.clear();
         self.query.clear();
         self.preview = Text::default();
         self.preview_found = None;
@@ -588,16 +655,19 @@ impl App {
             match key.code {
                 KeyCode::Esc => return self.leave_versions(),
                 KeyCode::Char('f') if ctrl && alt => return self.leave_versions(),
-                // a commit's keys and the file's: a row here is a file in a version
-                KeyCode::Char('o' | 't' | 'u' | 'g' | 'e') if ctrl && !alt => {
-                    self.set_status("Not available here", true, now);
-                    return Vec::new();
-                }
-                KeyCode::Char('g' | 'u') if alt && !ctrl => {
-                    self.set_status("Not available here", true, now);
-                    return Vec::new();
-                }
                 _ => {}
+            }
+        }
+        if self.tab == Tab::Git && self.scope.is_none() {
+            // a file's keys are not bound in Git (Bilal): nothing happens, nothing is said
+            let alt = key.modifiers.contains(KeyModifiers::ALT);
+            let file_key = match key.code {
+                KeyCode::Char('o' | 't' | 'u' | 'g' | 'e') if ctrl && !alt => true,
+                KeyCode::Char('g' | 'u') => alt && !ctrl,
+                _ => false,
+            };
+            if file_key {
+                return Vec::new();
             }
         }
         if self.result_filter.is_some() {
@@ -644,9 +714,11 @@ impl App {
                 'f' => self.enter_find(now),
                 'r' => vec![self.run_list()],
                 's' => {
+                    self.popup_files = false;
                     self.popup = Some(0);
                     Vec::new()
                 }
+                'p' => self.open_files(),
                 'o' => self.act(ActionKind::Editor, now),
                 't' => self.act(ActionKind::InFile, now),
                 'u' => self.act(ActionKind::DiffSplit, now),
@@ -705,6 +777,7 @@ impl App {
                     };
                 }
                 if self.layout.config.contains(at) {
+                    self.popup_files = false;
                     self.popup = Some(0);
                     return Vec::new();
                 }
@@ -795,7 +868,10 @@ impl App {
         match key.code {
             KeyCode::Esc => self.preview_find = None,
             KeyCode::Char('f') if ctrl => self.preview_find = None,
-            KeyCode::Char('s') if ctrl => self.popup = Some(0),
+            KeyCode::Char('s') if ctrl => {
+                self.popup_files = false;
+                self.popup = Some(0);
+            }
             KeyCode::Tab | KeyCode::BackTab => {
                 self.preview_find = None;
                 return None;
@@ -1015,6 +1091,7 @@ impl App {
             None => &self.query,
         });
         self.filter.set_hidden_types(self.hidden_types());
+        self.filter.set_only(self.only());
         self.notes.clear();
         self.selected = 0;
         self.offset = 0;
@@ -1412,11 +1489,12 @@ impl App {
             }
             KeyCode::Char(' ') | KeyCode::Enter => return self.toggle_row(cursor, now),
             KeyCode::Char('a') => {
-                if let Some(i) = self
-                    .popup_rows()
-                    .iter()
-                    .position(|r| matches!(r, PopupRow::AllTypes(_) | PopupRow::AllVersions(_)))
-                {
+                if let Some(i) = self.popup_rows().iter().position(|r| {
+                    matches!(
+                        r,
+                        PopupRow::AllTypes(_) | PopupRow::AllVersions(_) | PopupRow::AllFiles(_)
+                    )
+                }) {
                     return self.toggle_row(i, now);
                 }
             }
@@ -1428,6 +1506,16 @@ impl App {
     /// The popup's rows: the tab's options, then (Files, Content, Deep) every file type of the rows,
     /// the most first, and those turned off.
     pub fn popup_rows(&self) -> Vec<PopupRow> {
+        if self.popup_files {
+            let chosen = self.chosen_of(self.tab);
+            let files = chosen.map_or_else(|| self.filter.files(), |c| c.files.clone());
+            let mut rows = vec![PopupRow::AllFiles(chosen.is_none())];
+            rows.extend(files.into_iter().map(|f| {
+                let on = chosen.is_none_or(|c| c.on.contains(&f));
+                PopupRow::File(f, on)
+            }));
+            return rows;
+        }
         let options = match self.scope {
             _ if self.preview_find.is_some() => self.options.find_list(),
             _ if self.versions.is_some() => self.options.versions_list(),
@@ -1501,6 +1589,36 @@ impl App {
         self.hidden_types().len()
     }
 
+    /// Ctrl-P: the popup of the files to search in (Content and Deep, not inside one file).
+    fn open_files(&mut self) -> Vec<Effect> {
+        if self.tab.searches() && self.scope.is_none() {
+            self.popup_files = true;
+            self.popup = Some(0);
+        }
+        Vec::new()
+    }
+
+    /// `tab`'s files to search in, when some are chosen.
+    pub fn chosen_of(&self, tab: Tab) -> Option<&Chosen> {
+        self.chosen.iter().find(|(t, _)| *t == tab).map(|(_, c)| c)
+    }
+
+    /// The rows the current tab's chosen files allow (None: every one).
+    fn only(&self) -> Option<HashSet<OsString>> {
+        if self.scope.is_some() || !self.tab.searches() {
+            return None;
+        }
+        self.chosen_of(self.tab).map(|c| c.on.clone())
+    }
+
+    /// The files chosen changed: the rows of the others leave at once (the next search is in the
+    /// chosen ones only, `list_plan`).
+    fn files_changed(&mut self) -> Vec<Effect> {
+        self.filter.set_only(self.only());
+        self.selected = 0;
+        self.preview_if_changed()
+    }
+
     /// The current tab's file types turned off (none inside one file, Ctrl-T).
     fn hidden_types(&self) -> Vec<Option<String>> {
         if self.scope.is_some() {
@@ -1518,6 +1636,44 @@ impl App {
         let tab = self.tab;
         match self.popup_rows().get(index).cloned() {
             Some(PopupRow::Opt(..)) => return self.toggle_option(index, now),
+            Some(PopupRow::AllFiles(all)) => {
+                if all {
+                    // none chosen: nothing is searched until one is
+                    let files = self
+                        .chosen_of(tab)
+                        .map_or_else(|| self.filter.files(), |c| c.files.clone());
+                    self.chosen.retain(|(t, _)| *t != tab);
+                    let on = HashSet::new();
+                    self.chosen.push((tab, Chosen { files, on }));
+                    return self.files_changed();
+                }
+                // every file again: their rows were never found, so the search runs again
+                self.chosen.retain(|(t, _)| *t != tab);
+                return vec![self.run_list()];
+            }
+            Some(PopupRow::File(file, on)) => {
+                let files = self.filter.files();
+                let i = match self.chosen.iter().position(|(t, _)| *t == tab) {
+                    Some(i) => i,
+                    None => {
+                        let on = files.iter().cloned().collect();
+                        self.chosen.push((tab, Chosen { files, on }));
+                        self.chosen.len() - 1
+                    }
+                };
+                let c = &mut self.chosen[i].1;
+                if on {
+                    // left out: its rows leave at once
+                    c.on.remove(&file);
+                    return self.files_changed();
+                }
+                // chosen again: searched again (its rows were not looked for)
+                c.on.insert(file);
+                if c.on.len() == c.files.len() {
+                    self.chosen.remove(i); // every one again: as before
+                }
+                return vec![self.run_list()];
+            }
             Some(PopupRow::AllVersions(all)) => {
                 if let Some(v) = &mut self.versions {
                     v.off = if all {
@@ -1901,13 +2057,13 @@ pub(crate) mod tests {
         assert_eq!(
             a.popup_rows(),
             [
-                PopupRow::Opt(Opt::MatchCase, false),
                 PopupRow::Opt(Opt::WholeWord, false),
-                PopupRow::Opt(Opt::Regex, false)
+                PopupRow::Opt(Opt::Regex, false),
+                PopupRow::Opt(Opt::SmartCase, false),
+                PopupRow::Opt(Opt::MatchCase, false)
             ],
             "Find's options, no file types"
         );
-        a.handle_key(key(KeyCode::Down), now);
         assert_eq!(
             a.handle_key(key(KeyCode::Char(' ')), now),
             [Effect::SaveConfig],
@@ -1993,7 +2149,7 @@ pub(crate) mod tests {
         a.save_allowed = false;
         a.handle_key(ctrl('s'), now);
         assert_eq!(a.handle_key(key(KeyCode::Char(' ')), now), []);
-        assert!(a.options.find.match_case, "on for this run");
+        assert!(a.options.find.whole_word, "on for this run");
         assert!(a.status.as_ref().unwrap().0.contains("not saved"));
     }
 
@@ -2288,7 +2444,7 @@ pub(crate) mod tests {
         for _ in 0..3 {
             a.handle_key(key(KeyCode::Up), now);
         }
-        assert_eq!(a.popup, Some(9), "the cursor wraps");
+        assert_eq!(a.popup, Some(10), "the cursor wraps");
         a.handle_key(key(KeyCode::Enter), now);
         assert!(a.options.content.match_case, "Match case, the last row");
     }
@@ -2570,6 +2726,96 @@ pub(crate) mod tests {
         (a, now + Duration::from_secs(1))
     }
 
+    /// The paths `cmd` searches in: what follows the pattern (`.`, or `--` and the files chosen).
+    fn searched_in(a: &App) -> Vec<String> {
+        let ListPlan::Run { cmd, .. } = a.list_plan() else {
+            panic!("{:?}", a.list_plan())
+        };
+        let args: Vec<String> = cmd
+            .args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let e = args.iter().rposition(|a| a == "-e").expect("-e");
+        args[e + 2..].to_vec()
+    }
+
+    #[test]
+    fn ctrl_p_chooses_the_files_to_search_in() {
+        let (mut a, now) = found(Tab::Content);
+        let file = |p: &str, on| PopupRow::File(p.into(), on);
+        assert_eq!(a.handle_key(ctrl('p'), now), []);
+        assert_eq!(
+            a.popup_rows(),
+            [
+                PopupRow::AllFiles(true),
+                file("src/a.c", true),
+                file("docs/b.md", true)
+            ],
+            "the files listed, all chosen"
+        );
+        assert_eq!(searched_in(&a), ["."]);
+        a.popup = Some(2);
+        assert_eq!(
+            a.handle_key(key(KeyCode::Char(' ')), now),
+            [],
+            "no search: rows leave"
+        );
+        assert_eq!(a.filter.len(), 1, "only the chosen ones show");
+        assert_eq!(a.current().unwrap().key, "src/a.c");
+        assert_eq!(a.popup_rows()[0], PopupRow::AllFiles(false));
+        assert_eq!(
+            a.popup_rows()[2],
+            file("docs/b.md", false),
+            "still there to choose again"
+        );
+        assert_eq!(
+            searched_in(&a),
+            ["--", "src/a.c"],
+            "the next search in them only"
+        );
+        a.handle_key(key(KeyCode::Esc), now);
+        a.handle_key(ctrl('w'), now);
+        typed(&mut a, "other", now);
+        assert_eq!(searched_in(&a), ["--", "src/a.c"], "a new pattern too");
+        a.handle_key(ctrl('p'), now);
+        assert_eq!(
+            a.handle_key(key(KeyCode::Char('a')), now),
+            [Effect::RunList],
+            "files come back: searched again, their rows were never found"
+        );
+        assert_eq!(searched_in(&a), ["."], "all files: as before");
+        a.handle_key(key(KeyCode::Esc), now);
+        feed(&mut a, &["src/a.c", "docs/b.md"]); // that search's rows
+        a.popup = None;
+        a.handle_key(ctrl('p'), now);
+        a.popup = Some(1);
+        a.handle_key(key(KeyCode::Char(' ')), now);
+        assert_eq!(
+            a.handle_key(key(KeyCode::Char(' ')), now),
+            [Effect::RunList],
+            "chosen again: searched again"
+        );
+        feed(&mut a, &["src/a.c", "docs/b.md"]);
+        a.handle_key(key(KeyCode::Char(' ')), now);
+        a.handle_key(key(KeyCode::Esc), now);
+        a.switch_tab(Tab::Deep);
+        assert_eq!(searched_in(&a), ["."], "Deep's own (Bilal)");
+        a.switch_tab(Tab::Content);
+        assert_eq!(searched_in(&a), ["--", "docs/b.md"]);
+        a.set_root(PathBuf::from("/elsewhere"));
+        typed(&mut a, "x", now);
+        assert_eq!(searched_in(&a), ["."], "a new root: every file again");
+    }
+
+    #[test]
+    fn ctrl_p_is_for_content_and_deep() {
+        let (mut a, now) = app(Tab::Files);
+        feed(&mut a, &["a"]);
+        a.handle_key(ctrl('p'), now);
+        assert!(a.popup.is_none());
+    }
+
     fn version_row(hash: &str) -> crate::versions::VersionRow {
         crate::versions::VersionRow {
             hash: hash.into(),
@@ -2639,20 +2885,21 @@ pub(crate) mod tests {
                 PopupRow::Opt(Opt::Regex, true),
                 PopupRow::Opt(Opt::Binary, false),
                 PopupRow::Opt(Opt::Documents, false),
+                PopupRow::Opt(Opt::SmartCase, false),
                 PopupRow::Opt(Opt::MatchCase, false),
                 PopupRow::AllVersions(true),
                 v("aaa", true),
                 v("bbb", true)
             ]
         );
-        a.popup = Some(6);
+        a.popup = Some(7);
         assert_eq!(
             a.handle_key(key(KeyCode::Char(' ')), now),
             [Effect::RunList]
         );
         assert_eq!(versions_run(&a).1, ["bbb"], "only the versions chosen");
-        assert_eq!(a.popup_rows()[5], PopupRow::AllVersions(false));
-        a.popup = Some(5);
+        assert_eq!(a.popup_rows()[6], PopupRow::AllVersions(false));
+        a.popup = Some(6);
         a.handle_key(key(KeyCode::Char(' ')), now);
         assert!(versions_run(&a).1.is_empty(), "all of them again");
         a.handle_key(key(KeyCode::Char(' ')), now);
@@ -2693,11 +2940,39 @@ pub(crate) mod tests {
             a.view.is_none() && a.versions.is_some(),
             "Esc: back to the versions found"
         );
-        a.handle_key(ctrl('g'), now);
+        assert_eq!(a.handle_key(ctrl('g'), now), []);
         assert!(
-            a.status.as_ref().unwrap().0.contains("Not available"),
-            "{:?}",
+            a.status.is_none(),
+            "a file's keys do nothing here: {:?}",
             a.status
+        );
+    }
+
+    #[test]
+    fn a_files_keys_do_nothing_in_git() {
+        // Bilal: they need not be bound there (they said "Not available in Git")
+        let (mut a, now) = app(Tab::Git);
+        feed(&mut a, &["abcdef1"]);
+        for k in [
+            ctrl('t'),
+            ctrl('u'),
+            alt(KeyCode::Char('u')),
+            ctrl('g'),
+            alt(KeyCode::Char('g')),
+            ctrl('o'),
+            ctrl('e'),
+        ] {
+            assert_eq!(a.handle_key(k, now), [], "{k:?}");
+            assert!(
+                a.status.is_none() && a.view.is_none(),
+                "{k:?}: {:?}",
+                a.status
+            );
+        }
+        assert_eq!(
+            a.handle_key(ctrl('c'), now),
+            [Effect::Act(ActionKind::Copy)],
+            "copying the hash stays"
         );
     }
 
@@ -3216,6 +3491,7 @@ pub(crate) mod tests {
             [
                 PopupRow::Opt(Opt::WordsOnALine, true),
                 PopupRow::Opt(Opt::WordsInTheFile, false),
+                PopupRow::Opt(Opt::SmartCase, false),
                 PopupRow::Opt(Opt::MatchCase, false)
             ]
         );
@@ -3233,6 +3509,20 @@ pub(crate) mod tests {
             panic!()
         };
         assert!(cmd.args.contains(&"--files".into()), "{:?}", cmd.args);
+    }
+
+    #[test]
+    fn the_editor_follows_the_case_options() {
+        // vim: \c case aside, \C the case counts; none: actions' smart case (\c for lower case)
+        let (mut a, _) = app(Tab::Content);
+        a.query = "Needle".into();
+        assert_eq!(a.editor_query(), "\\cNeedle", "case aside");
+        a.options.toggle(Tab::Content, Opt::SmartCase);
+        assert_eq!(a.editor_query(), "Needle", "smart case");
+        a.options.toggle(Tab::Content, Opt::MatchCase);
+        assert_eq!(a.editor_query(), "\\CNeedle", "match case");
+        a.query.clear();
+        assert_eq!(a.editor_query(), "", "nothing to look for");
     }
 
     #[test]

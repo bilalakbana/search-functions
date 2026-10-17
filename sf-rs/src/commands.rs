@@ -142,6 +142,9 @@ struct Search {
 #[derive(Clone, Copy)]
 struct Reading {
     match_case: bool,
+    /// Without `match_case`: an upper-case letter counts the case (`--smart-case`); else case aside
+    /// (`-i`).
+    smart_case: bool,
     /// Words, every one on a line (`--bool`)...
     words_on_a_line: bool,
     /// ... or every one somewhere in the file (`--bool --files`).
@@ -169,11 +172,14 @@ fn ugrep_literal(text: &str) -> String {
 const READING: &str = "--smart-case";
 
 impl Reading {
-    /// ugrep's options for it: `--smart-case` unless the case counts, a Boolean query for words.
+    /// ugrep's options for it: case aside (`-i`), smart case or the case as typed; a Boolean query for
+    /// words.
     fn flags(self) -> Vec<&'static str> {
         let mut flags = Vec::new();
-        if !self.match_case {
+        if self.smart_case && !self.match_case {
             flags.push("--smart-case");
+        } else if !self.match_case {
+            flags.push("-i");
         }
         if self.words_on_a_line || self.words_in_the_file {
             flags.push("--bool");
@@ -210,22 +216,26 @@ impl Search {
         // list: every line of every file, or every PDF converted, would be far too much. Content lists
         // the text files, Deep every file.
         let pattern = !query.is_empty();
-        let reading = |match_case, on_a_line, in_the_file, whole_word, regex: bool| Reading {
-            match_case,
-            words_on_a_line: pattern && on_a_line,
-            words_in_the_file: pattern && in_the_file,
-            whole_word: pattern && whole_word,
-            literal: pattern && !regex,
-        };
-        // listing matches (not files): each word on the line or in the path, unless all in the file
-        let row_words = |lists: bool, in_the_file: bool, regex, whole_word, match_case| {
-            (pattern && lists && !in_the_file).then(|| RowWords {
-                words: words_of(query),
-                regex,
-                whole_word,
+        let reading =
+            |(match_case, smart_case), on_a_line, in_the_file, whole_word, regex: bool| Reading {
                 match_case,
-            })
-        };
+                smart_case,
+                words_on_a_line: pattern && on_a_line,
+                words_in_the_file: pattern && in_the_file,
+                whole_word: pattern && whole_word,
+                literal: pattern && !regex,
+            };
+        // listing matches (not files): each word on the line or in the path, unless all in the file
+        let row_words =
+            |lists: bool, in_the_file: bool, regex, whole_word, (match_case, smart_case)| {
+                (pattern && lists && !in_the_file).then(|| RowWords {
+                    words: words_of(query),
+                    regex,
+                    whole_word,
+                    smart_case,
+                    match_case,
+                })
+            };
         if tab == Tab::Deep {
             let d = &opts.deep;
             let words = row_words(
@@ -233,7 +243,7 @@ impl Search {
                 d.words_in_the_file,
                 d.regex,
                 d.whole_word,
-                d.match_case,
+                (d.match_case, d.smart_case),
             );
             return Search {
                 matching_lines: false,
@@ -242,7 +252,7 @@ impl Search {
                 documents: pattern && d.documents,
                 binaries: true,
                 reading: reading(
-                    d.match_case,
+                    (d.match_case, d.smart_case),
                     d.words_on_a_line && words.is_none(),
                     d.words_in_the_file,
                     d.whole_word,
@@ -262,7 +272,7 @@ impl Search {
             c.words_in_the_file,
             c.regex,
             c.whole_word,
-            c.match_case,
+            (c.match_case, c.smart_case),
         );
         Search {
             matching_lines,
@@ -272,7 +282,7 @@ impl Search {
             // with Archives & documents the file list has binaries too, the lists of matches not
             binaries: archives && !matching_lines && !each_match,
             reading: reading(
-                c.match_case,
+                (c.match_case, c.smart_case),
                 c.words_on_a_line && words.is_none(),
                 c.words_in_the_file,
                 c.whole_word,
@@ -351,6 +361,7 @@ pub fn in_file_plan(
     let words = !query.trim().is_empty();
     let reading = Reading {
         match_case: opts.match_case,
+        smart_case: opts.smart_case,
         words_on_a_line: words && opts.words_on_a_line,
         words_in_the_file: words && opts.words_in_the_file,
         whole_word: false,
@@ -887,7 +898,7 @@ mod tests {
         let want = os(&[
             "-rlU",
             "--sort=name",
-            "--smart-case",
+            "-i",
             "--ignore-binary",
             "-s",
             "--null",
@@ -941,7 +952,7 @@ mod tests {
             os(&[
                 "-rlU",
                 "--sort=name",
-                "--smart-case",
+                "-i",
                 "--ignore-binary",
                 "-s",
                 "--null",
@@ -985,7 +996,7 @@ mod tests {
             os(&[
                 "-rzl",
                 "--sort=name",
-                "--smart-case",
+                "-i",
                 "-s",
                 "--null",
                 "--exclude=*.rar",
@@ -1026,7 +1037,7 @@ mod tests {
             os(&[
                 "-rzno",
                 "--sort=name",
-                "--smart-case",
+                "-i",
                 "-a",
                 "-s",
                 "--null",
@@ -1061,7 +1072,7 @@ mod tests {
             os(&[
                 "-rlU",
                 "--sort=name",
-                "--smart-case",
+                "-i",
                 "-s",
                 "--null",
                 "--exclude-dir=.git",
@@ -1253,6 +1264,7 @@ mod tests {
                 words: vec!["CODE".into(), "of x".into()],
                 regex: true,
                 whole_word: false,
+                smart_case: false,
                 match_case: false,
             };
             assert_eq!(
@@ -1347,14 +1359,27 @@ mod tests {
     }
 
     #[test]
-    fn match_case_drops_smart_case() {
+    fn case_aside_smart_case_or_match_case() {
         for tab in [Tab::Content, Tab::Deep] {
             let mut o = Options::default();
             let (cmd, _) = run(list_plan(tab, &o, "Needle", &engines()));
-            assert!(has(&cmd, "--smart-case"), "{tab:?}");
+            assert!(
+                has(&cmd, "-i") && !has(&cmd, "--smart-case"),
+                "{tab:?}: case aside"
+            );
+            o.toggle(tab, Opt::SmartCase);
+            let (cmd, _) = run(list_plan(tab, &o, "Needle", &engines()));
+            assert!(
+                has(&cmd, "--smart-case") && !has(&cmd, "-i"),
+                "{tab:?}: smart"
+            );
             o.toggle(tab, Opt::MatchCase);
             let (cmd, _) = run(list_plan(tab, &o, "Needle", &engines()));
-            assert!(!has(&cmd, "--smart-case"), "{tab:?}: {:?}", cmd.args);
+            assert!(
+                !has(&cmd, "--smart-case") && !has(&cmd, "-i"),
+                "{tab:?}: {:?}",
+                cmd.args
+            );
             let PreviewPlan::Numbered { lines, header, .. } = preview_plan(
                 tab,
                 &o,
@@ -1370,6 +1395,13 @@ mod tests {
                 !has(&lines, "--smart-case") && !has(&header.matches.unwrap().text, "--smart-case")
             );
         }
+        let o = InFileOpts::default();
+        let (cmd, _) = run(in_file_plan("f.c".as_ref(), "Needle", &o, &engines()));
+        assert!(
+            has(&cmd, "-i"),
+            "in a file too: case aside by default {:?}",
+            cmd.args
+        );
     }
 
     #[test]
@@ -1388,6 +1420,7 @@ mod tests {
         let o = InFileOpts {
             words_on_a_line: false,
             words_in_the_file: true,
+            smart_case: false,
             match_case: true,
         };
         let a = args(&o);
@@ -1417,7 +1450,7 @@ mod tests {
             os(&[
                 "-rzl",
                 "--sort=name",
-                "--smart-case",
+                "-i",
                 "-s",
                 "--null",
                 "--exclude=*.rar",
@@ -1441,7 +1474,7 @@ mod tests {
             os(&[
                 "-rnU",
                 "--sort=name",
-                "--smart-case",
+                "-i",
                 "--ignore-binary",
                 "-s",
                 "--null",
@@ -1528,7 +1561,7 @@ mod tests {
             os(&[
                 "-rlU",
                 "--sort=name",
-                "--smart-case",
+                "-i",
                 "--ignore-binary",
                 "-s",
                 "--color=auto",
@@ -1607,7 +1640,7 @@ mod tests {
             cmd.args,
             os(&[
                 "-nHU",
-                "--smart-case",
+                "-i",
                 "--null",
                 "--separator=\x1f",
                 "--color=never",
@@ -1770,7 +1803,7 @@ mod tests {
             lines.args,
             os(&[
                 "-nHUa",
-                "--smart-case",
+                "-i",
                 "--null",
                 "--separator=\x1f",
                 "--color=never",
@@ -1804,7 +1837,7 @@ mod tests {
             binary.args,
             os(&[
                 "-znao",
-                "--smart-case",
+                "-i",
                 "--color=always",
                 "-B200",
                 "-A200",
@@ -1841,30 +1874,11 @@ mod tests {
         assert_eq!(m.text.program, PathBuf::from("/bin/ugrep"));
         assert_eq!(
             m.text.args,
-            os(&[
-                "-c",
-                "-o",
-                "-U",
-                "--smart-case",
-                "-e",
-                "ne",
-                "--",
-                "/r/src/a b"
-            ])
+            os(&["-c", "-o", "-U", "-i", "-e", "ne", "--", "/r/src/a b"])
         );
         assert_eq!(
             m.binary.args,
-            os(&[
-                "-z",
-                "-c",
-                "-o",
-                "-a",
-                "--smart-case",
-                "-e",
-                "ne",
-                "--",
-                "/r/src/a b"
-            ])
+            os(&["-z", "-c", "-o", "-a", "-i", "-e", "ne", "--", "/r/src/a b"])
         );
     }
 

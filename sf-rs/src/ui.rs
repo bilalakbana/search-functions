@@ -477,7 +477,8 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
     let versions_finder = app.versions.as_ref().and_then(|v| {
         let o = &app.options.versions;
         let opts = crate::model::FindOpts {
-            match_case: o.match_case || v.query.chars().any(char::is_uppercase),
+            match_case: o.match_case,
+            smart_case: o.smart_case,
             whole_word: o.whole_word,
             regex: o.regex,
         };
@@ -657,6 +658,7 @@ fn short(opt: Opt) -> &'static str {
         Opt::WholeWord => "whole word",
         Opt::Regex => "regex",
         Opt::Binary => "binary",
+        Opt::SmartCase => "smart case",
     }
 }
 
@@ -718,6 +720,15 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         0 => {}
         1 => active.push("1 type off".into()),
         n => active.push(format!("{n} types off")),
+    }
+    // Ctrl-P: the files searched in, when not all
+    match app
+        .chosen_of(app.tab)
+        .filter(|_| app.scope.is_none() && app.tab.searches())
+    {
+        Some(c) if c.on.len() == 1 => active.push("1 file chosen".into()),
+        Some(c) => active.push(format!("{} files chosen", c.on.len())),
+        None => {}
     }
     let extra = app.extra_options();
     if !extra.is_empty() {
@@ -834,6 +845,7 @@ fn footer_items(tab: Tab, editor: &str) -> Vec<String> {
             "Enter open",
             "^S options",
             "^Alt-F filter",
+            "^P files",
             "^O",
             "^T in file",
             "^U/^G diff",
@@ -1051,6 +1063,17 @@ fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLa
                 ])
             }
             PopupRow::Version(hash, on) => version_line(app, hash, check(*on)),
+            PopupRow::AllFiles(on) => Line::from(vec![
+                check(*on),
+                Span::styled(" All files", style(theme::TEXT)),
+            ]),
+            PopupRow::File(path, on) => {
+                let mut spans = vec![check(*on), Span::raw(" ")];
+                spans.extend(crate::items::path_spans(&crate::items::printable(
+                    &path.to_string_lossy(),
+                )));
+                Line::from(spans)
+            }
         };
         lines.push((Some(i), line));
     }
@@ -1058,10 +1081,13 @@ fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLa
         "Space / click · a all types · Esc close"
     } else if rows.iter().any(|r| matches!(r, PopupRow::AllVersions(_))) {
         "Space / click · a all versions · Esc close"
+    } else if rows.iter().any(|r| matches!(r, PopupRow::AllFiles(_))) {
+        "Space / click · a all files · Esc close"
     } else {
         "Space / click · Esc close"
     };
     let title = match app.scope {
+        _ if app.popup_files => " Files to search in ".to_string(),
         _ if app.preview_find.is_some() => " Find options ".to_string(),
         _ if app.versions.is_some() => " Versions options ".to_string(),
         Some(_) => " In file options ".to_string(),
@@ -1212,7 +1238,7 @@ mod tests {
         assert!(find(&buf, "[x] Ignored files").is_some());
         assert!(find(&buf, "[ ] Whole word").is_some());
         assert!(find(&buf, "[x] Regular expression").is_some());
-        assert_eq!(a.layout.popup_rows.len(), 10);
+        assert_eq!(a.layout.popup_rows.len(), 11);
         assert_eq!(
             a.layout.popup_rows[0].0, 0,
             "Matching lines, the popup's first row"
@@ -1513,7 +1539,7 @@ mod tests {
         let (mut a, _) = app(Tab::Content);
         let top = row(&render(&mut a, 200, 24), 0);
         assert!(
-            top.contains("Enter open · ^S options · ^Alt-F filter · ^O nvim"),
+            top.contains("Enter open · ^S options · ^Alt-F filter · ^P files · ^O nvim"),
             "{top:?}"
         );
         let (mut a, _) = app(Tab::Folders);
@@ -2181,6 +2207,25 @@ mod tests {
     }
 
     #[test]
+    fn ctrl_p_shows_the_files_and_says_how_many_are_chosen() {
+        let (mut a, now) = app_with_preview(Tab::Content);
+        let top = row(&render(&mut a, 200, 30), 0);
+        assert!(top.contains("^P files"), "{top:?}");
+        feed(&mut a, &["src/a.c", "docs/b.md"]);
+        a.handle_key(ctrl('p'), now);
+        let buf = render(&mut a, 120, 30);
+        assert!(find(&buf, " Files to search in ").is_some());
+        assert!(find(&buf, "[x] All files").is_some());
+        assert!(find(&buf, "[x] src/a.c").is_some() && find(&buf, "[x] docs/b.md").is_some());
+        assert!(find(&buf, "a all files").is_some());
+        a.popup = Some(2);
+        a.handle_key(key(KeyCode::Char(' ')), now);
+        a.handle_key(key(KeyCode::Esc), now);
+        let input = row(&render(&mut a, 120, 30), 29);
+        assert!(input.contains("1 file chosen"), "{input:?}");
+    }
+
+    #[test]
     fn git_names_ctrl_alt_f_for_versions() {
         let (mut a, _) = app(Tab::Git);
         let top = row(&render(&mut a, 200, 24), 0);
@@ -2403,7 +2448,6 @@ mod tests {
         let buf = render(&mut a, 120, 30);
         assert!(find(&buf, " Find options ").is_some());
         assert!(find(&buf, "Regular expression").is_some());
-        a.handle_key(key(KeyCode::Down), now);
         a.handle_key(key(KeyCode::Char(' ')), now);
         a.handle_key(key(KeyCode::Esc), now);
         let input = row(&render(&mut a, 120, 30), 29);

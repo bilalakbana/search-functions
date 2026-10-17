@@ -175,6 +175,8 @@ pub struct Filter {
     lower: Query,
     /// File types whose items are left out (`file_type`: the extension, None for none).
     hidden_types: Vec<Option<String>>,
+    /// Ctrl-P: only the items of these files (by key) show; None: every one.
+    only: Option<std::collections::HashSet<std::ffi::OsString>>,
     /// Indices of the matching items, in input order; unused while nothing filters (`active`).
     matches: Vec<usize>,
 }
@@ -262,6 +264,30 @@ impl Filter {
         };
     }
 
+    /// Ctrl-P: only the items of these files show (None: every one).
+    pub fn set_only(&mut self, only: Option<std::collections::HashSet<std::ffi::OsString>>) {
+        if only == self.only {
+            return;
+        }
+        self.only = only;
+        let all: Vec<usize> = (0..self.items.len()).collect();
+        self.matches = if self.active() {
+            self.matching(&all)
+        } else {
+            Vec::new()
+        };
+    }
+
+    /// The files of the items (their keys), each once, in their order; hints and notes left out.
+    pub fn files(&self) -> Vec<std::ffi::OsString> {
+        let mut seen = std::collections::HashSet::new();
+        self.items
+            .iter()
+            .filter(|i| i.selectable && seen.insert(&i.key))
+            .map(|i| i.key.clone())
+            .collect()
+    }
+
     /// How many items of each file type there are, the hidden ones too.
     pub fn types(&self) -> TypeCounts {
         let mut counts = BTreeMap::new();
@@ -273,7 +299,7 @@ impl Filter {
 
     /// Whether anything filters: words, or file types left out.
     fn active(&self) -> bool {
-        !self.query.is_empty() || !self.hidden_types.is_empty()
+        !self.query.is_empty() || !self.hidden_types.is_empty() || self.only.is_some()
     }
 
     /// The candidates that match, in their order; large lists split over the cores.
@@ -305,6 +331,13 @@ impl Filter {
     fn is_match(&self, i: usize) -> bool {
         let item = &self.items[i];
         if !self.hidden_types.is_empty() && self.hidden_types.contains(&file_type(&item.key)) {
+            return false;
+        }
+        if self
+            .only
+            .as_ref()
+            .is_some_and(|only| !only.contains(&item.key))
+        {
             return false;
         }
         if !self.lower.matches(&item.haystack()) {

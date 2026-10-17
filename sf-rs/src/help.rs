@@ -75,6 +75,10 @@ const KEYS: &[(&str, &str)] = &[
         "Ctrl-Alt-F",
         "Content, Deep: keep the pattern, typing filters the rows · Git: search every version",
     ),
+    (
+        "Ctrl-P",
+        "Content, Deep: the files to search in, chosen from those listed",
+    ),
     ("Ctrl-L", "hide or show the preview"),
     ("Ctrl-R", "run the list again"),
     ("Alt-↑  Alt-↓", "scroll the preview"),
@@ -113,9 +117,10 @@ const OPTIONS: &[(&str, &str)] = &[
         "All words in the file",
         "ankara izmir: the files with both, on any lines",
     ),
+    ("Match case", "A is not a (else case aside, or Smart case)"),
     (
-        "Match case",
-        "A is not a (else lower case finds both; Ctrl-F: else case aside)",
+        "Smart case",
+        "a pattern with an upper-case letter counts the case (Content, Deep, in a file, Ctrl-F, versions)",
     ),
     (
         "Whole word",

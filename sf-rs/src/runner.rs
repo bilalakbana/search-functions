@@ -446,6 +446,7 @@ mod tests {
             words: vec!["code".into(), "interest".into()],
             regex: true,
             whole_word: false,
+            smart_case: false,
             match_case: false,
         };
         r.start(

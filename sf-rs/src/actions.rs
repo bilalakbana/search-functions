@@ -157,6 +157,10 @@ pub fn perform(
     }
     let platform = &env.platform;
     if tab == Tab::Git {
+        // a versions row (Ctrl-Alt-F): its REV:PATH, as `git show` takes it
+        if let (ActionKind::Copy, Some((rev, path))) = (kind, item.version()) {
+            return copied(platform.copy_text(format!("{rev}:{path}").as_bytes()));
+        }
         let Some(hash) = item.key.to_str().filter(|h| is_hash(h)) else {
             return Outcome::Failed("Not a commit".into());
         };
@@ -914,6 +918,21 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(f.bin.join("wl-copy.stdin")).unwrap(),
             "abcdef1"
+        );
+    }
+
+    #[test]
+    fn a_versions_row_copies_its_version_and_path() {
+        // Git, Ctrl-Alt-F: the row's key is REV:PATH, which `git show` takes as it is
+        let f = fixture("act_versions_copy", false, false);
+        let rev = "0123456789abcdef0123456789abcdef01234567";
+        let raw = format!("{rev}:src/a.c\x009\x00x");
+        let item = parse(ParseKind::Versions, raw.as_bytes(), 0).unwrap();
+        let out = act(&f, ActionKind::Copy, Tab::Git, &item, "");
+        assert_eq!(out, Outcome::Done(Some("Copied to the clipboard".into())));
+        assert_eq!(
+            std::fs::read_to_string(f.bin.join("wl-copy.stdin")).unwrap(),
+            format!("{rev}:src/a.c")
         );
     }
 
