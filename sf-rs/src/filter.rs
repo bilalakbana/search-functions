@@ -1,6 +1,6 @@
 //! Filtering as Bilal's fzf does it (`-i -e --no-sort`): case-insensitive substrings, every word of
-//! the query must match, the input order is kept. File types turned off in Ctrl-S leave their items
-//! out too.
+//! the query must match, with fzf's extended search (`!word`, `^start`, `end$`, `a | b`); the input
+//! order is kept. File types turned off in Ctrl-S leave their items out too.
 
 use std::collections::BTreeMap;
 
@@ -12,14 +12,167 @@ pub type TypeCounts = BTreeMap<Option<String>, usize>;
 /// From this many candidates on, the filter runs on all cores.
 const PARALLEL: usize = 50_000;
 
+/// Where a term of the query is looked for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Kind {
+    Anywhere,
+    /// `^word`
+    Start,
+    /// `word$`
+    End,
+    /// `^word$`
+    Whole,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Term {
+    pub kind: Kind,
+    /// `!word`: the items without it.
+    pub left_out: bool,
+    pub text: String,
+}
+
+impl Term {
+    /// Whether `hay` holds the term's text where its kind says; as fzf, an anchor skips the spaces at
+    /// that end unless the text has one there itself.
+    fn found(&self, hay: &str) -> bool {
+        let t = self.text.as_str();
+        let start = |h: &'_ str| -> usize {
+            if t.starts_with(char::is_whitespace) {
+                0
+            } else {
+                h.len() - h.trim_start().len()
+            }
+        };
+        let end = |h: &'_ str| -> usize {
+            if t.ends_with(char::is_whitespace) {
+                h.len()
+            } else {
+                h.trim_end().len()
+            }
+        };
+        match self.kind {
+            Kind::Anywhere => hay.contains(t),
+            Kind::Start => hay[start(hay)..].starts_with(t),
+            Kind::End => hay[..end(hay)].ends_with(t),
+            Kind::Whole => {
+                let (a, b) = (start(hay), end(hay));
+                a <= b && &hay[a..b] == t
+            }
+        }
+    }
+}
+
+/// What a filter's words mean, read as fzf reads them with `--exact`: every set of terms must match,
+/// a set when any of its terms does (`a | b`), a left-out term (`!a`) when the item lacks it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Query {
+    sets: Vec<Vec<Term>>,
+}
+
+impl Query {
+    /// `typed` as fzf's `parseTerms` reads it (but `'`, which only switches fuzzy matching): words
+    /// apart by spaces, `\ ` a space inside one; in lower case unless the case counts.
+    pub fn parse(typed: &str, match_case: bool) -> Query {
+        let typed = typed.replace("\\ ", "\t");
+        let mut sets = Vec::new();
+        let mut set: Vec<Term> = Vec::new();
+        let (mut next_set, mut after_bar) = (false, false);
+        for token in typed.split(' ').filter(|t| !t.is_empty()) {
+            let token = token.replace('\t', " ");
+            let token = if match_case {
+                token
+            } else {
+                token.to_lowercase()
+            };
+            if !set.is_empty() && !after_bar && token == "|" {
+                next_set = false;
+                after_bar = true;
+                continue;
+            }
+            after_bar = false;
+            let mut text = token.as_str();
+            let left_out = text.starts_with('!');
+            if left_out {
+                text = &text[1..];
+            }
+            let mut kind = Kind::Anywhere;
+            if text != "$" && text.ends_with('$') {
+                kind = Kind::End;
+                text = &text[..text.len() - 1];
+            }
+            if let Some(rest) = text.strip_prefix('^') {
+                kind = if kind == Kind::End {
+                    Kind::Whole
+                } else {
+                    Kind::Start
+                };
+                text = rest;
+            }
+            if text.is_empty() {
+                continue;
+            }
+            if next_set {
+                sets.push(std::mem::take(&mut set));
+            }
+            set.push(Term {
+                kind,
+                left_out,
+                text: text.to_string(),
+            });
+            next_set = true;
+        }
+        if !set.is_empty() {
+            sets.push(set);
+        }
+        Query { sets }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.sets.is_empty()
+    }
+
+    pub fn matches(&self, hay: &str) -> bool {
+        self.sets
+            .iter()
+            .all(|set| set.iter().any(|t| t.found(hay) != t.left_out))
+    }
+
+    /// The terms an item shows (the red marks): none left out.
+    pub fn shown_terms(&self) -> impl Iterator<Item = &Term> {
+        self.sets.iter().flatten().filter(|t| !t.left_out)
+    }
+
+    /// Only the sets without a left-out term: what an item has to match in lower case too.
+    fn without_left_out(mut self) -> Query {
+        self.sets.retain(|set| set.iter().all(|t| !t.left_out));
+        self
+    }
+
+    /// The words when every set is one word looked for anywhere; else None.
+    fn plain_words(&self) -> Option<Vec<&str>> {
+        self.sets
+            .iter()
+            .map(|set| match set.as_slice() {
+                [t] if t.kind == Kind::Anywhere && !t.left_out => Some(t.text.as_str()),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
 #[derive(Default)]
 pub struct Filter {
     items: Vec<Item>,
-    words: Vec<String>,
+    /// The query as typed.
+    typed: String,
     /// Ctrl-S, Match case: the case of the words counts.
     match_case: bool,
-    /// The words as typed, while their case counts; else empty.
-    exact: Vec<String>,
+    /// What the items must match: in lower case, or as typed while the case counts.
+    query: Query,
+    /// What an item's lower-case text must match first: the query, or while the case counts its sets
+    /// without a left-out word (a quick pass before the text is made).
+    lower: Query,
     /// File types whose items are left out (`file_type`: the extension, None for none).
     hidden_types: Vec<Option<String>>,
     /// Indices of the matching items, in input order; unused while nothing filters (`active`).
@@ -52,30 +205,32 @@ impl Filter {
     }
 
     pub fn set_query(&mut self, q: &str) {
-        let words: Vec<String> = q.split_whitespace().map(str::to_lowercase).collect();
-        let exact: Vec<String> = if self.match_case {
-            q.split_whitespace().map(str::to_string).collect()
+        let query = Query::parse(q, self.match_case);
+        let lower = if self.match_case {
+            Query::parse(q, false).without_left_out()
         } else {
-            Vec::new()
+            query.clone()
         };
-        if words == self.words && exact == self.exact {
+        self.typed = q.to_string();
+        if query == self.query && lower == self.lower {
             return;
         }
-        // Every old word inside a new one: the new matches are a subset of the old ones (in lower
-        // case: with the case counting, an item may have the new word and not the old one).
+        // Plain words, every old one inside a new one: the new matches are a subset of the old ones
+        // (in lower case: with the case counting, an item may have the new word and not the old one).
         let narrower = !self.match_case
-            && !self.words.is_empty()
-            && self
-                .words
-                .iter()
-                .all(|o| words.iter().any(|n| n.contains(o.as_str())));
+            && match (self.query.plain_words(), query.plain_words()) {
+                (Some(old), Some(new)) => {
+                    !old.is_empty() && old.iter().all(|o| new.iter().any(|n| n.contains(o)))
+                }
+                _ => false,
+            };
         let candidates = if narrower {
             std::mem::take(&mut self.matches)
         } else {
             (0..self.items.len()).collect()
         };
-        self.words = words;
-        self.exact = exact;
+        self.query = query;
+        self.lower = lower;
         self.matches = if self.active() {
             self.matching(&candidates)
         } else {
@@ -83,21 +238,16 @@ impl Filter {
         };
     }
 
-    /// Whether the case of the words counts; the words are read again.
+    /// Whether the case of the words counts; the query is read again.
     pub fn set_match_case(&mut self, on: bool) {
         if on == self.match_case {
             return;
         }
         self.match_case = on;
-        let words = self.words.clone();
-        let query = if on {
-            // the case typed is gone with the lower-case words: the caller sets the query again
-            words.join(" ")
-        } else {
-            self.exact.join(" ")
-        };
-        self.words.clear(); // forces set_query to filter afresh
-        self.set_query(&query);
+        let typed = std::mem::take(&mut self.typed);
+        self.query = Query::default(); // forces set_query to filter afresh
+        self.lower = Query::default();
+        self.set_query(&typed);
     }
     pub fn set_hidden_types(&mut self, types: Vec<Option<String>>) {
         if types == self.hidden_types {
@@ -123,7 +273,7 @@ impl Filter {
 
     /// Whether anything filters: words, or file types left out.
     fn active(&self) -> bool {
-        !self.words.is_empty() || !self.hidden_types.is_empty()
+        !self.query.is_empty() || !self.hidden_types.is_empty()
     }
 
     /// The candidates that match, in their order; large lists split over the cores.
@@ -157,15 +307,11 @@ impl Filter {
         if !self.hidden_types.is_empty() && self.hidden_types.contains(&file_type(&item.key)) {
             return false;
         }
-        let hay = item.haystack();
-        if !self.words.iter().all(|w| hay.contains(w.as_str())) {
+        if !self.lower.matches(item.haystack()) {
             return false;
         }
-        // with the case counting, a second look at what the lower-case words let through
-        self.exact.is_empty() || {
-            let text = item.text();
-            self.exact.iter().all(|w| text.contains(w.as_str()))
-        }
+        // with the case counting, a second look at what the lower-case pass let through
+        !self.match_case || self.query.matches(&item.text())
     }
 
     /// The number of matching items.
@@ -210,6 +356,95 @@ mod tests {
         (0..f.len())
             .map(|i| f.get(i).unwrap().key.to_str().unwrap().to_string())
             .collect()
+    }
+
+    /// What `query` lets through of `names`.
+    fn through(names: &[&str], query: &str) -> Vec<String> {
+        let mut f = Filter::new();
+        f.push(items(names));
+        f.set_query(query);
+        shown(&f)
+    }
+
+    #[test]
+    fn fzf_syntax_leaves_out_anchors_and_ors() {
+        let names = [
+            "src/app.rs",
+            "src/tests.rs",
+            "src/app.c",
+            "docs/src.rs",
+            "lib/core.go",
+        ];
+        assert_eq!(
+            through(&names, "src !test .rs$"),
+            ["src/app.rs", "docs/src.rs"]
+        );
+        assert_eq!(through(&names, "^src .rs$"), ["src/app.rs", "src/tests.rs"]);
+        assert_eq!(
+            through(&names, "^src/app.c$"),
+            ["src/app.c"],
+            "^…$: the whole"
+        );
+        assert_eq!(through(&names, "!^src !.rs$"), ["lib/core.go"]);
+        assert_eq!(
+            through(&names, "^src .c$ | go$"),
+            ["src/app.c"],
+            "| joins the terms on either side; the sets must all match"
+        );
+        assert_eq!(through(&names, ".c$ | .go$"), ["src/app.c", "lib/core.go"]);
+    }
+
+    #[test]
+    fn fzf_syntax_edge_cases_as_fzf_reads_them() {
+        let names = ["a b.txt", "a-b.txt", "x|y", "cost$", "!bang"];
+        assert_eq!(
+            through(&names, r"a\ b"),
+            ["a b.txt"],
+            "a backslash keeps the space"
+        );
+        assert_eq!(through(&names, "!"), names, "a lone ! is nothing");
+        assert_eq!(through(&names, "^"), names, "a lone ^ is nothing");
+        assert_eq!(through(&names, "$"), ["cost$"], "a lone $ is the character");
+        assert_eq!(
+            through(&names, "| y"),
+            ["x|y"],
+            "a | with nothing before is the character"
+        );
+        assert_eq!(
+            through(&names, "!!"),
+            ["a b.txt", "a-b.txt", "x|y", "cost$"]
+        );
+        assert_eq!(
+            through(&["  indented"], "^indented"),
+            ["  indented"],
+            "as fzf, after leading spaces"
+        );
+    }
+
+    #[test]
+    fn a_left_out_word_follows_match_case() {
+        let mut f = Filter::new();
+        f.push(items(&["Foo.txt", "foo.txt", "bar"]));
+        f.set_query("!foo");
+        assert_eq!(shown(&f), ["bar"], "case aside");
+        f.set_match_case(true);
+        f.set_query("!Foo");
+        assert_eq!(shown(&f), ["foo.txt", "bar"], "only Foo as typed");
+    }
+
+    #[test]
+    fn a_query_that_widens_filters_every_item_again() {
+        let mut f = Filter::new();
+        f.push(items(&["abc", "xyz"]));
+        f.set_query("a");
+        assert_eq!(shown(&f), ["abc"]);
+        f.set_query("!a");
+        assert_eq!(shown(&f), ["xyz"], "not looked for among the rows with a");
+        f.set_query("!ab");
+        f.set_query("!abc");
+        assert_eq!(shown(&f), ["xyz"]);
+        f.set_query("!abcd");
+        assert_eq!(shown(&f), ["abc", "xyz"]);
     }
 
     #[test]

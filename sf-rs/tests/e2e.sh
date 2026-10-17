@@ -101,6 +101,13 @@ keys Escape
 expect 'types: the list without it'        "Files › .*1 type off +$((n_files - 1))/$n_files"
 keys C-s a Escape
 expect 'types: a turns all on again'       "Files › .*ignored +$n_files/$n_files"
+type_ '^src .txt$'
+expect 'files: fzf ^ and $'                "Files › \\^src \\.txt\\$ .* 3/$n_files"
+type_ ' !evil'
+expect 'files: fzf ! leaves out'           "Files › \\^src \\.txt\\$ !evil .* 2/$n_files"
+clear_query; type_ '.md$ | .bin$'
+expect 'files: fzf | either'               "Files › \\.md\\$ \\| \\.bin\\$ .* 2/$n_files"
+clear_query
 type_ 'main'
 expect 'files: query filters'              "Files › main .* 1/$n_files"
 red_on 'main' && ok 'files: typed text highlighted' || bad 'files: typed text not highlighted'
@@ -147,6 +154,21 @@ clear_query; type_ 'zzznotthere'
 expect 'search: no-match hint'             'No match\. Archives & documents'
 clear_query; type_ 'foo('
 expect 'search: broken pattern shown'      'mismatched'
+keys C-s Down Down Down Down Down Down Down Down Space Escape
+expect 'plain text: named on the input'    'Content › foo\( .*plain text'
+content_saved=$(awk '/^\[/ { s = ($0 == "[content]") } s' "$XDG/sf/config.toml" 2>/dev/null)
+grep -qx 'regex = false' <<< "$content_saved" && ok 'plain text: saved' || bad 'plain text: not saved'
+expect_not 'plain text: foo( is no error'  'mismatched'
+clear_query; type_ 'needle|main'
+expect 'plain text: | is the character'    'No match\.'
+keys C-s Down Down Down Down Down Down Down Down Space Escape
+expect 'regex again: | is either'          'Content › needle\|main .* 5/5'
+clear_query; type_ 'needl'
+expect 'whole word: needl found in needle' 'Content › needl .* 5/5'
+keys C-s Down Down Down Down Down Down Down Space Escape
+expect 'whole word: needl is no word'      'No match\.'
+expect 'whole word: named on the input'    'Content › needl .*whole word'
+keys C-s Down Down Down Down Down Down Down Space Escape
 clear_query; type_ 'needle'
 expect 'search: back to needle'            '5/5'
 keys C-s

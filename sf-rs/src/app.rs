@@ -339,8 +339,21 @@ impl App {
     }
 
     /// What the editor highlights (Ctrl-O, vim's search): words read as a Boolean query become any of
-    /// them (a phrase in quotes as one, a `-word` left out); a pattern goes as it is.
+    /// them (a phrase in quotes as one, a `-word` left out); a pattern goes as it is. With Whole word,
+    /// inside vim's word bounds (very magic `<(…)>`).
     pub fn editor_pattern(&self) -> String {
+        let pattern = self.editor_words();
+        if self.scope.is_none() && self.options.get(self.tab, Opt::WholeWord) && !pattern.is_empty()
+        {
+            format!("<({pattern})>")
+        } else {
+            pattern
+        }
+    }
+
+    /// `editor_pattern` before Whole word. Without Regular expression each part is vim's very nomagic
+    /// (`\V…\v`: only a backslash means something) and words are only apart by spaces, as ugrep gets them.
+    fn editor_words(&self) -> String {
         let words = match self.scope {
             Some(_) => {
                 let f = &self.options.in_file;
@@ -351,6 +364,19 @@ impl App {
                     || self.options.get(self.tab, Opt::WordsInTheFile)
             }
         };
+        let literal =
+            self.scope.is_none() && self.tab.searches() && !self.options.get(self.tab, Opt::Regex);
+        if literal {
+            let as_typed = |t: &str| format!("\\V{}\\v", t.replace('\\', "\\\\"));
+            return if words {
+                let terms: Vec<String> = self.query.split_whitespace().map(as_typed).collect();
+                terms.join("|")
+            } else if self.query.is_empty() {
+                String::new()
+            } else {
+                as_typed(&self.query)
+            };
+        }
         if !words {
             return self.pattern();
         }
@@ -2037,7 +2063,7 @@ pub(crate) mod tests {
         for _ in 0..3 {
             a.handle_key(key(KeyCode::Up), now);
         }
-        assert_eq!(a.popup, Some(7), "the cursor wraps");
+        assert_eq!(a.popup, Some(9), "the cursor wraps");
         a.handle_key(key(KeyCode::Enter), now);
         assert!(a.options.content.match_case, "Match case, the last row");
     }
@@ -2825,6 +2851,45 @@ pub(crate) mod tests {
             a.editor_pattern(),
             "ankara|x y",
             "words: any of them, not the excluded one"
+        );
+    }
+
+    #[test]
+    fn the_editor_finds_whole_words_when_the_tab_does() {
+        let (mut a, _) = app(Tab::Deep);
+        a.query = "config".into();
+        a.options.toggle(Tab::Deep, Opt::WholeWord);
+        assert_eq!(
+            a.editor_pattern(),
+            "<(config)>",
+            "vim's very magic word bounds"
+        );
+        a.options.toggle(Tab::Deep, Opt::WordsOnALine);
+        a.query = "ankara izmir".into();
+        assert_eq!(a.editor_pattern(), "<(ankara|izmir)>");
+        a.switch_tab(Tab::Content);
+        assert_eq!(a.editor_pattern(), "ankara izmir", "Content's own options");
+    }
+
+    #[test]
+    fn the_editor_finds_the_text_as_typed_without_regular_expression() {
+        let (mut a, _) = app(Tab::Content);
+        a.options.toggle(Tab::Content, Opt::Regex);
+        a.query = r"a.b\x".into();
+        assert_eq!(
+            a.editor_pattern(),
+            r"\Va.b\\x\v",
+            "vim's very nomagic, then back"
+        );
+        a.options.toggle(Tab::Content, Opt::WholeWord);
+        assert_eq!(a.editor_pattern(), r"<(\Va.b\\x\v)>");
+        a.options.toggle(Tab::Content, Opt::WholeWord);
+        a.options.toggle(Tab::Content, Opt::WordsOnALine);
+        a.query = "a.b c(".into();
+        assert_eq!(
+            a.editor_pattern(),
+            r"\Va.b\v|\Vc(\v",
+            "any of the words, each as typed"
         );
     }
 

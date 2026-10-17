@@ -119,11 +119,11 @@ const OPTIONS: &[(&str, &str)] = &[
     ),
     (
         "Whole word",
-        "Ctrl-F: not inside a longer word (config, not reconfig)",
+        "Content, Deep, Ctrl-F: not inside a longer word (config, not reconfig)",
     ),
     (
         "Regular expression",
-        "Ctrl-F: what is typed is a regex (Rust's: no look-around)",
+        "Content, Deep: on; off, the text as typed · Ctrl-F: off (Rust's, no look-around)",
     ),
     (
         "All branches",
@@ -145,7 +145,7 @@ const PATTERNS: &[(&str, &str)] = &[
     ("foo|bar", "either"),
     ("^import", "at the start of a line"),
     ("TODO.*fix", "TODO, then fix later on the line"),
-    ("\\bword\\b", "the whole word (or: -- -w)"),
+    ("\\bword\\b", "the whole word (or: Whole word in ⚙ Config)"),
     ("[0-9]{4}-[0-9]{2}", "four digits, a dash, two digits"),
 ];
 
@@ -155,6 +155,16 @@ const WORDS: &[(&str, &str)] = &[
     ("ankara|izmir", "either"),
     ("ankara -izmir", "ankara, not izmir"),
     ("\"ankara izmir\"", "the phrase"),
+];
+
+/// Typing in Files, Folders and Git, and Ctrl-Alt-F's words: fzf's extended search (`-e`).
+const FILTERS: &[(&str, &str)] = &[
+    ("src main", "both, anywhere, case aside"),
+    ("!test", "not test"),
+    ("^src/", "at the start"),
+    (".rs$", "at the end"),
+    (".rs$ | .md$", "either"),
+    ("my\\ file", "a space inside a word"),
 ];
 
 /// The command line examples: the command and what it does.
@@ -274,6 +284,14 @@ pub fn text() -> Text<'static> {
     );
     table(
         &mut lines,
+        "Filters",
+        "Files, Folders, Git, Ctrl-Alt-F: as fzf -e",
+        FILTERS,
+        22,
+        theme::PEACH,
+    );
+    table(
+        &mut lines,
         "Command line",
         "sf --help for the rest",
         EXAMPLES,
@@ -377,6 +395,32 @@ mod tests {
                 crate::cli::parse(&args)
             );
         }
+    }
+
+    #[test]
+    fn the_filter_examples_do_what_they_say() {
+        let names = ["src/main.rs", "src/test.rs", "docs/my file.md", "README.md"];
+        let through = |q: &str| -> Vec<&str> {
+            let query = crate::filter::Query::parse(q, false);
+            names
+                .iter()
+                .copied()
+                .filter(|n| query.matches(&n.to_lowercase()))
+                .collect()
+        };
+        let want: [&[&str]; 6] = [
+            &["src/main.rs"],
+            &["src/main.rs", "docs/my file.md", "README.md"],
+            &["src/main.rs", "src/test.rs"],
+            &["src/main.rs", "src/test.rs"],
+            &["src/main.rs", "src/test.rs", "docs/my file.md", "README.md"],
+            &["docs/my file.md"],
+        ];
+        assert_eq!(FILTERS.len(), want.len());
+        for ((q, what), want) in FILTERS.iter().zip(want) {
+            assert_eq!(through(q), want, "{q}: {what}");
+        }
+        assert!(plain(&text()).contains("!test"));
     }
 
     #[test]

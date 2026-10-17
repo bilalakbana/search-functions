@@ -104,7 +104,8 @@ in Git it shows the whole commit (delta, paged). The app starts in the current d
 Details settled from the existing setup and the prototype:
 
 - Filtering in Files, Folders and Git matches as Bilal's fzf does (`FZF_DEFAULT_OPTS="-i -e"`): case-insensitive
-  substring, words separated by spaces must all match; no fuzzy matching. Every occurrence of the typed words is
+  substring, words separated by spaces must all match; no fuzzy matching (fzf's `!`, `^`, `$`, `|` since
+  2026-10-17: "Other search tools' options"). Every occurrence of the typed words is
   drawn red in the rows (Bilal, 2026-10-17: "yazdığım nereye tekabül etmiş bilmiyorum").
 - Search with an empty query lists every text file, as `ugrep-fzf` does (`ugrep -rl … -e ''`), whatever the
   options: every line of every file, or every PDF converted, would be far too much (Bilal, 2026-10-17: the files
@@ -482,3 +483,35 @@ mockups: all three options, saved, red marks):
   programs on Alt+C and Alt+R.
 - Fixed on the way: finding from Content's result filter (Ctrl-Alt-F) showed the filter's "· filter: …" on the
   input line next to what is found.
+
+Other search tools' options (2026-10-17; Bilal asked what other tools offer and for a few proposals; surveyed: VS Code's
+Search view (its source: Match Case, Match Whole Word, Use Regular Expression, files to include / exclude, Use
+Exclude Settings and Ignore Files, only changed files), Notepad++'s Find in Files (Filters, Directory, In all
+sub-folders, In hidden folders, Match whole word only, Match case), Everything (`!`, `|`, `case:`, `regex:`,
+`ext:`, `size:`, `dm:`; Match Whole Words, Match Path, Match Diacritics), Double Commander's Find files (masks,
+excluded folders, depth, symlinks, archives, NOT containing, case, regex, hex, encodings, date, size,
+attributes, duplicates), Dolphin 25.04 (Filename / Content, From Here / Everywhere, Any Type / Documents / Images /
+Audio / Video, Any Date … This Year, Any Rating), ugrep 7.8.5, ripgrep 15.2, fd 10.3 and fzf 0.74; he chose three
+of four proposals, not "Newest first" in Files):
+
+- Whole word in Content and Deep (off): ugrep's `-w` in the list, the preview's count and its numbered matches
+  (`commands::Reading`), and Ctrl-O's vim pattern inside `<(…)>`. ugrep's `-w` works with the Boolean query.
+- Filters read as fzf's extended search with `--exact` (`filter::Query`, ported from fzf's `parseTerms`): words
+  must all match, `!word` leaves out, `^word` at the start, `word$` at the end, `^word$` the whole, a lone `|`
+  joins the terms on either side, `\ ` is a space in a word; a lone `!` or `^` is nothing, a lone `$` and a `|`
+  with nothing before it are characters, anchors skip spaces at their end (as fzf). fzf's `'` is left out (it
+  switches fuzzy matching, which sf has not). Files, Folders, Git, Ctrl-Alt-F and `--print`; no option (his fzf
+  functions had it). The red marks follow: anchored terms only where they matched, a left-out word never. With
+  Match case a quick lower-case pass checks only the sets without a left-out word (`!Foo` must keep `foo`), then
+  the text as typed. 1 M rows still filter in at most 11 ms.
+- Regular expression in Content and Deep (on, also for a config without it): off, sf puts a backslash before
+  ugrep's special characters (`\ . ^ $ | ( ) [ ] { } * + ? - "`; `ugrep_literal`), which ugrep 7.8.5 reads as
+  the characters in a regular expression and in a Boolean query alike (tried); its `-F` cannot be used, as
+  `-F --bool 'foo( a.b'` finds nothing. Ctrl-O's vim gets `\V…\v` (very nomagic). The input line names
+  "plain text" when it is off and nothing when on (a default named on every line crowded the hint). Ctrl-T's
+  search inside one file keeps reading a pattern (its own options).
+- Not taken, with the reason given to Bilal: Newest first in Files (fd does not sort: every file's time read
+  before the list shows, measured 567 324 files listed in 0.29 s, their lstat 1.5 s more in Python), include /
+  exclude glob fields (a text field in the popup; file types and `-- -g '!vendor/'` cover it), files NOT
+  containing, depth, symlinks, size, attributes, hex, encodings, duplicates (rarely needed; Deep searches
+  binaries), ratings and tags (no such data), only changed files (the Git tab and Ctrl-G).

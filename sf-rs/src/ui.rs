@@ -13,6 +13,7 @@ use ratatui::widgets::{
 };
 
 use crate::app::{App, PopupRow, ScreenLayout};
+use crate::filter::{Kind, Query, Term};
 use crate::model::{Opt, Tab};
 use crate::theme;
 
@@ -422,16 +423,8 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
         None if app.tab.searches() => "",
         None => &app.query,
     };
-    let words: Vec<String> = typed
-        .split_whitespace()
-        .map(|w| {
-            if match_case {
-                w.to_string()
-            } else {
-                w.to_lowercase()
-            }
-        })
-        .collect();
+    let query = Query::parse(typed, match_case);
+    let terms: Vec<Term> = query.shown_terms().cloned().collect();
     for i in app.offset..app.offset + visible {
         let Some(item) = app.filter.get(i) else { break };
         y -= 1;
@@ -444,7 +437,7 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
         };
         let mut spans: Vec<Span> = [marker]
             .into_iter()
-            .chain(highlight(item.display(), &words, match_case).spans)
+            .chain(highlight(item.display(), &terms, match_case).spans)
             .collect();
         if selected {
             // the band under every span: coloured engine output carries its own (reset) background
@@ -465,10 +458,10 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
     inner
 }
 
-/// Every occurrence of every word (lower case) in `line`, case-insensitive, drawn red and bold.
-/// `line` with every occurrence of `words` red: in any case, or (`match_case`) as typed.
-fn highlight(line: Line<'static>, words: &[String], match_case: bool) -> Line<'static> {
-    if words.is_empty() {
+/// `line` with the filter's terms red and bold where they are found (every occurrence, or at the start
+/// or end for an anchored one): in any case (the terms in lower case), or (`match_case`) as typed.
+fn highlight(line: Line<'static>, terms: &[Term], match_case: bool) -> Line<'static> {
+    if terms.is_empty() {
         return line;
     }
     let chars: Vec<(usize, char)> = line
@@ -491,13 +484,31 @@ fn highlight(line: Line<'static>, words: &[String], match_case: bool) -> Line<'s
         }
     }
     let mut hit = vec![false; chars.len()];
-    for word in words {
-        let w: Vec<char> = word.chars().collect();
+    // where an anchored term may start and end: past the spaces at that end, as the filter reads it
+    let first = lower.iter().take_while(|c| c.is_whitespace()).count();
+    let last = lower.len() - lower.iter().rev().take_while(|c| c.is_whitespace()).count();
+    for term in terms {
+        let w: Vec<char> = term.text.chars().collect();
         if w.is_empty() || w.len() > lower.len() {
             continue;
         }
+        let at_start = |start: usize| start == if w[0].is_whitespace() { 0 } else { first };
+        let at_end = |start: usize| {
+            start + w.len()
+                == if w[w.len() - 1].is_whitespace() {
+                    lower.len()
+                } else {
+                    last
+                }
+        };
         for start in 0..=lower.len() - w.len() {
-            if lower[start..start + w.len()] == w[..] {
+            let placed = match term.kind {
+                Kind::Anywhere => true,
+                Kind::Start => at_start(start),
+                Kind::End => at_end(start),
+                Kind::Whole => at_start(start) && at_end(start),
+            };
+            if placed && lower[start..start + w.len()] == w[..] {
                 for &k in &from[start..start + w.len()] {
                     hit[k] = true;
                 }
@@ -587,10 +598,16 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         Some(_) => app.options.in_file_list(), // inside one file, its own
         None => app.options.list(app.tab),
     };
+    let finding = app.preview_find.is_some();
+    // a pattern is a regular expression unless said otherwise: only "plain text" is named
     let mut active: Vec<String> = options
         .into_iter()
-        .filter(|(_, on)| *on)
-        .map(|(o, _)| short(o).to_string())
+        .filter_map(|(o, on)| match (o, on) {
+            (Opt::Regex, true) if !finding => None,
+            (Opt::Regex, false) if !finding => Some("plain text".to_string()),
+            (o, true) => Some(short(o).to_string()),
+            _ => None,
+        })
         .collect();
     match app.types_off_count() {
         0 => {}
@@ -1038,7 +1055,9 @@ mod tests {
         assert!(find(&buf, "[ ] Archives & documents").is_some());
         assert!(find(&buf, "[ ] Hidden files").is_some());
         assert!(find(&buf, "[x] Ignored files").is_some());
-        assert_eq!(a.layout.popup_rows.len(), 8);
+        assert!(find(&buf, "[ ] Whole word").is_some());
+        assert!(find(&buf, "[x] Regular expression").is_some());
+        assert_eq!(a.layout.popup_rows.len(), 10);
         assert_eq!(
             a.layout.popup_rows[0].0, 0,
             "Matching lines, the popup's first row"
@@ -1366,6 +1385,19 @@ mod tests {
     }
 
     #[test]
+    fn the_input_line_names_plain_text_not_the_default_regex() {
+        let (mut a, _) = app(Tab::Content);
+        let input = row(&render(&mut a, 120, 24), 23);
+        assert!(
+            !input.contains("regex"),
+            "the default goes unsaid: {input:?}"
+        );
+        a.options.toggle(Tab::Content, Opt::Regex);
+        let input = row(&render(&mut a, 120, 24), 23);
+        assert!(input.contains("ignored · plain text"), "{input:?}");
+    }
+
+    #[test]
     fn input_shows_active_options_and_count() {
         let (mut a, _) = app(Tab::Content);
         a.options.content.archives = true;
@@ -1612,6 +1644,40 @@ mod tests {
             theme::SURFACE,
             "the band stays under a highlight"
         );
+    }
+
+    #[test]
+    fn fzf_syntax_marks_only_where_it_found() {
+        let (mut a, now) = app(Tab::Files);
+        feed(&mut a, &["src/src.rs", "src/app.rs"]);
+        for c in "^src .rs$ !app".chars() {
+            a.handle_key(key(KeyCode::Char(c)), now);
+        }
+        let buf = render(&mut a, 80, 24);
+        assert!(find(&buf, "src/app.rs").is_none(), "left out");
+        assert_eq!(
+            fg_at(&buf, "src/src.rs", 0),
+            theme::RED,
+            "^src: at the start"
+        );
+        assert_ne!(
+            fg_at(&buf, "src/src.rs", 4),
+            theme::RED,
+            "not the src after it"
+        );
+        assert_eq!(fg_at(&buf, "src/src.rs", 7), theme::RED, ".rs$: at the end");
+        for c in "\x08\x08\x08\x08 | a | !b".chars() {
+            let code = if c == '\x08' {
+                KeyCode::Backspace
+            } else {
+                KeyCode::Char(c)
+            };
+            a.handle_key(key(code), now);
+        }
+        // "^src .rs$ | a | !b": the bar and the left-out word are not marked
+        let buf = render(&mut a, 80, 24);
+        assert_eq!(fg_at(&buf, "src/app.rs", 4), theme::RED, "a of app");
+        assert_ne!(fg_at(&buf, "src/app.rs", 3), theme::RED, "/ is no word");
     }
 
     #[test]

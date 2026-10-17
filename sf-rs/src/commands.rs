@@ -137,6 +137,23 @@ struct Reading {
     words_on_a_line: bool,
     /// ... or every one somewhere in the file (`--bool --files`).
     words_in_the_file: bool,
+    /// Not inside a longer word (`-w`).
+    whole_word: bool,
+    /// The pattern is text as typed, not a regular expression (`ugrep_literal`).
+    literal: bool,
+}
+
+/// `text` for ugrep as it is typed: every character its regular expressions or Boolean queries read
+/// otherwise gets a backslash.
+fn ugrep_literal(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    for c in text.chars() {
+        if "\\.^$|()[]{}*+?-\"".contains(c) {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Where a command takes the case and words options (`Reading::flags`).
@@ -155,7 +172,19 @@ impl Reading {
         if self.words_in_the_file {
             flags.push("--files");
         }
+        if self.whole_word {
+            flags.push("-w");
+        }
         flags
+    }
+
+    /// What ugrep gets after `-e`: the query, or its text as typed.
+    fn pattern(self, query: &str) -> String {
+        if self.literal {
+            ugrep_literal(query)
+        } else {
+            query.to_string()
+        }
     }
 
     /// `opts` with READING replaced by the flags.
@@ -172,10 +201,12 @@ impl Search {
         // list: every line of every file, or every PDF converted, would be far too much. Content lists
         // the text files, Deep every file.
         let pattern = !query.is_empty();
-        let reading = |match_case, on_a_line, in_the_file| Reading {
+        let reading = |match_case, on_a_line, in_the_file, whole_word, regex: bool| Reading {
             match_case,
             words_on_a_line: pattern && on_a_line,
             words_in_the_file: pattern && in_the_file,
+            whole_word: pattern && whole_word,
+            literal: pattern && !regex,
         };
         if tab == Tab::Deep {
             let d = &opts.deep;
@@ -185,7 +216,13 @@ impl Search {
                 archives: pattern,
                 documents: pattern && d.documents,
                 binaries: true,
-                reading: reading(d.match_case, d.words_on_a_line, d.words_in_the_file),
+                reading: reading(
+                    d.match_case,
+                    d.words_on_a_line,
+                    d.words_in_the_file,
+                    d.whole_word,
+                    d.regex,
+                ),
             };
         }
         let c = &opts.content;
@@ -201,7 +238,13 @@ impl Search {
             documents: archives,
             // with Archives & documents the file list has binaries too, the lists of matches not
             binaries: archives && !matching_lines && !each_match,
-            reading: reading(c.match_case, c.words_on_a_line, c.words_in_the_file),
+            reading: reading(
+                c.match_case,
+                c.words_on_a_line,
+                c.words_in_the_file,
+                c.whole_word,
+                c.regex,
+            ),
         }
     }
 }
@@ -222,6 +265,8 @@ pub fn in_file_plan(
         match_case: opts.match_case,
         words_on_a_line: words && opts.words_on_a_line,
         words_in_the_file: words && opts.words_in_the_file,
+        whole_word: false,
+        literal: false,
     };
     let pattern = in_file_pattern(query, opts);
     // -H: the name even for one file, so the rows read as Content's matching lines
@@ -376,9 +421,12 @@ pub fn list_plan_with(
                 ParseKind::SearchFiles { archives }
             };
             ListPlan::Run {
-                cmd: cmd
-                    .args(extra)
-                    .args(["--exclude-dir=.git", "-e", query, "."]),
+                cmd: cmd.args(extra).args([
+                    "--exclude-dir=.git",
+                    "-e",
+                    &reading.pattern(query),
+                    ".",
+                ]),
                 kind,
             }
         }
@@ -518,7 +566,7 @@ pub fn preview_plan_with(
                     .args(s.reading.into(opts))
                     .args(extra)
                     .arg("-e")
-                    .arg(query)
+                    .arg(s.reading.pattern(query))
                     .arg("--")
                     .arg(&path)
             };
@@ -984,6 +1032,87 @@ mod tests {
                 "{tab:?}: {:?}",
                 cmd.args
             );
+        }
+    }
+
+    #[test]
+    fn whole_word_goes_to_the_list_the_count_and_the_matches() {
+        for tab in [Tab::Content, Tab::Deep] {
+            let mut o = Options::default();
+            let (cmd, _) = run(list_plan(tab, &o, "config", &engines()));
+            assert!(!has(&cmd, "-w"), "{tab:?}: off by default");
+            o.toggle(tab, Opt::WholeWord);
+            let (cmd, _) = run(list_plan(tab, &o, "config", &engines()));
+            assert!(has(&cmd, "-w"), "{tab:?}: {:?}", cmd.args);
+            let PreviewPlan::Numbered {
+                lines,
+                binary,
+                header,
+                ..
+            } = preview_plan(
+                tab,
+                &o,
+                "config",
+                &item("a.txt", None),
+                72,
+                &engines(),
+                Path::new("/r"),
+            )
+            else {
+                panic!("{tab:?}")
+            };
+            let count = header.matches.unwrap();
+            for c in [&lines, &binary, &count.text, &count.binary] {
+                assert!(has(c, "-w"), "{tab:?}: {:?}", c.args);
+            }
+            let (cmd, _) = run(list_plan(tab, &o, "", &engines()));
+            assert!(!has(&cmd, "-w"), "{tab:?}: no pattern, every file");
+        }
+    }
+
+    #[test]
+    fn without_regular_expression_the_pattern_is_searched_as_typed() {
+        assert_eq!(
+            ugrep_literal(r#"a.b(c)[d]{2}*+?|^$\-" x"#),
+            r#"a\.b\(c\)\[d\]\{2\}\*\+\?\|\^\$\\\-\" x"#
+        );
+        for tab in [Tab::Content, Tab::Deep] {
+            let mut o = Options::default();
+            let pattern_of = |c: &Cmd| {
+                let i = c.args.iter().position(|a| a == "-e").expect("-e");
+                c.args[i + 1].clone()
+            };
+            let (cmd, _) = run(list_plan(tab, &o, "a.b(", &engines()));
+            assert_eq!(
+                pattern_of(&cmd),
+                "a.b(",
+                "{tab:?}: a regular expression by default"
+            );
+            o.toggle(tab, Opt::Regex);
+            let (cmd, _) = run(list_plan(tab, &o, "a.b(", &engines()));
+            assert_eq!(pattern_of(&cmd), r"a\.b\(", "{tab:?}");
+            let PreviewPlan::Numbered {
+                lines,
+                binary,
+                header,
+                ..
+            } = preview_plan(
+                tab,
+                &o,
+                "a.b(",
+                &item("a.txt", None),
+                72,
+                &engines(),
+                Path::new("/r"),
+            )
+            else {
+                panic!("{tab:?}")
+            };
+            let count = header.matches.unwrap();
+            for c in [&lines, &binary, &count.text, &count.binary] {
+                assert_eq!(pattern_of(c), r"a\.b\(", "{tab:?}: {:?}", c.args);
+            }
+            assert_eq!(count.pattern, "a.b(", "the header shows it as typed");
         }
     }
 

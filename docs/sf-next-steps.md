@@ -41,7 +41,9 @@ How Bilal starts the next session (paste):
   - git keys in tmux windows, Whole files, Alt-F, Ctrl-T in views (v0.8.0): `cargo test` 374; `tests/e2e.sh` 156/156.
   - Ctrl-F finds in the preview, Ctrl-Alt-F filters (Alt-F is KDE's; v0.8.1): `cargo test` 375; `tests/e2e.sh` 156/156.
   - Ctrl-F as Notepad++'s Find (marks, count, Match case / Whole word / Regular expression): `cargo test` 399;
-    `tests/e2e.sh` 161/161.
+    `tests/e2e.sh` 161/161 (commit fedd98f, not pushed).
+  - Whole word and Regular expression in Content/Deep, fzf's syntax in the filters: `cargo test` 410;
+    `tests/e2e.sh` 172/172; speed (release, ignored) 1 M rows ≤ 11 ms.
   - Step 2 (same day): `cargo test` 243; `tests/e2e.sh` 86/86 (with a release package's layout);
     `tests/sub_functions.sh NEW_EMPTY_DIR` 7/7 (`-L sfrs-sub-functions`); `python3 -I packaging/test_build.py` 7;
     `packaging/test_package.sh PACKAGE NEW_EMPTY_DIR` all passed on Ubuntu 22.04, Debian 12, Ubuntu 24.04.
@@ -77,7 +79,7 @@ How Bilal starts the next session (paste):
 | `engines.rs` | finds fd/fdfind, bat/batcat, ugrep, ugrep+, git, delta, file, ls in PATH; `$BAT_THEME`; `bundle_dir` / `with_bundle` (a release package's `lib/sf`, first in PATH) |
 | `commands.rs` | pure: `list_plan` (engine command per tab/options/query; `Search` says how Content or Deep searches) and `preview_plan` (Sniff/Numbered/Run/Pipe, Content/Deep `Header` with `ugrep -c -o` counts) |
 | `items.rs` | compact rows (`Look::{Path, Match, Styled}`, ~160 B/row), parsers, `path_spans` (folders blue, `/` yellow, name green), `printable`, `ansi_text` (no escape gets through) |
-| `filter.rs` | fzf `-i -e --no-sort` semantics, parallel from 50 000 rows |
+| `filter.rs` | fzf `-i -e --no-sort` semantics with its extended search (`Query`: `!`, `^`, `$`, `\|`), parallel from 50 000 rows |
 | `find.rs` | Ctrl-F's `Finder`: where a preview line holds the text, by `[find]` (Match case, Whole word, Regular expression through the `regex` crate) |
 | `runner.rs` | list child in its own process group (kill on cancel), bounded records (64 KiB), batches, sorting/numbering |
 | `preview.rs` | preview worker (newest wins, kills the old), `is_text`, header lines, Content's numbered matches (`numbered_blocks`, `numbered_lines`) |
@@ -233,7 +235,9 @@ The ask was:
 - Mind: crossterm/tmux/KDE key conflicts (memory feedback-sf-keys-vs-tmux-root: check `tmux list-keys -T
   root`, `~/.config/kglobalshortcutsrc`, `ghostty +list-keybinds --default`).
 
-B. After A: what other search tools offer in their options (ripgrep/ugrep flags, fzf, VS Code's search
+B. Built 2026-10-17, uncommitted; what and why: `docs/sf-tui-design.md` → "Other search tools' options" (his
+choice: Whole word, fzf's syntax in the filters, Regular expression in Content/Deep; not Newest first). The ask was:
+After A: what other search tools offer in their options (ripgrep/ugrep flags, fzf, VS Code's search
   panel: include/exclude globs, whole word, regex, preserve case; Everything; Notepad++ Find in Files;
   Double Commander / Dolphin search), and propose the few that would help sf. Bilal's taste: minimal, no
   feature overload; give a recommendation with reasons and one alternative each; ask before building.

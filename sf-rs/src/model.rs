@@ -152,6 +152,10 @@ pub struct ContentOpts {
     /// The words of the pattern all on one line; never on together with `words_in_the_file`.
     pub words_on_a_line: bool,
     pub words_in_the_file: bool,
+    /// The pattern not inside a longer word (`-w`).
+    pub whole_word: bool,
+    /// What is typed is a regular expression; off: the text as typed.
+    pub regex: bool,
     pub match_case: bool,
 }
 
@@ -164,6 +168,8 @@ pub struct DeepOpts {
     pub ignored: bool,
     pub words_on_a_line: bool,
     pub words_in_the_file: bool,
+    pub whole_word: bool,
+    pub regex: bool,
     pub match_case: bool,
 }
 
@@ -221,6 +227,8 @@ impl Default for ContentOpts {
             ignored: true,
             words_on_a_line: false,
             words_in_the_file: false,
+            whole_word: false,
+            regex: true,
             match_case: false,
         }
     }
@@ -235,6 +243,8 @@ impl Default for DeepOpts {
             ignored: true,
             words_on_a_line: false,
             words_in_the_file: false,
+            whole_word: false,
+            regex: true,
             match_case: false,
         }
     }
@@ -299,6 +309,8 @@ impl Options {
                 Opt::Ignored,
                 Opt::WordsOnALine,
                 Opt::WordsInTheFile,
+                Opt::WholeWord,
+                Opt::Regex,
                 Opt::MatchCase,
             ],
             Tab::Deep => &[
@@ -308,6 +320,8 @@ impl Options {
                 Opt::Ignored,
                 Opt::WordsOnALine,
                 Opt::WordsInTheFile,
+                Opt::WholeWord,
+                Opt::Regex,
                 Opt::MatchCase,
             ],
             Tab::Git => &[Opt::AllBranches, Opt::WholeFiles, Opt::MatchCase],
@@ -397,9 +411,13 @@ impl Options {
             (Tab::Files, Opt::MatchCase) => Some(&mut self.files.match_case),
             (Tab::Content, Opt::WordsOnALine) => Some(&mut self.content.words_on_a_line),
             (Tab::Content, Opt::WordsInTheFile) => Some(&mut self.content.words_in_the_file),
+            (Tab::Content, Opt::WholeWord) => Some(&mut self.content.whole_word),
+            (Tab::Content, Opt::Regex) => Some(&mut self.content.regex),
             (Tab::Content, Opt::MatchCase) => Some(&mut self.content.match_case),
             (Tab::Deep, Opt::WordsOnALine) => Some(&mut self.deep.words_on_a_line),
             (Tab::Deep, Opt::WordsInTheFile) => Some(&mut self.deep.words_in_the_file),
+            (Tab::Deep, Opt::WholeWord) => Some(&mut self.deep.whole_word),
+            (Tab::Deep, Opt::Regex) => Some(&mut self.deep.regex),
             (Tab::Deep, Opt::MatchCase) => Some(&mut self.deep.match_case),
             (Tab::Folders, Opt::MatchCase) => Some(&mut self.folders.match_case),
             (Tab::Git, Opt::MatchCase) => Some(&mut self.git.match_case),
@@ -465,6 +483,8 @@ mod tests {
                 Opt::Ignored,
                 Opt::WordsOnALine,
                 Opt::WordsInTheFile,
+                Opt::WholeWord,
+                Opt::Regex,
                 Opt::MatchCase
             ]
         );
@@ -517,6 +537,8 @@ mod tests {
                 (Opt::Ignored, true),
                 (Opt::WordsOnALine, false),
                 (Opt::WordsInTheFile, false),
+                (Opt::WholeWord, false),
+                (Opt::Regex, true),
                 (Opt::MatchCase, false)
             ]
         );
@@ -563,6 +585,8 @@ mod tests {
                 Opt::Ignored,
                 Opt::WordsOnALine,
                 Opt::WordsInTheFile,
+                Opt::WholeWord,
+                Opt::Regex,
                 Opt::MatchCase
             ]
         );
@@ -575,6 +599,8 @@ mod tests {
                 Opt::Ignored,
                 Opt::WordsOnALine,
                 Opt::WordsInTheFile,
+                Opt::WholeWord,
+                Opt::Regex,
                 Opt::MatchCase
             ]
         );
@@ -591,6 +617,19 @@ mod tests {
             assert!(!o.get(tab, Opt::MatchCase), "{tab:?}: off, as before");
         }
         assert!(!o.get(Tab::Content, Opt::WordsOnALine) && !o.get(Tab::Deep, Opt::WordsOnALine));
+        assert!(
+            !o.get(Tab::Content, Opt::WholeWord) && !o.get(Tab::Deep, Opt::WholeWord),
+            "off, as before"
+        );
+        assert!(
+            o.get(Tab::Content, Opt::Regex) && o.get(Tab::Deep, Opt::Regex),
+            "a pattern is a regular expression, as before"
+        );
+        let old: Options = toml::from_str("[content]\nmatch_case = true\n[deep]\n").unwrap();
+        assert!(
+            old.content.regex && old.deep.regex,
+            "also in a config from before"
+        );
     }
 
     #[test]
