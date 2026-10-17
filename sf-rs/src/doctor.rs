@@ -108,6 +108,15 @@ pub fn report(env: &Env, engines: &Engines, config: Option<&Path>, run: Run) -> 
     row("Clipboard", &clipboard);
 
     row("Engines", "");
+    // Ctrl-O's editor where it is: `$EDITOR` may name a path or a program in PATH
+    let editor = env.editor.as_ref().and_then(|e| {
+        let given = Path::new(&e.program);
+        if given.components().count() > 1 {
+            Some(given.to_path_buf())
+        } else {
+            given.to_str().and_then(program)
+        }
+    });
     let list: [(&str, Option<PathBuf>, &str); 10] = [
         ("fd", engines.fd.clone(), "needed for Files and Folders"),
         ("bat", engines.bat.clone(), "file previews"),
@@ -117,7 +126,7 @@ pub fn report(env: &Env, engines: &Engines, config: Option<&Path>, run: Run) -> 
         ("delta", engines.delta.clone(), "commits and diffs"),
         ("file", engines.file.clone(), "previews of binary files"),
         ("ls", engines.ls.clone(), "folder previews"),
-        ("nvim", program("nvim"), "needed for Ctrl-O"),
+        ("editor", editor, "Ctrl-O: install nvim or set $EDITOR"),
         (
             "tmux",
             program("tmux"),
@@ -322,6 +331,7 @@ mod tests {
         Setup {
             bin,
             env: Env {
+                editor: crate::actions::find_editor(&path, None, None),
                 platform: Platform { path, ..platform },
                 sub,
             },
@@ -442,7 +452,7 @@ mod tests {
         );
         assert!(r.lines().all(|l| !l.ends_with(' ')), "{r:?}");
         assert!(line(&r, "delta").starts_with("not found"), "{r}");
-        assert!(line(&r, "nvim").contains("Ctrl-O"), "{r}");
+        assert!(line(&r, "editor").contains("Ctrl-O"), "{r}");
         assert!(!line(&r, "ugrep").contains("older"), "{r}");
     }
 

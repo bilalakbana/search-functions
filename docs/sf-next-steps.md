@@ -27,6 +27,7 @@ How Bilal starts the next session (paste):
     powershell.exe/wslpath, fresh `XDG_CONFIG_HOME`; WSL mode, OSC 52 through tmux, the commands, `sf doctor`.
   - `tests/platform_action.sh NEW_EMPTY_DIR` → 20/20: the fzf functions' wrapper (with sf, an old sf, no sf) and
     `sub-functions/file_list` in a private tmux server (`-L sfrs-platform-action`).
+  - After v0.1.0 (command line, `--print`, Ctrl-O's editor): `cargo test` 261; `tests/e2e.sh` 98/98.
   - Step 2 (same day): `cargo test` 243; `tests/e2e.sh` 86/86 (with a release package's layout);
     `tests/sub_functions.sh NEW_EMPTY_DIR` 7/7 (`-L sfrs-sub-functions`); `python3 -I packaging/test_build.py` 7;
     `packaging/test_package.sh PACKAGE NEW_EMPTY_DIR` all passed on Ubuntu 22.04, Debian 12, Ubuntu 24.04.
@@ -124,6 +125,9 @@ images used for the tests were removed again.
 
 Still open:
 
+- The command line (`sf content needle`, `-- ENGINE-OPTIONS`, `--print`, pipes), Ctrl-O's editor choice and
+  the README's wget line came after v0.1.0 (see the design doc's "Command line"): they reach people with the
+  next release (raise `version` in `sf-rs/Cargo.toml` to 0.2.0, commit, push, tag `v0.2.0`; Bilal's OK).
 - Bilal on WSL: install with the README's line, then the Step 1 checklist above.
 - Later, if wanted: a weekly workflow that bumps `bundle.toml` (would need "Allow GitHub Actions to create pull
   requests" in the repo settings), aarch64 packages. A new release: raise `version` in `sf-rs/Cargo.toml`,

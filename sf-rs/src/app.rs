@@ -60,6 +60,10 @@ pub struct App {
     pub root: PathBuf,
     /// Shared by all tabs: a filter in Files, Folders and Git, the pattern in Search.
     pub query: String,
+    /// Engine options from the command line (`sf TAB -- OPTIONS`), for that tab only.
+    pub extra: Option<(Tab, Vec<OsString>)>,
+    /// The editor's name for the Ctrl-O key in the tab bar.
+    pub editor: String,
     pub options: Options,
     pub engines: Engines,
     pub filter: Filter,
@@ -102,6 +106,8 @@ impl App {
             tab,
             root,
             query: String::new(),
+            extra: None,
+            editor: "nvim".into(),
             options,
             engines,
             filter: Filter::new(),
@@ -134,12 +140,27 @@ impl App {
     }
 
     pub fn list_plan(&self) -> ListPlan {
-        commands::list_plan(self.tab, &self.options, &self.query, &self.engines)
+        commands::list_plan_with(
+            self.tab,
+            &self.options,
+            &self.query,
+            &self.engines,
+            self.extra_options(),
+            false,
+        )
+    }
+
+    /// The command line's engine options when they are the current tab's.
+    pub fn extra_options(&self) -> &[OsString] {
+        match &self.extra {
+            Some((tab, extra)) if *tab == self.tab => extra,
+            _ => &[],
+        }
     }
 
     pub fn preview_plan(&self) -> PreviewPlan {
         match self.current() {
-            Some(item) => commands::preview_plan(
+            Some(item) => commands::preview_plan_with(
                 self.tab,
                 &self.options,
                 &self.query,
@@ -147,6 +168,7 @@ impl App {
                 self.layout.preview.width.max(20),
                 &self.engines,
                 &self.root,
+                self.extra_options(),
             ),
             None => PreviewPlan::Nothing,
         }
@@ -554,6 +576,25 @@ pub(crate) mod tests {
         );
         assert_eq!(a.start(), [Effect::RunList]);
         (a, now)
+    }
+
+    #[test]
+    fn engine_options_go_to_their_tab_only() {
+        let (mut a, now) = app(Tab::Files);
+        a.extra = Some((Tab::Files, vec!["-e".into(), "rs".into()]));
+        let ListPlan::Run { cmd, .. } = a.list_plan() else {
+            panic!()
+        };
+        assert_eq!(
+            &cmd.args[cmd.args.len() - 2..],
+            ["-e", "rs"].map(OsString::from)
+        );
+        a.handle_key(key(KeyCode::Tab), now);
+        assert_eq!(a.tab, Tab::Content);
+        let ListPlan::Run { cmd, .. } = a.list_plan() else {
+            panic!()
+        };
+        assert!(!cmd.args.contains(&"rs".into()), "{:?}", cmd.args);
     }
 
     pub fn rows(kind: ParseKind, raws: &[&str]) -> Vec<Item> {

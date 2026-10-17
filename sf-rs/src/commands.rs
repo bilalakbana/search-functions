@@ -107,7 +107,22 @@ pub enum ListPlan {
     Hint(String),
 }
 
+/// The list's command as the window starts it (the tests' shorthand).
+#[cfg(test)]
 pub fn list_plan(tab: Tab, opts: &Options, query: &str, e: &Engines) -> ListPlan {
+    list_plan_with(tab, opts, query, e, &[], false)
+}
+
+/// The list's command with `extra` options for the engine (from `sf TAB -- OPTIONS`); with `print`,
+/// Content's command prints ugrep's own grep-style output for `sf --print` instead of sf's records.
+pub fn list_plan_with(
+    tab: Tab,
+    opts: &Options,
+    query: &str,
+    e: &Engines,
+    extra: &[OsString],
+    print: bool,
+) -> ListPlan {
     let hint = |h: &str| ListPlan::Hint(h.to_string());
     let hidden = opts.get(tab, Opt::Hidden);
     let ignored = opts.get(tab, Opt::Ignored);
@@ -129,7 +144,7 @@ pub fn list_plan(tab: Tab, opts: &Options, query: &str, e: &Engines) -> ListPlan
                 cmd = cmd.arg("--no-ignore");
             }
             ListPlan::Run {
-                cmd: cmd.args(["--exclude", ".git"]),
+                cmd: cmd.args(["--exclude", ".git"]).args(extra),
                 kind,
             }
         }
@@ -152,48 +167,45 @@ pub fn list_plan(tab: Tab, opts: &Options, query: &str, e: &Engines) -> ListPlan
                 };
                 p
             };
-            // -s: no messages about unreadable files; what stays on stderr (a broken pattern) is shown
-            let lines = ["--separator=\x1f", "--color=never", "--replace=\x01%o\x02"];
-            let cmd = Cmd::new(program);
-            let mut cmd = match (matching_lines, archives) {
-                (false, false) => cmd.args([
+            // -s: no messages about unreadable files; what stays on stderr (a broken pattern) is shown.
+            // sf reads NUL after a path, 0x1f after a line number and every match between 0x01 and 0x02;
+            // printed (`sf --print`), ugrep's own output goes out, coloured on a terminal.
+            let mode = match (matching_lines, archives) {
+                (false, false) => &[
                     "-rlU",
                     "--sort=name",
                     "--smart-case",
                     "--ignore-binary",
                     "-s",
-                    "--null",
-                ]),
-                (false, true) => cmd.args([
-                    "-rzl",
+                ][..],
+                (false, true) => &["-rzl", "--sort=name", "--smart-case", "-s"][..],
+                (true, false) => &[
+                    "-rnU",
                     "--sort=name",
                     "--smart-case",
+                    "--ignore-binary",
                     "-s",
-                    "--null",
-                    "--exclude=*.rar",
-                ]),
-                (true, false) => cmd
-                    .args([
-                        "-rnU",
-                        "--sort=name",
-                        "--smart-case",
-                        "--ignore-binary",
-                        "-s",
-                        "--null",
-                    ])
-                    .args(lines),
-                (true, true) => cmd
-                    .args([
-                        "-rzn",
-                        "--sort=name",
-                        "--smart-case",
-                        "--ignore-binary",
-                        "-s",
-                        "--null",
-                    ])
-                    .args(lines)
-                    .arg("--exclude=*.rar"),
+                ][..],
+                (true, true) => &[
+                    "-rzn",
+                    "--sort=name",
+                    "--smart-case",
+                    "--ignore-binary",
+                    "-s",
+                ][..],
             };
+            let mut cmd = Cmd::new(program).args(mode);
+            if print {
+                cmd = cmd.arg("--color=auto");
+            } else {
+                cmd = cmd.arg("--null");
+                if matching_lines {
+                    cmd = cmd.args(["--separator=\x1f", "--color=never", "--replace=\x01%o\x02"]);
+                }
+            }
+            if archives {
+                cmd = cmd.arg("--exclude=*.rar");
+            }
             if hidden {
                 cmd = cmd.arg("--hidden");
             }
@@ -206,7 +218,9 @@ pub fn list_plan(tab: Tab, opts: &Options, query: &str, e: &Engines) -> ListPlan
                 ParseKind::SearchFiles { archives }
             };
             ListPlan::Run {
-                cmd: cmd.args(["--exclude-dir=.git", "-e", query, "."]),
+                cmd: cmd
+                    .args(extra)
+                    .args(["--exclude-dir=.git", "-e", query, "."]),
                 kind,
             }
         }
@@ -218,7 +232,9 @@ pub fn list_plan(tab: Tab, opts: &Options, query: &str, e: &Engines) -> ListPlan
             if opts.git.all_branches {
                 cmd = cmd.arg("--all");
             }
-            let cmd = cmd.args(["--graph", "--color=always", "--abbrev=7", GIT_LOG_FORMAT]);
+            let cmd = cmd
+                .args(["--graph", "--color=always", "--abbrev=7", GIT_LOG_FORMAT])
+                .args(extra);
             ListPlan::Run {
                 cmd,
                 kind: ParseKind::Git,
@@ -267,6 +283,8 @@ pub enum Binary {
     Show(Cmd),
 }
 
+/// The preview as the window starts it (the tests' shorthand).
+#[cfg(test)]
 pub fn preview_plan(
     tab: Tab,
     opts: &Options,
@@ -275,6 +293,22 @@ pub fn preview_plan(
     width: u16,
     e: &Engines,
     root: &Path,
+) -> PreviewPlan {
+    preview_plan_with(tab, opts, query, item, width, e, root, &[])
+}
+
+/// The preview of `item`; Content's matches and their count take `extra`, the ugrep options from the
+/// command line, as the list does.
+#[allow(clippy::too_many_arguments)]
+pub fn preview_plan_with(
+    tab: Tab,
+    opts: &Options,
+    query: &str,
+    item: &Item,
+    width: u16,
+    e: &Engines,
+    root: &Path,
+    extra: &[OsString],
 ) -> PreviewPlan {
     if !item.selectable {
         return PreviewPlan::Nothing;
@@ -315,6 +349,7 @@ pub fn preview_plan(
             let count = |g: &PathBuf, opts: &[&str]| {
                 Cmd::new(g)
                     .args(opts)
+                    .args(extra)
                     .arg("-e")
                     .arg(query)
                     .arg("--")
@@ -362,6 +397,7 @@ pub fn preview_plan(
             let matches = |opts: &[&str]| {
                 Cmd::new(grep)
                     .args(opts)
+                    .args(extra)
                     .arg("-e")
                     .arg(query)
                     .arg("--")
@@ -700,6 +736,124 @@ mod tests {
         assert!(cmd.args.contains(&"--replace=\x01%o\x02".into()));
         assert!(cmd.args.contains(&"--exclude=*.rar".into()));
         assert_eq!(kind, ParseKind::SearchLines);
+    }
+
+    #[test]
+    fn extra_options_come_before_sf_own_positionals() {
+        let o = Options::default();
+        let extra = os(&["-e", "rs", "x"]);
+        let (cmd, _) = run(list_plan_with(
+            Tab::Files,
+            &o,
+            "",
+            &engines(),
+            &extra,
+            false,
+        ));
+        assert_eq!(
+            &cmd.args[cmd.args.len() - 3..],
+            &extra[..],
+            "fd: after sf's options"
+        );
+        let (cmd, _) = run(list_plan_with(
+            Tab::Content,
+            &o,
+            "needle",
+            &engines(),
+            &os(&["-w"]),
+            false,
+        ));
+        assert_eq!(
+            &cmd.args[cmd.args.len() - 5..],
+            &os(&["-w", "--exclude-dir=.git", "-e", "needle", "."])[..],
+            "ugrep: before the pattern and the folder"
+        );
+        let (cmd, _) = run(list_plan_with(
+            Tab::Git,
+            &o,
+            "",
+            &engines(),
+            &os(&["--author=b"]),
+            false,
+        ));
+        assert_eq!(cmd.args.last(), Some(&OsString::from("--author=b")));
+    }
+
+    #[test]
+    fn content_printed_is_ugreps_own_output() {
+        let mut o = Options::default();
+        let (cmd, kind) = run(list_plan_with(
+            Tab::Content,
+            &o,
+            "needle",
+            &engines(),
+            &[],
+            true,
+        ));
+        assert_eq!(kind, ParseKind::SearchFiles { archives: false });
+        assert_eq!(
+            cmd.args,
+            os(&[
+                "-rlU",
+                "--sort=name",
+                "--smart-case",
+                "--ignore-binary",
+                "-s",
+                "--color=auto",
+                "--exclude-dir=.git",
+                "-e",
+                "needle",
+                "."
+            ])
+        );
+        o.toggle(Tab::Content, Opt::MatchingLines);
+        let (cmd, _) = run(list_plan_with(
+            Tab::Content,
+            &o,
+            "needle",
+            &engines(),
+            &[],
+            true,
+        ));
+        assert_eq!(&cmd.args[..2], &os(&["-rnU", "--sort=name"])[..]);
+        for gone in [
+            "--null",
+            "--separator=\x1f",
+            "--replace=\x01%o\x02",
+            "--color=never",
+        ] {
+            assert!(!cmd.args.contains(&gone.into()), "{gone} in {:?}", cmd.args);
+        }
+        assert!(cmd.args.contains(&"--color=auto".into()));
+    }
+
+    #[test]
+    fn content_preview_counts_and_shows_with_the_engine_options() {
+        let plan = preview_plan_with(
+            Tab::Content,
+            &Options::default(),
+            "needle",
+            &item("a.c", None),
+            80,
+            &engines(),
+            Path::new("/r"),
+            &os(&["-w"]),
+        );
+        let PreviewPlan::Sniff {
+            text: Some(text),
+            header: Some(header),
+            ..
+        } = plan
+        else {
+            panic!("{plan:?}")
+        };
+        let before_e = |c: &Cmd| {
+            let w = c.args.iter().position(|a| a == "-w");
+            w.is_some() && w.map(|w| w + 1) == c.args.iter().position(|a| a == "-e")
+        };
+        assert!(before_e(&text), "{:?}", text.args);
+        let count = header.matches.unwrap();
+        assert!(before_e(&count.text) && before_e(&count.binary));
     }
 
     #[test]

@@ -223,6 +223,27 @@ expect 'doctor: open'                      "Open +xdg-open $STUBS/xdg-open"
 expect 'doctor: exits 0'                   '^rc-doctor=0'
 shot doctor
 
+# the command line: a start query, engine options after --, the list printed instead of the window
+keys "clear; '$SF' content needle" Enter
+expect 'start: Content with the pattern'   'Content › needle .* 5/5'
+keys Escape
+expect 'start: quit'                       '^READY>\s*$'
+keys "clear; '$SF' files -- -e md" Enter
+expect 'engine options: shown, fd -e md'   'Files › .*-- -e md +1/1'
+expect 'engine options: the one .md file'  'docs/readme\.md'
+keys Escape
+expect 'engine options: quit'              '^READY>\s*$'
+keys "clear; '$SF' files main --print; echo rc-print=\$?" Enter
+expect 'print: the filtered file'          '^src/main\.c\s*$'
+expect 'print: exit 0'                     '^rc-print=0'
+keys "clear; '$SF' content needle | wc -l; '$SF' folders deep | cat; '$SF' files zzz --print; echo rc-none=\$?" Enter
+expect 'piped: content prints its files'   '^5\s*$'
+expect 'piped: folders'                    '^src/deep dir\s*$'
+expect 'print: nothing found exits 1'      '^rc-none=1'
+keys "clear; '$SF' files -- -l; echo rc-refused=\$?" Enter
+expect 'refused: the reason'               'sf files: -l is refused'
+expect 'refused: exit 2'                   '^rc-refused=2'
+
 # a release package's layout, bin/sf beside lib/sf: sf takes engines and sub-functions from lib/sf first and
 # puts lib/sf in front of the PATH of what it starts, tmux windows included
 PKG=$W/pkg

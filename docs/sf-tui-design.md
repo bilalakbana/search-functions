@@ -256,3 +256,26 @@ Release package (Step 2 of `docs/sf-next-steps.md`, 2026-10-17):
   package test, then `gh release create` with the package and its `.sha256`; started by hand it does all but
   publish. Only `actions/checkout`, pinned by commit; `permissions: {}` at the top, `contents: write` for the
   job; values reach the scripts as environment variables. No weekly version check for now (Bilal).
+
+Command line (after v0.1.0, 2026-10-17; Bilal asked for engine flags and a print mode):
+
+- `sf [files|content|folders|git] [QUERY...] [--print] [-- ENGINE-OPTIONS...]` (`cli.rs`). QUERY (words joined
+  by spaces) starts the tab with it: the filter in Files, Folders and Git, the pattern in Content. A word with a
+  leading `-` before `--` is an error that points to `--` (a pattern starting with `-` is typed in the window).
+  Kept as words (`sf files`), not `--files`: after `--` every option is the engine's.
+- Options after `--` go to the starting tab's engine only (fd in Files and Folders, ugrep in Content, git log
+  in Git): fd and git get them last, ugrep before `--exclude-dir=.git -e QUERY .`; Content's preview count and
+  matches get them too, so the preview counts as the list does. They show in the input line (`-- -w -i`).
+  Refused, with the reason: options that change what the engine prints, which sf parses (fd `-l -x -X -0 -c
+  -q`, ugrep `-c -l -L -h -A -B -C -y -b -k -T -Q --json --format --replace --color …`, git `--oneline --pretty
+  --format -p --stat …`; tables in `cli.rs`). None of the three takes abbreviated long options (checked);
+  short clusters are read letter by letter until a letter that takes a value.
+- `--print`, or stdout not a terminal (a pipe or a file): the list instead of the window. Files, Folders, Git:
+  the window's rows (sorted, numbered, filtered by QUERY; `..` left out; Git rows as plain text). Content:
+  ugrep's own `path` / `path:line:text` output, `--color=auto` (coloured on a terminal), untruncated. Exit 0
+  when something was listed, 1 when nothing, 2 on an error (an engine message, a missing engine); a closed
+  pipe (`| head`) ends quietly. A wrong word prints the usage; a refused option only its one line.
+- Ctrl-O: nvim, else `$VISUAL`, `$EDITOR` (with its words, as "code --wait"), vim, vi; vi and vim get `+LINE`,
+  the pattern through `$SF_QUERY` and `--`, any other editor only `+LINE` and the absolute path. The tab bar
+  names it (`^O nvim`, `^O nano`), the tmux window is named after it, `sf doctor` shows it.
+- README: `wget -qO- … | tar -xz -C ~/.local` beside the curl line (curl is not on every desktop).

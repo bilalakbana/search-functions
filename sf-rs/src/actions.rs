@@ -44,6 +44,57 @@ pub enum Outcome {
     Failed(String),
 }
 
+/// The editor Ctrl-O opens.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Editor {
+    /// As found: a name in `$PATH` or `$EDITOR`'s first word.
+    pub program: OsString,
+    /// `$EDITOR`'s other words.
+    pub args: Vec<OsString>,
+    /// vi or vim: takes `+LINE`, `-c` commands and `--`.
+    pub vim: bool,
+}
+
+/// nvim, else `$VISUAL`, `$EDITOR`, vim, vi: the first that is there.
+pub fn find_editor(
+    path_var: &std::ffi::OsStr,
+    visual: Option<OsString>,
+    editor: Option<OsString>,
+) -> Option<Editor> {
+    let there = |program: &std::ffi::OsStr| {
+        let path = Path::new(program);
+        if path.components().count() > 1 {
+            path.is_file()
+        } else {
+            program
+                .to_str()
+                .is_some_and(|name| crate::engines::find(path_var, &[name]).is_some())
+        }
+    };
+    let named = |name: &str| Some(OsString::from(name));
+    [named("nvim"), visual, editor, named("vim"), named("vi")]
+        .into_iter()
+        .flatten()
+        .find_map(|value| {
+            // `$EDITOR` may hold words, as "code --wait"
+            let value = value.to_str()?.to_string();
+            let mut words = value.split_whitespace().map(OsString::from);
+            let program = words.next()?;
+            if !there(&program) {
+                return None;
+            }
+            let name = Path::new(&program)
+                .file_name()?
+                .to_string_lossy()
+                .into_owned();
+            Some(Editor {
+                vim: name == "vi" || name.contains("vim"),
+                program,
+                args: words.collect(),
+            })
+        })
+}
+
 /// Where sf runs.
 #[derive(Clone, Debug)]
 pub struct Env {
@@ -51,15 +102,24 @@ pub struct Env {
     pub platform: Platform,
     /// The sub-functions folder (see `sub_functions`).
     pub sub: PathBuf,
+    /// Ctrl-O's editor; None when there is none.
+    pub editor: Option<Editor>,
 }
 
 impl Env {
     /// `bundle`: the release package's `lib/sf`, if sf runs from one.
     pub fn detect(bundle: Option<&Path>) -> Env {
         let home = dirs::home_dir();
+        let platform = Platform::detect();
+        let editor = find_editor(
+            &platform.path,
+            std::env::var_os("VISUAL"),
+            std::env::var_os("EDITOR"),
+        );
         Env {
-            platform: Platform::detect(),
+            platform,
             sub: sub_functions(std::env::var_os("SF_SUBFUNCTIONS"), bundle, home),
+            editor,
         }
     }
 }
@@ -153,18 +213,29 @@ fn terminal(
 ) -> Outcome {
     let sub = |name: &str| Cmd::new(env.sub.join(name)).arg(path);
     let (window, title, cmd) = match kind {
-        ActionKind::Editor => ("nvim", "editor", editor(tab, item, query, path)),
+        ActionKind::Editor => {
+            let Some(e) = &env.editor else {
+                return Outcome::Failed("No editor: install nvim or set $EDITOR".into());
+            };
+            // the window is named after the editor, "nvim" as the fzf functions name it
+            let name = Path::new(&e.program).file_name().unwrap_or(&e.program);
+            (
+                name.to_string_lossy().into_owned(),
+                "editor",
+                editor(e, tab, item, query, path),
+            )
+        }
         ActionKind::InFile => {
             let mut cmd = sub("search_in_single_file");
             if tab == Tab::Content && !query.is_empty() {
                 cmd = cmd.arg(query);
             }
-            ("infile", "file-content", cmd)
+            ("infile".into(), "file-content", cmd)
         }
-        ActionKind::DiffSplit => ("diff", "git", sub("show_diffs")),
-        ActionKind::Diff => ("diff", "git", sub("git_diff")),
-        ActionKind::DiffShort => ("diff", "git", sub("git_diff_short")),
-        ActionKind::Log => ("logs", "git", sub("show_logs")),
+        ActionKind::DiffSplit => ("diff".into(), "git", sub("show_diffs")),
+        ActionKind::Diff => ("diff".into(), "git", sub("git_diff")),
+        ActionKind::DiffShort => ("diff".into(), "git", sub("git_diff_short")),
+        ActionKind::Log => ("logs".into(), "git", sub("show_logs")),
         _ => return Outcome::Failed(format!("{kind:?} needs no terminal")),
     };
     if !env.platform.tmux {
@@ -173,7 +244,7 @@ fn terminal(
     // More than one argument after the options: tmux runs the program itself, no shell. The folder
     // is never given with `-c`, which tmux expands as a format (a folder named `#(cmd)` would run
     // cmd); a fixed script changes into it, the folder being one of its arguments.
-    let mut args: Vec<OsString> = ["new-window", "-n", window].map(OsString::from).into();
+    let mut args: Vec<OsString> = ["new-window", "-n", &window].map(OsString::from).into();
     // the window gets sf's PATH (with a release package's engines), not the tmux server's
     let mut path = OsString::from("PATH=");
     path.push(&env.platform.path);
@@ -196,15 +267,16 @@ fn terminal(
     done(result.map(|()| None))
 }
 
-/// nvim at the matching line, or searching for the Search pattern. The pattern goes in $SF_QUERY and
-/// nvim reads it with `let @/ = $SF_QUERY`: as an Ex command (`-c "/pattern"`) a pattern with `/|`
-/// would run whatever follows. Very magic (`\v`) is closest to ugrep's syntax; `\c` gives smart case.
-fn editor(tab: Tab, item: &Item, query: &str, path: &Path) -> Cmd {
-    let mut cmd = Cmd::new("nvim");
+/// The editor at the matching line, or (vi and vim) searching for the Search pattern. The pattern goes
+/// in $SF_QUERY and vim reads it with `let @/ = $SF_QUERY`: as an Ex command (`-c "/pattern"`) a pattern
+/// with `/|` would run whatever follows. Very magic (`\v`) is closest to ugrep's syntax; `\c` gives
+/// smart case. Another editor gets only `+LINE` and the path, which is absolute and so never an option.
+fn editor(e: &Editor, tab: Tab, item: &Item, query: &str, path: &Path) -> Cmd {
+    let mut cmd = Cmd::new(&e.program).args(&e.args);
     if tab == Tab::Content {
         if let Some(line) = item.line {
             cmd = cmd.arg(format!("+{line}"));
-        } else if !query.is_empty() {
+        } else if !query.is_empty() && e.vim {
             let case = if query.chars().any(char::is_uppercase) {
                 ""
             } else {
@@ -222,7 +294,10 @@ fn editor(tab: Tab, item: &Item, query: &str, path: &Path) -> Cmd {
                 .env("SF_QUERY", &format!("{case}\\v{query}"));
         }
     }
-    cmd.arg("--").arg(path)
+    if e.vim {
+        cmd = cmd.arg("--");
+    }
+    cmd.arg(path)
 }
 
 #[cfg(test)]
@@ -283,7 +358,15 @@ mod tests {
         };
         Fixture {
             bin,
-            env: Env { platform, sub },
+            env: Env {
+                platform,
+                sub,
+                editor: Some(Editor {
+                    program: "nvim".into(),
+                    args: Vec::new(),
+                    vim: true,
+                }),
+            },
             root,
         }
     }
@@ -512,6 +595,68 @@ mod tests {
             vec![("SF_QUERY".to_string(), "\\vUpper".to_string())],
             "smart case"
         );
+    }
+
+    #[test]
+    fn editor_is_nvim_then_visual_editor_vim_vi() {
+        let bin = temp_dir("editor_find");
+        let found = |path: &Path, visual: Option<&str>, editor: Option<&str>| {
+            find_editor(
+                path.as_os_str(),
+                visual.map(Into::into),
+                editor.map(Into::into),
+            )
+        };
+        assert_eq!(found(&bin, None, None), None);
+        for p in ["vi", "vim", "nano", "code"] {
+            stub(&bin, p);
+        }
+        let vi = found(&bin, None, None).unwrap();
+        assert_eq!((vi.program, vi.vim), ("vim".into(), true), "vim before vi");
+        let nano = found(&bin, Some("missing-editor"), Some("nano")).unwrap();
+        assert_eq!(
+            (nano.program, nano.vim),
+            ("nano".into(), false),
+            "a missing $VISUAL is skipped"
+        );
+        let code = found(&bin, Some("code --wait"), Some("nano")).unwrap();
+        assert_eq!(
+            code.args,
+            vec![OsString::from("--wait")],
+            "$VISUAL with its words"
+        );
+        stub(&bin, "nvim");
+        assert_eq!(
+            found(&bin, Some("code"), None).unwrap().program,
+            "nvim",
+            "nvim first"
+        );
+    }
+
+    #[test]
+    fn another_editor_gets_only_the_line_and_the_path() {
+        let mut f = fixture("act_editor_nano", false, false);
+        f.env.editor = Some(Editor {
+            program: "nano".into(),
+            args: vec!["-l".into()],
+            vim: false,
+        });
+        let item = parse(ParseKind::SearchLines, b"a.c\x0012\x1fneedle", 0).unwrap();
+        let path = f.root.join("a.c");
+        assert_eq!(
+            act(&f, ActionKind::Editor, Tab::Content, &item, "needle"),
+            Outcome::Foreground(vec![Cmd::new("nano").arg("-l").arg("+12").arg(&path)])
+        );
+        assert_eq!(
+            act(&f, ActionKind::Editor, Tab::Content, &file("a.c"), "needle"),
+            Outcome::Foreground(vec![Cmd::new("nano").arg("-l").arg(&path)]),
+            "no vim commands for the pattern"
+        );
+        f.env.editor = None;
+        let Outcome::Failed(msg) = act(&f, ActionKind::Editor, Tab::Files, &file("a.c"), "") else {
+            panic!()
+        };
+        assert!(msg.contains("$EDITOR"), "{msg}");
     }
 
     #[test]

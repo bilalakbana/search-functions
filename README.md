@@ -39,9 +39,15 @@ A collection of efficient and flexible search tools to search inside file conten
 ### 🔹 Everything in One Window
 
 ```bash
-sf            # starts in Files
-sf content    # or: folders, git
+sf                         # starts in Files
+sf content needle          # Content searching for "needle"; files, folders and git take a filter
+sf files -- -e rs -d 3     # options after -- go to the tab's engine: fd, ugrep or git log
+sf content TODO | wc -l    # into a pipe or a file (or with --print) sf prints the list, no window
 ```
+
+Options that change what the engine prints (`-l`, `--color`, `-c`, `--json`, `-C 3`, `--oneline`, …) are
+refused with the reason. Printed, Content gives ugrep's own `path` or `path:line:text` lines; the exit status
+is 0 when something was listed, 1 when nothing, 2 on an error.
 
 | Tab | Lists | Typing | Options (⚙ Config, defaults) |
 |-----|-------|--------|------------------------------|
@@ -119,7 +125,7 @@ These shortcuts apply when using the interactive search tools (`fzf`, `ugrep-fzf
 | `Enter`  | Open the selected file                   |
 | `Ctrl-e` | Open file location in file manager       |
 | `Ctrl-c` | Copy relative path of selected file (on WSL its Windows path; use `Esc` to quit) |
-| `Ctrl-o` | Open the file in nvim in a new tmux window (`sf`: at the matching line; outside tmux in the same terminal) |
+| `Ctrl-o` | Open the file in nvim in a new tmux window (`sf`: at the matching line, with nvim or else `$VISUAL`, `$EDITOR`, vim, vi; outside tmux in the same terminal) |
 | `Ctrl-t` | Search inside the selected file in a new tmux window (`sf`: with the Content pattern) |
 | `Ctrl-u` / `Ctrl-g` / `Alt-g` / `Alt-u` | git diff / diff (delta) / short diff / log of the file |
 | `Alt-j` / `Ctrl-j` | Folder list / file list in a new tmux window |
@@ -137,11 +143,13 @@ These shortcuts apply when using the interactive search tools (`fzf`, `ugrep-fzf
 mkdir -p ~/.local && curl -fsSL https://github.com/bilalakbana/search-functions/releases/latest/download/sf-linux-x86_64.tar.gz | tar -xz -C ~/.local
 sf doctor   # what it found, how open / reveal / copy work here
 ```
+Without curl: `mkdir -p ~/.local && wget -qO- https://github.com/bilalakbana/search-functions/releases/latest/download/sf-linux-x86_64.tar.gz | tar -xz -C ~/.local`.
 
 The package brings its own fd, bat, ugrep (with `ug` and `ugrep+`), fzf and delta in `~/.local/lib/sf`; only sf
 uses them. If `sf` is not found, `~/.local/bin` is not in your `PATH` yet: log in again (Ubuntu and Debian add it
 once it exists) or add `export PATH="$HOME/.local/bin:$PATH"` to your shell's rc file. Taken from the system when
-wanted: git (Git tab, diffs), tmux (actions in windows of their own), nvim (`Ctrl-o`), and for PDF and Office files
+wanted: git (Git tab, diffs), tmux (actions in windows of their own), an editor for `Ctrl-o` (nvim, else
+`$VISUAL`, `$EDITOR`, vim or vi), and for PDF and Office files
 in Content `sudo apt install poppler-utils antiword pandoc`. Each release names the package's sha256 (also in
 `sf-linux-x86_64.tar.gz.sha256`); what is inside and the licenses: `~/.local/share/doc/sf/`. To update, run the
 line again.

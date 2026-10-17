@@ -100,7 +100,7 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect, layout: &mut ScreenLay
     let from = layout.tabs.last().map_or(area.x, |(_, r)| r.right()) + 2;
     let to = layout.config.x.saturating_sub(2);
     if to > from {
-        draw_keys(frame, app.tab, Rect::new(from, area.y, to - from, 1));
+        draw_keys(frame, app, Rect::new(from, area.y, to - from, 1));
     }
 }
 
@@ -339,13 +339,18 @@ fn placeholder(app: &App) -> &'static str {
 }
 
 fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
-    let active: Vec<&str> = app
+    let mut active: Vec<String> = app
         .options
         .list(app.tab)
         .into_iter()
         .filter(|(_, on)| *on)
-        .map(|(o, _)| short(o))
+        .map(|(o, _)| short(o).to_string())
         .collect();
+    let extra = app.extra_options();
+    if !extra.is_empty() {
+        let words: Vec<_> = extra.iter().map(|a| a.to_string_lossy()).collect();
+        active.push(crate::items::printable(&format!("-- {}", words.join(" "))));
+    }
     let mut count = format!("{}/{}", app.filter.len(), app.filter.total());
     if app.loading {
         count.push_str(" …");
@@ -393,11 +398,11 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     }
 }
 
-fn footer_items(tab: Tab) -> &'static [&'static str] {
-    match tab {
+fn footer_items(tab: Tab, editor: &str) -> Vec<String> {
+    let items: &[&str] = match tab {
         Tab::Files | Tab::Content => &[
             "Enter open",
-            "^O nvim",
+            "^O",
             "^T in file",
             "^U/^G diff",
             "Alt-U log",
@@ -407,17 +412,24 @@ fn footer_items(tab: Tab) -> &'static [&'static str] {
         ],
         Tab::Folders => &["Enter go inside", "^E reveal", "^C copy", "Esc quit"],
         Tab::Git => &["Enter show commit", "^C copy hash", "Esc quit"],
-    }
+    };
+    items
+        .iter()
+        .map(|i| match *i {
+            "^O" => format!("^O {editor}"),
+            i => i.to_string(),
+        })
+        .collect()
 }
 
 /// The keys for the selected item; when narrow, items before "Esc quit" are left out, never cut.
 /// The keys for the selected item, centred in `area`; when narrow, items before "Esc quit" are left
 /// out, never cut.
-fn draw_keys(frame: &mut Frame, tab: Tab, area: Rect) {
-    let width = |items: &[&str]| {
+fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
+    let width = |items: &[String]| {
         items.iter().map(|i| i.chars().count()).sum::<usize>() + 3 * items.len().saturating_sub(1)
     };
-    let mut items: Vec<&str> = footer_items(tab).to_vec();
+    let mut items = footer_items(app.tab, &app.editor);
     while items.len() > 1 && width(&items) > area.width as usize {
         items.remove(items.len() - 2);
     }
@@ -632,6 +644,20 @@ mod tests {
     }
 
     #[test]
+    fn input_shows_the_engine_options_of_its_tab() {
+        let (mut a, _) = app(Tab::Files);
+        a.extra = Some((Tab::Files, vec!["-e".into(), "rs".into()]));
+        feed(&mut a, &["a.rs"]);
+        a.loading = false;
+        let buf = render(&mut a, 100, 24);
+        let input = row(&buf, 23);
+        assert!(
+            input.trim_end().ends_with("ignored · -- -e rs   1/1"),
+            "{input:?}"
+        );
+    }
+
+    #[test]
     fn keys_sit_in_the_middle_of_the_tab_bar() {
         let cases = [
             (
@@ -659,6 +685,14 @@ mod tests {
             assert!(left.abs_diff(right) <= 1, "{tab:?}: {left} vs {right}");
             assert!(!row(&buf, 23).contains("Esc quit"), "no footer any more");
         }
+    }
+
+    #[test]
+    fn ctrl_o_names_the_editor() {
+        let (mut a, _) = app(Tab::Files);
+        a.editor = "nano".into();
+        let buf = render(&mut a, 200, 24);
+        assert!(row(&buf, 0).contains("^O nano"), "{:?}", row(&buf, 0));
     }
 
     /// The cells of column `x` between rows `from` and `to`.

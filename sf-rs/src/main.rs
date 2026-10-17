@@ -2,6 +2,7 @@
 
 mod actions;
 mod app;
+mod cli;
 mod commands;
 mod config;
 mod doctor;
@@ -11,6 +12,7 @@ mod items;
 mod model;
 mod platform;
 mod preview;
+mod print;
 mod runner;
 #[cfg(test)]
 mod testutil;
@@ -19,7 +21,7 @@ mod ui;
 
 use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
-use std::io::stdout;
+use std::io::{IsTerminal, stdout};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
@@ -34,12 +36,13 @@ use ratatui::crossterm::terminal::{EnterAlternateScreen, enable_raw_mode};
 
 use crate::actions::{Env, Outcome, perform};
 use crate::app::{App, Effect};
+use crate::cli::Cli;
 use crate::commands::{Cmd, ListPlan};
 use crate::model::{Options, Tab};
 use crate::preview::Previewer;
 use crate::runner::Runner;
 
-const USAGE: &str = "usage: sf [files|content|folders|git]
+const USAGE: &str = "usage: sf [files|content|folders|git] [QUERY...] [--print] [-- ENGINE-OPTIONS...]
        sf open|reveal|copy-path PATH
        sf copy-text TEXT
        sf doctor
@@ -48,6 +51,13 @@ The search functions in one window: Files, Content (search inside files), Folder
 a click switch the tab; ⚙ Config (or Ctrl-S) holds the tab's options; Esc quits. The keys for the
 selected item are listed at the bottom. Options are kept in $XDG_CONFIG_HOME/sf/config.toml
 (~/.config/sf/config.toml).
+
+QUERY starts the tab with it: what filters the list in Files, Folders and Git, the pattern in Content.
+Options after -- go to the starting tab's engine: fd in Files and Folders, ugrep in Content, git log in Git
+(sf files -- -e rs, sf content TODO -- -t py); those that change what the engine prints are refused.
+With --print, or when the output goes to a pipe or a file, sf prints the list instead of opening the
+window (Content: ugrep's own path:line:text); exit status 0 when something was listed, 1 when nothing,
+2 on an error.
 
 The other forms do one action as the window does, on Linux and on WSL alike: open PATH with its default
 application, reveal it in the file manager, copy PATH (on WSL its Windows form) or TEXT to the
@@ -63,41 +73,69 @@ fn main() -> ExitCode {
     let bundle = use_bundle();
     let bundle = bundle.as_deref();
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
-    let words: Vec<Option<&str>> = args.iter().map(|a| a.to_str()).collect();
-    let tab = match words.as_slice() {
-        [] => Tab::Files,
-        [Some("-h" | "--help")] => {
+    let (tab, query, print, extra) = match cli::parse(&args) {
+        Ok(Cli::Help) => {
             print!("{USAGE}");
             return ExitCode::SUCCESS;
         }
-        [Some("doctor")] => return doctor(bundle),
-        [Some(name), _] if platform::COMMANDS.contains(name) => {
-            return command(name, &args[1], bundle);
-        }
-        [Some(name), ..] if platform::COMMANDS.contains(name) => {
-            let what = if *name == "copy-text" { "TEXT" } else { "PATH" };
-            eprint!("sf {name}: one {what} expected\n{USAGE}");
+        Ok(Cli::Doctor) => return doctor(bundle),
+        Ok(Cli::Command { name, value }) => return command(&name, &value, bundle),
+        Ok(Cli::Run {
+            tab,
+            query,
+            print,
+            extra,
+        }) => (tab, query, print, extra),
+        // a wrong word gets the usage; a refused option or a command's argument only the reason
+        Err(e) if e.starts_with("sf ") => {
+            eprintln!("{e} (sf --help)");
             return ExitCode::from(2);
         }
-        [Some(a)] => match Tab::from_name(a) {
-            Some(tab) => tab,
-            None => {
-                eprint!("sf: unknown tab: {a}\n{USAGE}");
-                return ExitCode::from(2);
-            }
-        },
-        _ => {
-            eprint!("{USAGE}");
+        Err(e) => {
+            eprint!("sf: {e}\n{USAGE}");
             return ExitCode::from(2);
         }
     };
-    match run(tab, bundle) {
+    if print || !std::io::stdout().is_terminal() {
+        return print_list(tab, &query, &extra, bundle);
+    }
+    match run(tab, query, extra, bundle) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("sf: {e:#}");
             ExitCode::FAILURE
         }
     }
+}
+
+/// The options from the config file, or the defaults and why.
+fn load_options() -> (Options, Option<String>) {
+    match config::default_path().as_deref().map(config::load) {
+        Some(Ok(options)) => (options, None),
+        Some(Err(e)) => (Options::default(), Some(e)),
+        None => (
+            Options::default(),
+            Some("No config folder: neither XDG_CONFIG_HOME nor HOME is set".into()),
+        ),
+    }
+}
+
+/// `sf --print`: the list instead of the window.
+fn print_list(tab: Tab, query: &str, extra: &[OsString], bundle: Option<&Path>) -> ExitCode {
+    let root = match std::env::current_dir() {
+        Ok(root) => root,
+        Err(e) => {
+            eprintln!("sf: reading the current folder: {e}");
+            return ExitCode::from(2);
+        }
+    };
+    let env = Env::detect(bundle);
+    let engines = engines::discover(&env.platform.path);
+    let (options, config_error) = load_options();
+    if let Some(e) = config_error {
+        eprintln!("sf: {e} (the defaults are used)");
+    }
+    ExitCode::from(print::print(tab, &options, query, &engines, extra, &root))
 }
 
 /// `sf open|reveal|copy-path PATH`, `sf copy-text TEXT`: a note or the error on stderr; exit 1 on error.
@@ -143,20 +181,23 @@ fn use_bundle() -> Option<PathBuf> {
     Some(bundle)
 }
 
-fn run(tab: Tab, bundle: Option<&Path>) -> anyhow::Result<()> {
+fn run(tab: Tab, query: String, extra: Vec<OsString>, bundle: Option<&Path>) -> anyhow::Result<()> {
     let root = std::env::current_dir().context("reading the current folder")?;
     let env = Env::detect(bundle);
     let engines = engines::discover(&env.platform.path);
     let config_path = config::default_path();
-    let (options, config_error) = match config_path.as_deref().map(config::load) {
-        Some(Ok(options)) => (options, None),
-        Some(Err(e)) => (Options::default(), Some(e)),
-        None => (
-            Options::default(),
-            Some("No config folder: neither XDG_CONFIG_HOME nor HOME is set".into()),
-        ),
-    };
-    let app = App::new(root, tab, options, engines, config_error, Instant::now());
+    let (options, config_error) = load_options();
+    let mut app = App::new(root, tab, options, engines, config_error, Instant::now());
+    app.query = query;
+    if !extra.is_empty() {
+        app.extra = Some((tab, extra));
+    }
+    if let Some(editor) = &env.editor {
+        let name = Path::new(&editor.program)
+            .file_name()
+            .unwrap_or(&editor.program);
+        app.editor = name.to_string_lossy().into_owned();
+    }
     let window = TmuxWindow::rename(&env);
 
     let mut terminal = ratatui::try_init().context("starting the terminal")?;
