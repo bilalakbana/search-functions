@@ -223,6 +223,32 @@ expect 'doctor: open'                      "Open +xdg-open $STUBS/xdg-open"
 expect 'doctor: exits 0'                   '^rc-doctor=0'
 shot doctor
 
+# a release package's layout, bin/sf beside lib/sf: sf takes engines and sub-functions from lib/sf first and
+# puts lib/sf in front of the PATH of what it starts, tmux windows included
+PKG=$W/pkg
+mkdir -p "$PKG/bin" "$PKG/lib/sf/sub-functions"
+cp "$SF" "$PKG/bin/sf"
+for e in fd ugrep; do ln -s "$(command -v "$e")" "$PKG/lib/sf/$e"; done   # the pane's PATH may have neither
+cat > "$PKG/lib/sf/sub-functions/search_in_single_file" <<EOF
+#!/bin/bash
+printf 'BUNDLED-INFILE %s PATH=%s\n' "\$1" "\$PATH" >> "$LOG"
+sleep 1
+EOF
+chmod +x "$PKG/lib/sf/sub-functions/search_in_single_file"
+keys "clear; env -u SF_SUBFUNCTIONS '$PKG/bin/sf' doctor; echo rc-bundle=\$?" Enter
+expect 'bundle: ugrep from lib/sf'         "  ugrep +$PKG/lib/sf/ugrep "
+expect 'bundle: its sub-functions'         "Sub-functions $PKG/lib/sf/sub-functions"
+expect 'bundle: doctor exits 0'            '^rc-bundle=0'
+keys "clear; cd '$T' && env -u SF_SUBFUNCTIONS '$PKG/bin/sf'" Enter
+expect 'bundle: sf starts'                 'Files › type to filter'
+type_ 'main'
+expect 'bundle: one file'                  "Files › main .* 1/$n_files"
+keys C-t
+expect_log 'bundle: Ctrl-T runs its sub-function, lib/sf first in PATH' "BUNDLED-INFILE $T/src/main.c PATH=$PKG/lib/sf:$STUBS:"
+back_to_sf
+keys Escape
+expect 'bundle: quit'                      '^READY>\s*$'
+
 echo "pass=$PASS fail=$FAIL (screens in $SHOTS)"
 tm kill-server
 [[ $FAIL -eq 0 ]]

@@ -21,7 +21,7 @@ use std::collections::VecDeque;
 use std::ffi::{OsStr, OsString};
 use std::io::stdout;
 use std::os::unix::process::CommandExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::sync::mpsc::channel;
 use std::time::{Duration, Instant};
@@ -60,6 +60,8 @@ const FRAME: Duration = Duration::from_millis(30);
 const MESSAGES_PER_FRAME: usize = 2000;
 
 fn main() -> ExitCode {
+    let bundle = use_bundle();
+    let bundle = bundle.as_deref();
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     let words: Vec<Option<&str>> = args.iter().map(|a| a.to_str()).collect();
     let tab = match words.as_slice() {
@@ -68,8 +70,10 @@ fn main() -> ExitCode {
             print!("{USAGE}");
             return ExitCode::SUCCESS;
         }
-        [Some("doctor")] => return doctor(),
-        [Some(name), _] if platform::COMMANDS.contains(name) => return command(name, &args[1]),
+        [Some("doctor")] => return doctor(bundle),
+        [Some(name), _] if platform::COMMANDS.contains(name) => {
+            return command(name, &args[1], bundle);
+        }
         [Some(name), ..] if platform::COMMANDS.contains(name) => {
             let what = if *name == "copy-text" { "TEXT" } else { "PATH" };
             eprint!("sf {name}: one {what} expected\n{USAGE}");
@@ -87,7 +91,7 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    match run(tab) {
+    match run(tab, bundle) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("sf: {e:#}");
@@ -97,10 +101,10 @@ fn main() -> ExitCode {
 }
 
 /// `sf open|reveal|copy-path PATH`, `sf copy-text TEXT`: a note or the error on stderr; exit 1 on error.
-fn command(name: &str, value: &OsStr) -> ExitCode {
+fn command(name: &str, value: &OsStr, bundle: Option<&Path>) -> ExitCode {
     let result = std::env::current_dir()
         .map_err(|e| format!("reading the current folder: {e}"))
-        .and_then(|cwd| platform::command(name, value, &Env::detect().platform, &cwd));
+        .and_then(|cwd| platform::command(name, value, &Env::detect(bundle).platform, &cwd));
     match result {
         Ok(note) => {
             if let Some(note) = note {
@@ -115,8 +119,8 @@ fn command(name: &str, value: &OsStr) -> ExitCode {
     }
 }
 
-fn doctor() -> ExitCode {
-    let env = Env::detect();
+fn doctor(bundle: Option<&Path>) -> ExitCode {
+    let env = Env::detect(bundle);
     let engines = engines::discover(&env.platform.path);
     let run = |program: &Path, args: &[&str]| {
         doctor::run_program(&env.platform.path, program, args, Duration::from_secs(3))
@@ -128,10 +132,21 @@ fn doctor() -> ExitCode {
     ExitCode::SUCCESS
 }
 
-fn run(tab: Tab) -> anyhow::Result<()> {
+/// A release package's `lib/sf` beside sf's folder, when there is one: it goes in front of sf's own
+/// `$PATH`, which every program sf starts inherits, so its engines are found first.
+fn use_bundle() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let bundle = engines::bundle_dir(&exe)?;
+    let path = engines::with_bundle(Some(&bundle), &std::env::var_os("PATH").unwrap_or_default());
+    // SAFETY: the first thing main does; no other thread exists yet that could read the environment.
+    unsafe { std::env::set_var("PATH", path) };
+    Some(bundle)
+}
+
+fn run(tab: Tab, bundle: Option<&Path>) -> anyhow::Result<()> {
     let root = std::env::current_dir().context("reading the current folder")?;
-    let engines = engines::discover(&std::env::var_os("PATH").unwrap_or_default());
-    let env = Env::detect();
+    let env = Env::detect(bundle);
+    let engines = engines::discover(&env.platform.path);
     let config_path = config::default_path();
     let (options, config_error) = match config_path.as_deref().map(config::load) {
         Some(Ok(options)) => (options, None),

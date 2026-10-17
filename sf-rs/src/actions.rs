@@ -49,22 +49,32 @@ pub enum Outcome {
 pub struct Env {
     /// Linux or WSL, the session, tmux, `$PATH`.
     pub platform: Platform,
-    /// The sub-functions folder (`$SF_SUBFUNCTIONS`, else `~/.SearchFunctions/sub-functions`).
+    /// The sub-functions folder (see `sub_functions`).
     pub sub: PathBuf,
 }
 
 impl Env {
-    pub fn detect() -> Env {
-        let sub = std::env::var_os("SF_SUBFUNCTIONS")
-            .filter(|s| !s.is_empty())
-            .map(PathBuf::from)
-            .or_else(|| dirs::home_dir().map(|h| h.join(".SearchFunctions/sub-functions")))
-            .unwrap_or_else(|| PathBuf::from("sub-functions"));
+    /// `bundle`: the release package's `lib/sf`, if sf runs from one.
+    pub fn detect(bundle: Option<&Path>) -> Env {
+        let home = dirs::home_dir();
         Env {
             platform: Platform::detect(),
-            sub,
+            sub: sub_functions(std::env::var_os("SF_SUBFUNCTIONS"), bundle, home),
         }
     }
+}
+
+/// The sub-functions folder: `$SF_SUBFUNCTIONS`, else the bundle's, else `~/.SearchFunctions/sub-functions`.
+fn sub_functions(var: Option<OsString>, bundle: Option<&Path>, home: Option<PathBuf>) -> PathBuf {
+    var.filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            bundle
+                .map(|b| b.join("sub-functions"))
+                .filter(|s| s.is_dir())
+        })
+        .or_else(|| home.map(|h| h.join(".SearchFunctions/sub-functions")))
+        .unwrap_or_else(|| PathBuf::from("sub-functions"))
 }
 
 /// `sh -c CD_AND_EXEC sf DIR PROGRAM ARGS...`: runs PROGRAM in DIR; the script itself holds no data.
@@ -164,6 +174,10 @@ fn terminal(
     // is never given with `-c`, which tmux expands as a format (a folder named `#(cmd)` would run
     // cmd); a fixed script changes into it, the folder being one of its arguments.
     let mut args: Vec<OsString> = ["new-window", "-n", window].map(OsString::from).into();
+    // the window gets sf's PATH (with a release package's engines), not the tmux server's
+    let mut path = OsString::from("PATH=");
+    path.push(&env.platform.path);
+    args.extend(["-e".into(), path]);
     for (k, v) in &cmd.env {
         args.push("-e".into()); // -e values are not expanded
         args.push(format!("{k}={v}").into());
@@ -520,6 +534,7 @@ mod tests {
         );
         let root = f.root.to_str().unwrap();
         let path = f.root.join("a.c");
+        let path_var = format!("PATH={}", f.env.platform.path.to_str().unwrap());
         assert_eq!(
             calls(&f.bin, "tmux"),
             [
@@ -527,6 +542,8 @@ mod tests {
                     "new-window",
                     "-n",
                     "nvim",
+                    "-e",
+                    &path_var,
                     "sh",
                     "-c",
                     "cd -- \"$1\" && shift && exec \"$@\"",
@@ -557,12 +574,15 @@ mod tests {
             f.root.to_str().unwrap(),
             "the folder is an argument of the wrapper"
         );
+        let path_var = format!("PATH={}", f.env.platform.path.to_str().unwrap());
         assert_eq!(
             &first[..at],
             [
                 "new-window",
                 "-n",
                 "logs",
+                "-e",
+                &path_var,
                 "sh",
                 "-c",
                 "cd -- \"$1\" && shift && exec \"$@\""
@@ -575,8 +595,45 @@ mod tests {
         let f = fixture("act_tmux_env", false, true);
         act(&f, ActionKind::Editor, Tab::Content, &file("a"), "q");
         let first = &calls(&f.bin, "tmux")[0];
-        let at = first.iter().position(|a| a == "-e").unwrap();
-        assert_eq!(first[at + 1], "SF_QUERY=\\c\\vq");
+        let values: Vec<&String> = first
+            .iter()
+            .zip(&first[1..])
+            .filter(|(flag, _)| *flag == "-e")
+            .map(|(_, value)| value)
+            .collect();
+        assert_eq!(values.len(), 2, "{first:?}");
+        assert!(values[0].starts_with("PATH="), "sf's PATH, with its bundle");
+        assert_eq!(values[1], "SF_QUERY=\\c\\vq");
+    }
+
+    #[test]
+    fn sub_functions_come_from_override_bundle_or_home() {
+        let bundle = temp_dir("sub_bundle");
+        let home = PathBuf::from("/home/u");
+        let repo = PathBuf::from("/home/u/.SearchFunctions/sub-functions");
+        assert_eq!(
+            sub_functions(Some("/x".into()), Some(&bundle), Some(home.clone())),
+            PathBuf::from("/x")
+        );
+        assert_eq!(
+            sub_functions(Some("".into()), None, Some(home.clone())),
+            repo,
+            "empty: unset"
+        );
+        assert_eq!(
+            sub_functions(None, Some(&bundle), Some(home.clone())),
+            repo,
+            "bundle without sub-functions"
+        );
+        std::fs::create_dir(bundle.join("sub-functions")).unwrap();
+        assert_eq!(
+            sub_functions(None, Some(&bundle), Some(home)),
+            bundle.join("sub-functions")
+        );
+        assert_eq!(
+            sub_functions(None, None, None),
+            PathBuf::from("sub-functions")
+        );
     }
 
     #[test]

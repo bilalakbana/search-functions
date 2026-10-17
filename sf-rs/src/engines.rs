@@ -1,8 +1,8 @@
 //! The external programs sf runs, found once at start.
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Where each engine lives; `None` when it is not installed. A tab that needs a missing one says so.
 #[derive(Clone, Debug, Default)]
@@ -40,6 +40,26 @@ pub fn discover(path_var: &OsStr) -> Engines {
     }
 }
 
+/// The bundle of a release package: `lib/sf` beside the folder of `exe` (`~/.local/bin/sf` →
+/// `~/.local/lib/sf`), when it exists. It holds the engines and the sub-functions.
+pub fn bundle_dir(exe: &Path) -> Option<PathBuf> {
+    let dir = exe.parent()?.parent()?.join("lib/sf");
+    dir.is_dir().then_some(dir)
+}
+
+/// `path_var` with `bundle` in front, so the bundled engines win and every program sf starts finds
+/// them too (ugrep+ runs `ug`, the sub-functions run fzf, bat and ugrep). A bundle path that cannot
+/// stand in `$PATH` (it holds a `:`) leaves `path_var` as it is; `sf doctor` then shows the engines
+/// found without it.
+pub fn with_bundle(bundle: Option<&Path>, path_var: &OsStr) -> OsString {
+    let Some(bundle) = bundle else {
+        return path_var.to_owned();
+    };
+    let rest = std::env::split_paths(path_var).filter(|d| !d.as_os_str().is_empty());
+    std::env::join_paths(std::iter::once(bundle.to_path_buf()).chain(rest))
+        .unwrap_or_else(|_| path_var.to_owned())
+}
+
 /// The first of `names` found as an executable file in `path_var`, names in order of preference.
 pub fn find(path_var: &OsStr, names: &[&str]) -> Option<PathBuf> {
     let dirs: Vec<PathBuf> = std::env::split_paths(path_var)
@@ -57,7 +77,6 @@ pub fn find(path_var: &OsStr, names: &[&str]) -> Option<PathBuf> {
 mod tests {
     use super::*;
     use crate::testutil::{executable, temp_dir};
-    use std::ffi::OsString;
 
     #[test]
     fn discover_finds_fdfind_and_batcat() {
@@ -82,6 +101,39 @@ mod tests {
         let e = discover(&path);
         assert_eq!(e.ugrep, Some(a.join("ugrep")));
         assert_eq!(e.fd, Some(b.join("fd")));
+    }
+
+    #[test]
+    fn bundle_is_lib_sf_beside_the_bin_folder() {
+        let root = temp_dir("bundle_dir");
+        std::fs::create_dir_all(root.join("bin")).unwrap();
+        let exe = root.join("bin/sf");
+        assert_eq!(bundle_dir(&exe), None, "no lib/sf: a cargo install");
+        std::fs::create_dir_all(root.join("lib/sf")).unwrap();
+        assert_eq!(bundle_dir(&exe), Some(root.join("lib/sf")));
+    }
+
+    #[test]
+    fn bundled_engines_come_before_path() {
+        let bundle = temp_dir("bundle_first");
+        let system = temp_dir("bundle_system");
+        for dir in [&bundle, &system] {
+            executable(&dir.join("ugrep"), "");
+        }
+        executable(&system.join("git"), "");
+        let path = with_bundle(Some(&bundle), system.as_os_str());
+        let e = discover(&path);
+        assert_eq!(e.ugrep, Some(bundle.join("ugrep")));
+        assert_eq!(
+            e.git,
+            Some(system.join("git")),
+            "what the bundle lacks comes from PATH"
+        );
+        assert_eq!(with_bundle(None, OsStr::new("/a:/b")), "/a:/b");
+        assert_eq!(
+            with_bundle(Some(&bundle), OsStr::new("")),
+            bundle.as_os_str()
+        );
     }
 
     #[test]
