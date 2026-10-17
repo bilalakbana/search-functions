@@ -15,8 +15,8 @@ How Bilal starts the next session (paste):
 - `~/.SearchFunctions/sf-rs`: the Rust app `sf` (ratatui 0.30, ~7300 lines incl. tests). Installed as
   `~/.cargo/bin/sf` (`cargo install --path ~/.SearchFunctions/sf-rs`); nothing else in PATH is named sf. The fzf
   prototype `~/.SearchFunctions/sf` still exists (README suggests `alias sf-fzf=…`).
-- Git: `origin` (github.com/bilalakbana/search-functions, public) has Steps 1 to 4 and the command line;
-  releases `v0.1.0`, `v0.2.0`, `v0.3.0` and `v0.4.0` (2026-10-17); later commits: `git log origin/main..main`.
+- Git: `origin` (github.com/bilalakbana/search-functions, public) has Steps 1 to 4, the Deep tab and the command
+  line; releases `v0.1.0` to `v0.5.0` (2026-10-17); later commits: `git log origin/main..main`.
 - Bilal's config `~/.config/sf/config.toml` holds every option explicitly (sf writes all values); on 2026-10-17
   its hidden/ignored values were set to the new defaults (hidden false, ignored true) with his OK.
 - Tests, all green on 2026-10-17 after Step 1:
@@ -159,13 +159,13 @@ red, a rule between the blocks. advancedsearch's file list was already Content (
 
 Released as v0.4.0 (Bilal's OK). Still open: the Step 1 WSL checklist.
 
-### The Deep tab — done 2026-10-17 (not committed yet)
+### The Deep tab — done and released as v0.5.0, 2026-10-17
 
 Bilal wanted advancedsearch/detailedsearch as a tab of their own, because they search binaries (dll, exe) that
 Content leaves out. What and why: `docs/sf-tui-design.md` → "The Deep tab". Files · Content · **Deep** · Folders ·
 Git; Deep = advancedsearch + `_plus` (option Documents) + detailedsearch (option Each match) under one Config,
 preview as Content's (numbered, with context; Bilal's choice); Content keeps its own Each match and Archives &
-documents (Bilal). Offered and not answered yet: "^S options" in the tab bar; a filter of the results after a
+documents (Bilal). Released as v0.5.0 (Bilal's OK). Offered and not answered yet: "^S options" in the tab bar; a filter of the results after a
 fixed pattern (the old scripts' fzf typing).
 
 ## Deferred minors (known, not fixed)
