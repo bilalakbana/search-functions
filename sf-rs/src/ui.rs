@@ -299,13 +299,14 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'
         frame.render_widget(Paragraph::new(line), Rect::new(inner.x, y, inner.width, 1));
     }
     // the filter's words, drawn red in the rows (Search's query is a pattern for the contents)
-    let words: Vec<String> = if app.tab.searches() {
-        Vec::new()
-    } else {
-        app.query
+    let words: Vec<String> = match &app.result_filter {
+        Some(words) => words.split_whitespace().map(str::to_lowercase).collect(),
+        None if app.tab.searches() => Vec::new(),
+        None => app
+            .query
             .split_whitespace()
             .map(str::to_lowercase)
-            .collect()
+            .collect(),
     };
     for i in app.offset..app.offset + visible {
         let Some(item) = app.filter.get(i) else { break };
@@ -478,18 +479,28 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         ),
         Span::styled(" › ", style(theme::FAINT)),
     ];
-    let cursor_x = left_area.x
+    let mut cursor_x = left_area.x
         + 1
         + title.chars().count() as u16
         + 3
         + Line::raw(query.as_str()).width() as u16;
+    let hint =
+        |text: &'static str| Span::styled(text, style(theme::DIM).add_modifier(Modifier::ITALIC));
     if query.is_empty() {
-        left.push(Span::styled(
-            placeholder(app),
-            style(theme::DIM).add_modifier(Modifier::ITALIC),
-        ));
+        left.push(hint(placeholder(app)));
     } else {
         left.push(Span::styled(query, style(theme::TEXT)));
+    }
+    // Ctrl-F: the pattern stays; the cursor is in the words that filter the rows
+    if let Some(words) = &app.result_filter {
+        let words = crate::items::printable(words);
+        left.push(Span::styled(" · filter: ", style(theme::FAINT)));
+        cursor_x += " · filter: ".chars().count() as u16 + Line::raw(words.as_str()).width() as u16;
+        if words.is_empty() {
+            left.push(hint("type words · the rows with all of them"));
+        } else {
+            left.push(Span::styled(words, style(theme::TEXT)));
+        }
     }
     frame.render_widget(Paragraph::new(Line::from(left)), left_area);
     frame.render_widget(
@@ -506,8 +517,9 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
 
 fn footer_items(tab: Tab, editor: &str) -> Vec<String> {
     let items: &[&str] = match tab {
-        Tab::Files | Tab::Content | Tab::Deep => &[
+        Tab::Files => &[
             "Enter open",
+            "^S options",
             "^O",
             "^T in file",
             "^U/^G diff",
@@ -516,8 +528,31 @@ fn footer_items(tab: Tab, editor: &str) -> Vec<String> {
             "^C copy",
             "Esc quit",
         ],
-        Tab::Folders => &["Enter go inside", "^E reveal", "^C copy", "Esc quit"],
-        Tab::Git => &["Enter show commit", "^C copy hash", "Esc quit"],
+        Tab::Content | Tab::Deep => &[
+            "Enter open",
+            "^S options",
+            "^F filter",
+            "^O",
+            "^T in file",
+            "^U/^G diff",
+            "Alt-U log",
+            "^E reveal",
+            "^C copy",
+            "Esc quit",
+        ],
+        Tab::Folders => &[
+            "Enter go inside",
+            "^S options",
+            "^E reveal",
+            "^C copy",
+            "Esc quit",
+        ],
+        Tab::Git => &[
+            "Enter show commit",
+            "^S options",
+            "^C copy hash",
+            "Esc quit",
+        ],
     };
     items
         .iter()
@@ -528,7 +563,6 @@ fn footer_items(tab: Tab, editor: &str) -> Vec<String> {
         .collect()
 }
 
-/// The keys for the selected item; when narrow, items before "Esc quit" are left out, never cut.
 /// The keys for the selected item, centred in `area`; when narrow, items before "Esc quit" are left
 /// out, never cut.
 fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
@@ -536,6 +570,12 @@ fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
         items.iter().map(|i| i.chars().count()).sum::<usize>() + 3 * items.len().saturating_sub(1)
     };
     let mut items = footer_items(app.tab, &app.editor);
+    if app.result_filter.is_some() || app.scope.is_some() {
+        // Esc leaves the filter or the file, not sf
+        if let Some(esc) = items.last_mut() {
+            *esc = "Esc back".into();
+        }
+    }
     while items.len() > 1 && width(&items) > area.width as usize {
         items.remove(items.len() - 2);
     }
@@ -775,6 +815,63 @@ mod tests {
     }
 
     #[test]
+    fn the_result_filter_is_drawn_after_the_pattern() {
+        let (mut a, now) = app(Tab::Content);
+        a.start_query("needle".into());
+        feed(&mut a, &["src/main.c", "docs/b.md"]);
+        let input = row(&render(&mut a, 120, 24), 23);
+        assert!(
+            input.contains("Content › needle · filter: type words · the rows with all of them"),
+            "{input:?}"
+        );
+        for c in "main".chars() {
+            a.handle_key(key(KeyCode::Char(c)), now);
+        }
+        let buf = render(&mut a, 120, 24);
+        assert!(
+            row(&buf, 23).contains("Content › needle · filter: main"),
+            "{:?}",
+            row(&buf, 23)
+        );
+        assert_eq!(
+            fg_at(&buf, "src/main.c", 4),
+            theme::RED,
+            "the filter's words are red"
+        );
+    }
+
+    #[test]
+    fn the_keys_name_options_and_the_filter() {
+        let (mut a, _) = app(Tab::Content);
+        let top = row(&render(&mut a, 200, 24), 0);
+        assert!(
+            top.contains("Enter open · ^S options · ^F filter · ^O nvim"),
+            "{top:?}"
+        );
+        let (mut a, _) = app(Tab::Folders);
+        let top = row(&render(&mut a, 200, 24), 0);
+        assert!(top.contains("^S options") && !top.contains("^F"), "{top:?}");
+    }
+
+    #[test]
+    fn esc_is_named_back_where_it_goes_back() {
+        let (mut a, now) = app(Tab::Content);
+        a.start_query("needle".into());
+        let top = row(&render(&mut a, 200, 24), 0);
+        assert!(
+            top.contains("Esc back") && !top.contains("Esc quit"),
+            "{top:?}"
+        );
+        a.handle_key(key(KeyCode::Esc), now);
+        let top = row(&render(&mut a, 200, 24), 0);
+        assert!(top.contains("Esc quit"), "{top:?}");
+        feed(&mut a, &["src/a.c"]);
+        a.handle_key(ctrl('t'), now);
+        let top = row(&render(&mut a, 200, 24), 0);
+        assert!(top.contains("Esc back"), "inside a file: {top:?}");
+    }
+
+    #[test]
     fn input_shows_active_options_and_count() {
         let (mut a, _) = app(Tab::Content);
         a.options.content.archives = true;
@@ -809,13 +906,16 @@ mod tests {
         let cases = [
             (
                 Tab::Files,
-                "Enter open · ^O nvim · ^T in file · ^U/^G diff · Alt-U log · ^E reveal · ^C copy · Esc quit",
+                "Enter open · ^S options · ^O nvim · ^T in file · ^U/^G diff · Alt-U log · ^E reveal · ^C copy · Esc quit",
             ),
             (
                 Tab::Folders,
-                "Enter go inside · ^E reveal · ^C copy · Esc quit",
+                "Enter go inside · ^S options · ^E reveal · ^C copy · Esc quit",
             ),
-            (Tab::Git, "Enter show commit · ^C copy hash · Esc quit"),
+            (
+                Tab::Git,
+                "Enter show commit · ^S options · ^C copy hash · Esc quit",
+            ),
         ];
         for (tab, want) in cases {
             let (mut a, _) = app(tab);

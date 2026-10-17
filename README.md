@@ -40,7 +40,7 @@ A collection of efficient and flexible search tools to search inside file conten
 
 ```bash
 sf                         # starts in Files
-sf content needle          # Content searching for "needle"; files, folders and git take a filter
+sf content needle          # Content searching for "needle", typing then filters the files found (Ctrl-F)
 sf deep needle -- -i       # Deep: binaries and archives too, as advancedsearch (-i: ignore case)
 sf files -- -e rs -d 3     # options after -- go to the tab's engine: fd, ugrep or git log
 sf content TODO | wc -l    # into a pipe or a file (or with --print) sf prints the list, no window
@@ -134,6 +134,8 @@ These shortcuts apply when using the interactive search tools (`fzf`, `ugrep-fzf
 | `Ctrl-u` / `Ctrl-g` / `Alt-g` / `Alt-u` | git diff / diff (delta) / short diff / log of the file (`sf`: history with changes / changes against HEAD / short / log, shown inside its window; `/` searches, `Esc` back; `Enter` in Git shows a commit so) |
 | `Alt-j` / `Ctrl-j` | Folder list / file list in a new tmux window |
 | `Ctrl-l` | Toggle the preview                       |
+| `Ctrl-s` | `sf`: the tab's options (⚙ Config)       |
+| `Ctrl-f` | `sf`, Content and Deep: keep the pattern, typing filters the files found by their names (as `advancedsearch PATTERN`); `Esc` back to the pattern |
 
 > These are customizable if you tweak your FZF or terminal bindings.
 

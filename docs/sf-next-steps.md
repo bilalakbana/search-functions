@@ -33,6 +33,7 @@ How Bilal starts the next session (paste):
   - Deep tab: `cargo test` 306; `tests/e2e.sh` 131/131; platform_action 20/20; sub_functions 7/7.
   - v0.5.1 (Files without a preview, binary preview fixes, Deep preview speed): `cargo test` 316;
     `tests/e2e.sh` 132/132.
+  - Ctrl-F filter and the key hints: `cargo test` 323; `tests/e2e.sh` 136/136.
   - Step 2 (same day): `cargo test` 243; `tests/e2e.sh` 86/86 (with a release package's layout);
     `tests/sub_functions.sh NEW_EMPTY_DIR` 7/7 (`-L sfrs-sub-functions`); `python3 -I packaging/test_build.py` 7;
     `packaging/test_package.sh PACKAGE NEW_EMPTY_DIR` all passed on Ubuntu 22.04, Debian 12, Ubuntu 24.04.
@@ -167,8 +168,8 @@ Bilal wanted advancedsearch/detailedsearch as a tab of their own, because they s
 Content leaves out. What and why: `docs/sf-tui-design.md` → "The Deep tab". Files · Content · **Deep** · Folders ·
 Git; Deep = advancedsearch + `_plus` (option Documents) + detailedsearch (option Each match) under one Config,
 preview as Content's (numbered, with context; Bilal's choice); Content keeps its own Each match and Archives &
-documents (Bilal). Released as v0.5.0 (Bilal's OK). Offered and not answered yet: "^S options" in the tab bar; a filter of the results after a
-fixed pattern (the old scripts' fzf typing).
+documents (Bilal). Released as v0.5.0 (Bilal's OK). "^S options" in the tab bar and Ctrl-F (filter the
+results after a fixed pattern) followed after v0.5.1 (not committed yet), see the design doc's "After v0.5.0".
 
 ## Deferred minors (known, not fixed)
 

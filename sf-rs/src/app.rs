@@ -134,8 +134,11 @@ struct PreviewWait {
 pub struct App {
     pub tab: Tab,
     pub root: PathBuf,
-    /// Shared by all tabs: a filter in Files, Folders and Git, the pattern in Search.
+    /// Shared by all tabs: a filter in Files, Folders and Git, the pattern in Content and Deep.
     pub query: String,
+    /// Ctrl-F in Content and Deep: the pattern stays as it is and these words filter the rows found
+    /// (as advancedsearch's fzf did).
+    pub result_filter: Option<String>,
     /// Engine options from the command line (`sf TAB -- OPTIONS`), for that tab only.
     pub extra: Option<(Tab, Vec<OsString>)>,
     /// The editor's name for the Ctrl-O key in the tab bar.
@@ -190,6 +193,7 @@ impl App {
             tab,
             root,
             query: String::new(),
+            result_filter: None,
             extra: None,
             editor: "nvim".into(),
             view: None,
@@ -317,6 +321,13 @@ impl App {
             return self.popup_key(key, now);
         }
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if self.result_filter.is_some() {
+            match key.code {
+                KeyCode::Esc => return self.leave_result_filter(),
+                KeyCode::Char('f') if ctrl => return self.leave_result_filter(),
+                _ => {}
+            }
+        }
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let page = (self.layout.list.height as usize)
             .saturating_sub(self.notes.len())
@@ -347,6 +358,7 @@ impl App {
             KeyCode::Char(c) if ctrl => match c {
                 'w' | 'h' => self.edit(delete_word, now),
                 'l' => self.toggle_preview(),
+                'f' => self.enter_result_filter(),
                 'r' => vec![self.run_list()],
                 's' => {
                     self.popup = Some(0);
@@ -565,8 +577,11 @@ impl App {
     fn run_list(&mut self) -> Effect {
         self.list_gen += 1;
         self.filter.clear();
-        self.filter
-            .set_query(if self.tab.searches() { "" } else { &self.query });
+        self.filter.set_query(match &self.result_filter {
+            Some(words) => words,
+            None if self.tab.searches() => "",
+            None => &self.query,
+        });
         self.notes.clear();
         self.selected = 0;
         self.offset = 0;
@@ -579,12 +594,19 @@ impl App {
 
     fn switch_tab(&mut self, tab: Tab) -> Vec<Effect> {
         self.tab = tab;
+        self.result_filter = None;
         self.preview = Text::default();
         self.preview_scroll = 0;
         vec![self.run_list()]
     }
 
     fn edit(&mut self, f: impl FnOnce(&mut String), now: Instant) -> Vec<Effect> {
+        if let Some(words) = &mut self.result_filter {
+            f(words);
+            self.filter.set_query(words);
+            self.selected = 0;
+            return self.preview_if_changed();
+        }
         f(&mut self.query);
         if self.tab.searches() {
             self.search_due = Some(now + SEARCH_DELAY);
@@ -710,6 +732,7 @@ impl App {
     }
 
     fn enter_scope(&mut self, key: OsString) -> Vec<Effect> {
+        self.result_filter = None;
         self.scope = Some(Scope {
             key,
             back: (self.tab, self.query.clone()),
@@ -721,6 +744,31 @@ impl App {
         self.preview = Text::default();
         self.preview_scroll = 0;
         vec![self.run_list()]
+    }
+
+    /// The query a start from the command line gives: a pattern for Content or Deep is kept and what
+    /// is typed filters the rows found (Bilal: as `advancedsearch PATTERN`).
+    pub fn start_query(&mut self, query: String) {
+        if self.tab.searches() && !query.is_empty() {
+            self.result_filter = Some(String::new());
+        }
+        self.query = query;
+    }
+
+    /// Ctrl-F: the pattern stays, typing filters the rows found.
+    fn enter_result_filter(&mut self) -> Vec<Effect> {
+        if self.tab.searches() && self.scope.is_none() {
+            self.result_filter = Some(String::new());
+        }
+        Vec::new()
+    }
+
+    /// Esc or Ctrl-F again: typing edits the pattern again; every row found is back.
+    fn leave_result_filter(&mut self) -> Vec<Effect> {
+        self.result_filter = None;
+        self.filter.set_query("");
+        self.selected = 0;
+        self.preview_if_changed()
     }
 
     fn leave_scope(&mut self) -> Vec<Effect> {
@@ -1530,6 +1578,80 @@ pub(crate) mod tests {
             text: Text::raw("t"),
         });
         assert_eq!(a.preview_scroll, 43);
+    }
+
+    /// Content with the pattern "needle" searched and two files found.
+    fn found(tab: Tab) -> (App, Instant) {
+        let (mut a, now) = app(tab);
+        typed(&mut a, "needle", now);
+        assert_eq!(a.tick(now + Duration::from_secs(1)), [Effect::RunList]);
+        feed(&mut a, &["src/a.c", "docs/b.md"]);
+        (a, now + Duration::from_secs(1))
+    }
+
+    #[test]
+    fn ctrl_f_keeps_the_pattern_and_filters_the_rows() {
+        let (mut a, now) = found(Tab::Content);
+        assert_eq!(a.handle_key(ctrl('f'), now), []);
+        assert_eq!(a.result_filter.as_deref(), Some(""));
+        typed(&mut a, "SRC", now);
+        assert_eq!((a.query.as_str(), a.filter.len()), ("needle", 1));
+        assert_eq!(a.current().unwrap().key, "src/a.c");
+        assert_eq!(
+            a.tick(now + Duration::from_secs(1)),
+            [],
+            "the search does not run again"
+        );
+        a.handle_key(key(KeyCode::Backspace), now);
+        assert_eq!(a.result_filter.as_deref(), Some("SR"));
+        assert_eq!(a.handle_key(ctrl('r'), now), [Effect::RunList]);
+        feed(&mut a, &["src/a.c", "docs/b.md"]);
+        assert_eq!(a.filter.len(), 1, "a new run keeps the filter");
+        a.handle_key(key(KeyCode::Esc), now);
+        assert_eq!(a.result_filter, None, "Esc goes back to the pattern");
+        assert_eq!((a.query.as_str(), a.filter.len()), ("needle", 2));
+        assert_eq!(a.handle_key(key(KeyCode::Esc), now), [Effect::Quit]);
+    }
+
+    #[test]
+    fn ctrl_f_again_or_another_tab_ends_the_filter() {
+        let (mut a, now) = found(Tab::Deep);
+        a.handle_key(ctrl('f'), now);
+        a.handle_key(ctrl('f'), now);
+        assert_eq!(a.result_filter, None);
+        a.handle_key(ctrl('f'), now);
+        a.handle_key(key(KeyCode::Tab), now);
+        assert_eq!((a.tab, a.result_filter.as_deref()), (Tab::Folders, None));
+    }
+
+    #[test]
+    fn ctrl_f_is_for_a_pattern_only() {
+        let (mut a, now) = app(Tab::Files);
+        a.handle_key(ctrl('f'), now);
+        assert_eq!(a.result_filter, None);
+        let (mut a, now) = found(Tab::Content);
+        a.handle_key(ctrl('t'), now);
+        a.handle_key(ctrl('f'), now);
+        assert_eq!(a.result_filter, None, "not inside a file");
+    }
+
+    #[test]
+    fn a_pattern_from_the_command_line_starts_the_filter() {
+        let (mut a, _) = app(Tab::Deep);
+        a.start_query("needle".into());
+        assert_eq!(
+            (a.query.as_str(), a.result_filter.as_deref()),
+            ("needle", Some(""))
+        );
+        let (mut a, _) = app(Tab::Files);
+        a.start_query("main".into());
+        assert_eq!(
+            (a.query.as_str(), a.result_filter.as_deref()),
+            ("main", None)
+        );
+        let (mut a, _) = app(Tab::Content);
+        a.start_query(String::new());
+        assert_eq!(a.result_filter, None, "no pattern to keep");
     }
 
     #[test]

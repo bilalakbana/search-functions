@@ -90,7 +90,7 @@ expect "start: $n_files files listed"      "$n_files/$n_files"
 expect_not 'start: Files without a preview' '│ *1 needle ignored'
 keys C-l
 expect 'files: Ctrl-L shows bat with numbers' '│ *1 needle ignored'
-expect 'start: footer'                     'Enter open · \^O nvim'
+expect 'start: footer'                     'Enter open · \^S options · \^O nvim'
 [[ $(tm display-message -p -t e2e '#W') == search ]] && ok 'tmux: window named search' || bad 'tmux: window not renamed'
 shot files
 type_ 'main'
@@ -175,6 +175,10 @@ expect 'deep: each match in a binary'      'src/blob\.bin:1:'
 expect 'deep: each match in an archive'    'docs/arch\.zip\{inzip\.txt\}:1:needle inside zip'
 keys C-s Space Escape
 expect 'deep: files again'                 'Deep › needle .* 7/7'
+keys C-f; type_ 'blob'
+expect 'deep: Ctrl-F filters the rows'     'Deep › needle · filter: blob .* 1/7'
+keys Escape
+expect 'deep: Esc back to the pattern'     'Deep › needle +ignored +7/7'
 
 keys Tab
 expect 'tab: Folders'                      'Folders › '
@@ -260,7 +264,11 @@ shot doctor
 
 # the command line: a start query, engine options after --, the list printed instead of the window
 keys "clear; '$SF' content needle" Enter
-expect 'start: Content with the pattern'   'Content › needle .* 5/5'
+expect 'start: Content with the pattern'   'Content › needle · filter: .* 5/5'
+type_ 'src'
+expect 'start: typing filters the rows'    'Content › needle · filter: src .* 3/5'
+keys Escape
+expect 'start: Esc back to the pattern'    'Content › needle +ignored +5/5'
 keys Escape
 expect 'start: quit'                       '^READY>\s*$'
 keys "clear; '$SF' files -- -e md" Enter

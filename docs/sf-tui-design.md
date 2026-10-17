@@ -367,4 +367,10 @@ After v0.5.0 (2026-10-17):
   outside Content and Deep) instead of the previous row's. (4) Deep starts a preview once the cursor rests for
   100 ms (`App::preview_wait`), so running down a list of binaries starts no scans. No size limit: it would hide
   what was searched for.
-
+- The two offers Bilal approved: (1) the tab bar names `^S options` in every tab, and `^F filter` in Content and
+  Deep, right after Enter, so they stay when the bar is narrow. (2) Ctrl-F in Content and Deep keeps the pattern
+  and makes typing filter the rows found, by fzf's rules as in Files (`App::result_filter`): the input reads
+  `Content › needle · filter: words`, the words are red in the rows, the search does not run again (Ctrl-R keeps
+  the filter). Esc or Ctrl-F again goes back to the pattern (Bilal); another tab or Ctrl-T ends it. A start
+  with a pattern (`sf deep needle`) begins in the filter, as `advancedsearch needle` did (Bilal). Where Esc goes
+  back (the filter, a file after Ctrl-T) the bar says "Esc back" instead of "Esc quit".

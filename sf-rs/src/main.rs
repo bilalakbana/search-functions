@@ -55,7 +55,8 @@ selected item are listed at the bottom. Options are kept in $XDG_CONFIG_HOME/sf/
 (~/.config/sf/config.toml).
 
 QUERY starts the tab with it: what filters the list in Files, Folders and Git, the pattern in Content and
-Deep. Options after -- go to the starting tab's engine: fd in Files and Folders, ugrep in Content and Deep,
+Deep, where typing then filters the files found by their names (Ctrl-F; Esc edits the pattern, as Ctrl-F
+does at any time). Options after -- go to the starting tab's engine: fd in Files and Folders, ugrep in Content and Deep,
 git log in Git (sf files -- -e rs, sf content TODO -- -t py, sf deep needle -- -i); those that change what
 the engine prints are refused.
 With --print, or when the output goes to a pipe or a file, sf prints the list instead of opening the
@@ -193,7 +194,7 @@ fn run(tab: Tab, query: String, extra: Vec<OsString>) -> anyhow::Result<()> {
     let config_path = config::default_path();
     let (options, config_error) = load_options();
     let mut app = App::new(root, tab, options, engines, config_error, Instant::now());
-    app.query = query;
+    app.start_query(query);
     if !extra.is_empty() {
         app.extra = Some((tab, extra));
     }
