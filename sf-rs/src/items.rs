@@ -366,9 +366,18 @@ pub fn printable(s: &str) -> String {
         .collect()
 }
 
-/// Coloured engine output as styled text: invalid UTF-8 replaced, tabs as spaces, control characters
-/// as U+FFFD.
+/// Coloured engine output as styled text: invalid UTF-8 replaced, tabs as spaces, carriage returns left
+/// out, other control characters as U+FFFD.
 pub fn ansi_text(bytes: &[u8]) -> Text<'static> {
+    // ansi-to-tui breaks the line at every carriage return: a CRLF file, or a binary's match ending in
+    // "\r\r\n", would get empty lines (the fzf previews ran `tr -d '\r'` for this)
+    let without_cr: Vec<u8>;
+    let bytes = if bytes.contains(&b'\r') {
+        without_cr = bytes.iter().copied().filter(|&b| b != b'\r').collect();
+        &without_cr[..]
+    } else {
+        bytes
+    };
     let lossy = String::from_utf8_lossy(bytes);
     let mut text = lossy
         .as_bytes()
@@ -660,6 +669,16 @@ mod tests {
         assert_eq!(
             t.lines[0].spans[0].style.fg,
             Some(ratatui::style::Color::Red)
+        );
+    }
+
+    #[test]
+    fn ansi_text_breaks_lines_only_at_newlines() {
+        // a binary's match as ugrep prints it ends in "\r\r\n"; a carriage return is no line of its own
+        let t = ansi_text(b"1:MZ\x00This program\r\r\nx\ry\n");
+        assert_eq!(
+            t.lines.iter().map(text_of).collect::<Vec<_>>(),
+            ["1:MZ\u{fffd}This program", "xy"]
         );
     }
 

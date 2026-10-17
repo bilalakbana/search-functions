@@ -46,8 +46,9 @@ struct Shared {
 #[derive(Default)]
 struct State {
     pending: Option<(u64, PreviewPlan)>,
-    /// The process group of the running preview, while its leader is unreaped.
-    running: Option<u32>,
+    /// The process groups of the running preview (its count runs beside its matches), while their
+    /// leaders are unreaped.
+    running: Vec<u32>,
     closed: bool,
 }
 
@@ -63,7 +64,7 @@ impl Previewer {
     pub fn request(&self, generation: u64, plan: PreviewPlan) {
         let mut st = lock(&self.shared.state);
         st.pending = Some((generation, plan));
-        kill_group(st.running);
+        kill_all(&st.running);
         self.shared.wake.notify_one();
     }
 }
@@ -118,14 +119,9 @@ fn produce(plan: PreviewPlan, shared: &Shared) -> (Text<'static>, usize) {
             header,
         } => {
             let is_text = is_text(&path);
-            let body = sniffed(&path, &is_text, text, binary, shared);
-            let Some(header) = header else {
-                return (body, 0);
-            };
-            let mut lines = header_lines(header, matches!(is_text, Ok(true)), shared);
-            let n = lines.len();
-            lines.extend(body.lines);
-            (Text::from(lines), n)
+            with_header(header, matches!(is_text, Ok(true)), shared, || {
+                sniffed(&path, &is_text, text, binary, shared).lines
+            })
         }
         PreviewPlan::Numbered {
             path,
@@ -134,14 +130,34 @@ fn produce(plan: PreviewPlan, shared: &Shared) -> (Text<'static>, usize) {
             header,
         } => {
             let is_text = is_text(&path);
-            let body = numbered(&path, &is_text, lines, binary, shared);
-            let mut lines = header_lines(header, matches!(is_text, Ok(true)), shared);
-            let n = lines.len();
-            lines.extend(body);
-            (Text::from(lines), n)
+            with_header(Some(header), matches!(is_text, Ok(true)), shared, || {
+                numbered(&path, &is_text, lines, binary, shared)
+            })
         }
         other => (unsniffed(other, shared), 0),
     }
+}
+
+/// The lines of `body` under the header's; the header's count runs beside the body's commands (a big
+/// archive takes seconds for each).
+fn with_header(
+    header: Option<Header>,
+    text: bool,
+    shared: &Shared,
+    body: impl FnOnce() -> Vec<Line<'static>>,
+) -> (Text<'static>, usize) {
+    let (head, body) = thread::scope(|s| {
+        let head = header.map(|h| s.spawn(move || header_lines(h, text, shared)));
+        let body = body();
+        let head = head.map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e)));
+        (head, body)
+    });
+    let Some(mut lines) = head else {
+        return (Text::from(body), 0);
+    };
+    let n = lines.len();
+    lines.extend(body);
+    (Text::from(lines), n)
 }
 
 /// `File  path`, with a pattern `Pattern  p` and `Matches  n`, then an empty line.
@@ -254,7 +270,7 @@ fn numbered(
             shown.extend(notes(&out));
             shown
         }
-        Ok(false) => match run(&[binary], shared) {
+        Ok(false) => match run_limited(&[binary], shared, Some(MAX_BLOCKS)) {
             Ok(out) => {
                 let stdout = out.stdout.strip_suffix(b"\n").unwrap_or(&out.stdout);
                 let mut shown = if stdout.is_empty() {
@@ -273,11 +289,25 @@ fn numbered(
 struct Output {
     stdout: Vec<u8>,
     stderr: Vec<u8>,
-    capped: bool,
+    cut: Option<Cut>,
+}
+
+/// Why an output was not read to its end.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Cut {
+    /// MAX_OUTPUT bytes read.
+    Bytes,
+    /// The lines asked for read (a binary's first MAX_BLOCKS matches).
+    Lines,
 }
 
 /// Runs `cmds` as a pipeline in a process group of its own and collects the last one's output.
 fn run(cmds: &[Cmd], shared: &Shared) -> Result<Output, String> {
+    run_limited(cmds, shared, None)
+}
+
+/// `run`, reading at most `max_lines` lines; the pipeline is ended when there is more.
+fn run_limited(cmds: &[Cmd], shared: &Shared, max_lines: Option<usize>) -> Result<Output, String> {
     let mut children: Vec<Child> = Vec::new();
     let mut errors = Vec::new();
     let mut stdout: Option<ChildStdout> = None;
@@ -298,7 +328,9 @@ fn run(cmds: &[Cmd], shared: &Shared) -> Result<Output, String> {
                     pgid = child.id();
                 }
                 let mut err = child.stderr.take().expect("stderr is piped");
-                errors.push(thread::spawn(move || read_capped(&mut err, 64 << 10).0));
+                errors.push(thread::spawn(move || {
+                    read_capped(&mut err, 64 << 10, None).0
+                }));
                 stdout = child.stdout.take();
                 children.push(child);
             }
@@ -316,17 +348,18 @@ fn run(cmds: &[Cmd], shared: &Shared) -> Result<Output, String> {
         if st.pending.is_some() || st.closed {
             kill_group(Some(pgid)); // a newer request came while this one started
         } else {
-            st.running = Some(pgid);
+            st.running.push(pgid);
         }
     }
-    let (out, capped) = read_capped(
+    let (out, cut) = read_capped(
         &mut stdout.expect("a pipeline has a last command"),
         MAX_OUTPUT,
+        max_lines,
     );
-    if capped {
+    if cut.is_some() {
         kill_group(Some(pgid));
     }
-    lock(&shared.state).running = None;
+    lock(&shared.state).running.retain(|&g| g != pgid);
     for mut c in children {
         let _ = c.wait();
     }
@@ -337,22 +370,44 @@ fn run(cmds: &[Cmd], shared: &Shared) -> Result<Output, String> {
     Ok(Output {
         stdout: out,
         stderr,
-        capped,
+        cut,
     })
 }
 
-/// Reads up to `max` bytes, then (when not capped) on to the end so the writer never blocks.
-fn read_capped(r: &mut impl Read, max: usize) -> (Vec<u8>, bool) {
+/// Reads up to `max` bytes and `max_lines` lines; says why when there was more.
+fn read_capped(r: &mut impl Read, max: usize, max_lines: Option<usize>) -> (Vec<u8>, Option<Cut>) {
     let mut out = Vec::new();
+    let mut lines = 0;
     let mut buf = [0u8; 64 << 10];
     loop {
         match r.read(&mut buf) {
-            Ok(0) | Err(_) => return (out, false),
+            Ok(0) | Err(_) => return (out, None),
             Ok(n) => {
+                let mut chunk = &buf[..n];
+                let mut cut = None;
+                if let Some(limit) = max_lines {
+                    if lines == limit {
+                        return (out, Some(Cut::Lines)); // bytes after the last line wanted
+                    }
+                    let newlines = chunk.iter().enumerate().filter(|&(_, &b)| b == b'\n');
+                    match newlines.map(|(i, _)| i).nth(limit - lines - 1) {
+                        Some(end) => {
+                            lines = limit;
+                            if end + 1 < chunk.len() {
+                                cut = Some(Cut::Lines);
+                            }
+                            chunk = &chunk[..=end];
+                        }
+                        None => lines += chunk.iter().filter(|&&b| b == b'\n').count(),
+                    }
+                }
                 let room = max - out.len();
-                out.extend_from_slice(&buf[..n.min(room)]);
-                if n >= room {
-                    return (out, true);
+                out.extend_from_slice(&chunk[..chunk.len().min(room)]);
+                if chunk.len() >= room {
+                    return (out, Some(Cut::Bytes));
+                }
+                if cut.is_some() {
+                    return (out, cut);
                 }
             }
         }
@@ -377,8 +432,12 @@ fn shown(result: Result<Output, String>) -> Text<'static> {
 /// What goes under an output: that it was cut, and its errors in red.
 fn notes(out: &Output) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    if out.capped {
-        lines.push(dim_line("… preview cut at 4 MiB"));
+    match out.cut {
+        Some(Cut::Bytes) => lines.push(dim_line("… preview cut at 4 MiB")),
+        Some(Cut::Lines) => lines.push(dim_line(&format!(
+            "… only the first {MAX_BLOCKS} matches are shown"
+        ))),
+        None => {}
     }
     lines.extend(red_lines(&String::from_utf8_lossy(&out.stderr)).lines);
     lines
@@ -436,8 +495,14 @@ impl Drop for Previewer {
     fn drop(&mut self) {
         let mut st = self.shared.state.lock().unwrap_or_else(|e| e.into_inner());
         st.closed = true;
-        kill_group(st.running);
+        kill_all(&st.running);
         self.shared.wake.notify_one();
+    }
+}
+
+fn kill_all(groups: &[u32]) {
+    for &g in groups {
+        kill_group(Some(g));
     }
 }
 
@@ -1028,6 +1093,102 @@ mod tests {
             p.request(g, PreviewPlan::Run(sh(&format!("sleep 0.3; echo {g}"))));
         }
         assert_eq!(drain(&rx, Duration::from_millis(1500)), [3]);
+    }
+
+    #[test]
+    fn a_binary_shows_its_first_matches_and_stops_reading() {
+        // the engine would go on for 30 s: the preview stops reading after MAX_BLOCKS matches
+        let path = file("many.bin", b"x\0needle\0");
+        let t = Instant::now();
+        let m = msg(PreviewPlan::Numbered {
+            path,
+            lines: printf("never"),
+            binary: sh("seq 400 | sed 's/^/x needle /'; exec sleep 30"),
+            header: header("many.bin", None).unwrap(),
+        });
+        assert!(t.elapsed() < Duration::from_secs(3), "{:?}", t.elapsed());
+        let shown = plain(&m.text);
+        assert_eq!(shown.matches("Match #").count(), MAX_BLOCKS, "{shown}");
+        assert!(
+            shown.ends_with("… only the first 300 matches are shown"),
+            "{shown}"
+        );
+    }
+
+    #[test]
+    fn a_line_limit_is_cut_only_when_there_is_more() {
+        let read = |bytes: &[u8]| read_capped(&mut &bytes[..], 100, Some(2));
+        assert_eq!(read(b"a\nb\n"), (b"a\nb\n".to_vec(), None));
+        assert_eq!(read(b"a\nb"), (b"a\nb".to_vec(), None));
+        assert_eq!(read(b"a\nb\nc\n"), (b"a\nb\n".to_vec(), Some(Cut::Lines)));
+        assert_eq!(
+            read_capped(&mut &b"abcdef"[..], 4, Some(2)),
+            (b"abcd".to_vec(), Some(Cut::Bytes))
+        );
+    }
+
+    #[test]
+    fn the_count_runs_beside_the_matches() {
+        let path = file("both.txt", b"a\nneedle\n");
+        let t = Instant::now();
+        let m = msg(PreviewPlan::Numbered {
+            path,
+            lines: sh("sleep 1; printf 'both.txt\\000\\062\\037\\001needle\\002\\n'"),
+            binary: printf("never"),
+            header: header("both.txt", Some(sh("sleep 1; echo 1"))).unwrap(),
+        });
+        assert!(
+            t.elapsed() < Duration::from_millis(1800),
+            "{:?}",
+            t.elapsed()
+        );
+        assert!(
+            plain(&m.text).contains("Matches  1\n\nMatch #1"),
+            "{}",
+            plain(&m.text)
+        );
+    }
+
+    #[test]
+    fn newer_request_ends_the_count_and_the_matches() {
+        let dir = temp_dir("preview_kill_both");
+        let (count_pid, lines_pid) = (dir.join("count"), dir.join("lines"));
+        let (tx, rx) = channel();
+        let p = Previewer::new(tx);
+        let waits = |pidfile: &std::path::Path| {
+            sh(&format!("echo $$ > '{}'; exec sleep 30", pidfile.display()))
+        };
+        p.request(
+            1,
+            PreviewPlan::Numbered {
+                path: file("kill.txt", b"needle\n"),
+                lines: waits(&lines_pid),
+                binary: printf("never"),
+                header: header("kill.txt", Some(waits(&count_pid))).unwrap(),
+            },
+        );
+        let t = Instant::now();
+        let pid = |f: &std::path::Path| loop {
+            if let Ok(s) = std::fs::read_to_string(f)
+                && s.ends_with('\n')
+            {
+                break s.trim().to_string();
+            }
+            assert!(t.elapsed() < Duration::from_secs(5));
+            thread::sleep(Duration::from_millis(10));
+        };
+        let pids = [pid(&count_pid), pid(&lines_pid)];
+        p.request(2, PreviewPlan::Text("two".into()));
+        let msg = rx
+            .recv_timeout(Duration::from_secs(1))
+            .expect("second preview not answered in 1 s");
+        assert_eq!(msg.generation, 2);
+        for pid in pids {
+            assert!(
+                std::fs::metadata(format!("/proc/{pid}")).is_err(),
+                "process {pid} still there"
+            );
+        }
     }
 
     #[test]

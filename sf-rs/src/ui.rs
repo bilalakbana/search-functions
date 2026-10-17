@@ -26,7 +26,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     }
     let area = frame.area();
     let body = area.height.saturating_sub(2);
-    let preview_h = if app.preview_visible {
+    let preview_h = if app.preview_visible() {
         body * 60 / 100
     } else {
         0
@@ -41,14 +41,14 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     let mut layout = ScreenLayout::default();
     draw_tab_bar(frame, app, bar, &mut layout);
     let status = status_line(app);
-    if app.preview_visible {
+    if app.preview_visible() {
         layout.preview = draw_preview(frame, app, preview, status.clone());
     }
     layout.list = draw_list(
         frame,
         app,
         list,
-        if app.preview_visible { None } else { status },
+        if app.preview_visible() { None } else { status },
     );
     draw_input(frame, app, input);
     if let Some(cursor) = app.popup {
@@ -270,6 +270,9 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect, status: Option<Line<'s
 
 fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'static>>) -> Rect {
     let mut block = bordered();
+    if !app.preview_visible() {
+        block = block.title_top(root_title(app)); // else in the preview's border
+    }
     if let Some(status) = status {
         block = block.title_bottom(status);
     }
@@ -631,7 +634,7 @@ fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::tests::{app, ctrl, feed, key};
+    use crate::app::tests::{app, app_with_preview, ctrl, feed, key};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
@@ -946,7 +949,7 @@ mod tests {
 
     #[test]
     fn long_preview_has_a_scrollbar() {
-        let (mut a, _) = app(Tab::Files);
+        let (mut a, _) = app_with_preview(Tab::Files);
         feed(&mut a, &["a"]);
         a.on_preview(crate::preview::PreviewMsg {
             header_lines: 0,
@@ -1090,7 +1093,7 @@ mod tests {
 
     #[test]
     fn preview_border_has_root_and_status() {
-        let (mut a, now) = app(Tab::Files);
+        let (mut a, now) = app_with_preview(Tab::Files);
         a.root = "/r/project".into();
         a.set_status("Copied to the clipboard", false, now);
         let buf = render(&mut a, 80, 24);
@@ -1106,7 +1109,7 @@ mod tests {
 
     #[test]
     fn hidden_preview_gives_the_list_the_room() {
-        let (mut a, now) = app(Tab::Files);
+        let (mut a, now) = app_with_preview(Tab::Files);
         a.handle_key(ctrl('l'), now);
         render(&mut a, 80, 24);
         assert_eq!(a.layout.preview, Rect::default());
@@ -1114,8 +1117,16 @@ mod tests {
     }
 
     #[test]
+    fn without_a_preview_the_list_border_names_the_root() {
+        let (mut a, _) = app(Tab::Files); // Files starts without its preview
+        feed(&mut a, &["a"]);
+        let buf = render(&mut a, 80, 24);
+        assert!(row(&buf, 1).contains("/r/p"), "{:?}", row(&buf, 1));
+    }
+
+    #[test]
     fn layout_rects_recorded() {
-        let (mut a, _) = app(Tab::Files);
+        let (mut a, _) = app_with_preview(Tab::Files);
         let buf = render(&mut a, 120, 30);
         let l = &a.layout;
         assert_eq!(l.tabs.len(), 5);

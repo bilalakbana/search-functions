@@ -499,11 +499,12 @@ pub fn preview_plan_with(
                 };
             };
             PreviewPlan::Numbered {
-                // a text file's matching lines as the list reads them; the preview adds the lines around
+                // a text file's matching lines as the list reads them; the preview adds the lines around.
+                // -a: what sf calls text is read as text, NUL bytes and all (else "Binary file matches")
                 lines: with_pattern(
                     grep,
                     &[
-                        "-nHU",
+                        "-nHUa",
                         "--smart-case",
                         "--null",
                         "--separator=\x1f",
@@ -1205,7 +1206,9 @@ mod tests {
             &engines(),
             Path::new("/r"),
         );
-        // the matching lines as sf reads them; the preview adds the lines around from the file
+        // the matching lines as sf reads them; the preview adds the lines around from the file. -a: a
+        // file sf calls text is read as text, also when ugrep would see a NUL byte in it as binary
+        // (it would print "Binary file … matches" instead of the lines)
         let PreviewPlan::Numbered { lines, path, .. } = plan else {
             panic!("{plan:?}")
         };
@@ -1214,7 +1217,7 @@ mod tests {
         assert_eq!(
             lines.args,
             os(&[
-                "-nHU",
+                "-nHUa",
                 "--smart-case",
                 "--null",
                 "--separator=\x1f",

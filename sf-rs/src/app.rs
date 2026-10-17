@@ -8,7 +8,8 @@ use ratatui::crossterm::event::{
     KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
 };
 use ratatui::layout::{Position, Rect};
-use ratatui::text::Text;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span, Text};
 
 use crate::actions::ActionKind;
 use crate::commands::{self, ListPlan, PreviewPlan};
@@ -18,11 +19,16 @@ use crate::items::{self, Item};
 use crate::model::{Opt, Options, Tab};
 use crate::preview::PreviewMsg;
 use crate::runner::ListMsg;
+use crate::theme;
 use crate::views::ViewKind;
 
 /// Search runs this long after the last keystroke.
 pub const SEARCH_DELAY: Duration = Duration::from_millis(150);
 const STATUS_OK: Duration = Duration::from_secs(3);
+/// Deep's preview starts once the cursor rests this long: it may search a big binary or archive.
+const PREVIEW_DELAY: Duration = Duration::from_millis(100);
+/// A preview not here after this long says it is coming, in place of the previous row's.
+const PREVIEW_NOTE: Duration = Duration::from_millis(250);
 const STATUS_ERROR: Duration = Duration::from_secs(6);
 /// Two clicks on the same row within this time are a double click.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
@@ -114,6 +120,17 @@ pub struct ScreenLayout {
     pub popup_rows: Vec<(Opt, Rect)>,
 }
 
+/// A preview that is wanted and not here yet.
+#[derive(Debug, Default)]
+struct PreviewWait {
+    /// The first tick after the row changed.
+    since: Option<Instant>,
+    /// Its Effect::Preview is out (at once, or in Deep once the cursor rests).
+    requested: bool,
+    /// The "searching inside …" note stands in for it.
+    noted: bool,
+}
+
 pub struct App {
     pub tab: Tab,
     pub root: PathBuf,
@@ -140,7 +157,10 @@ pub struct App {
     pub loading: bool,
     pub preview: Text<'static>,
     pub preview_scroll: u16,
-    pub preview_visible: bool,
+    /// The tabs whose preview Ctrl-L has hidden; Files starts without one (Bilal).
+    previews_hidden: Vec<Tab>,
+    /// The current row's preview, while it is wanted and not here yet.
+    preview_wait: Option<PreviewWait>,
     /// The Config popup's cursor, while it is open.
     pub popup: Option<usize>,
     /// A message for a moment: text, is an error, since.
@@ -184,7 +204,8 @@ impl App {
             loading: false,
             preview: Text::default(),
             preview_scroll: 0,
-            preview_visible: true,
+            previews_hidden: vec![Tab::Files],
+            preview_wait: None,
             popup: None,
             save_allowed: config_error.is_none(),
             status: config_error.map(|e| (e, true, now)),
@@ -447,10 +468,42 @@ impl App {
                 self.status = None;
             }
         }
-        match self.search_due {
-            Some(due) if now >= due => vec![self.run_list()],
-            _ => Vec::new(),
+        let mut effects = self.wait_for_preview(now);
+        if matches!(self.search_due, Some(due) if now >= due) {
+            effects.push(self.run_list());
         }
+        effects
+    }
+
+    /// Starts Deep's preview once the cursor rests; a preview slow to come says so.
+    fn wait_for_preview(&mut self, now: Instant) -> Vec<Effect> {
+        let what = if self.tab.searches() {
+            "searching inside"
+        } else {
+            "loading"
+        };
+        let note = self.current().map(|i| {
+            let name = items::printable(&String::from_utf8_lossy(i.key.as_encoded_bytes()));
+            format!("{what} {name}…")
+        });
+        let Some(wait) = &mut self.preview_wait else {
+            return Vec::new();
+        };
+        let waited = now.duration_since(*wait.since.get_or_insert(now));
+        let mut effects = Vec::new();
+        if !wait.requested && waited >= PREVIEW_DELAY {
+            wait.requested = true;
+            effects.push(Effect::Preview);
+        }
+        if !wait.noted && waited >= PREVIEW_NOTE {
+            wait.noted = true;
+            if let Some(note) = note {
+                self.preview =
+                    Text::from(Line::from(Span::styled(note, Style::new().fg(theme::DIM))));
+                self.preview_scroll = 0;
+            }
+        }
+        effects
     }
 
     pub fn on_list(&mut self, msg: ListMsg) -> Vec<Effect> {
@@ -497,6 +550,7 @@ impl App {
         if msg.generation != self.preview_gen {
             return;
         }
+        self.preview_wait = None;
         self.preview = msg.text;
         // a matching line about a third down the preview, below the header
         let third = 1 + self.layout.preview.height as usize / 3;
@@ -519,6 +573,7 @@ impl App {
         self.loading = true;
         self.search_due = None;
         self.previewed = None;
+        self.preview_wait = None;
         Effect::RunList
     }
 
@@ -547,7 +602,8 @@ impl App {
 
     /// A preview request when the current row is another one than the last request's.
     fn preview_if_changed(&mut self) -> Vec<Effect> {
-        if !self.preview_visible {
+        if !self.preview_visible() {
+            self.preview_wait = None;
             return Vec::new();
         }
         let id = self.current().map(|i| (i.key.clone(), i.line));
@@ -559,9 +615,20 @@ impl App {
         self.preview_scroll = 0;
         if self.previewed.is_none() {
             self.preview = Text::default();
+            self.preview_wait = None;
             return Vec::new();
         }
-        vec![Effect::Preview]
+        // Deep's preview may search a big binary or archive: it waits for the cursor to rest
+        let requested = self.tab != Tab::Deep;
+        self.preview_wait = Some(PreviewWait {
+            requested,
+            ..PreviewWait::default()
+        });
+        if requested {
+            vec![Effect::Preview]
+        } else {
+            Vec::new()
+        }
     }
 
     /// Requests the current row's preview again (the preview's width changed).
@@ -570,8 +637,18 @@ impl App {
         self.preview_if_changed()
     }
 
+    /// Whether the current tab shows its preview.
+    pub fn preview_visible(&self) -> bool {
+        !self.previews_hidden.contains(&self.tab)
+    }
+
     fn toggle_preview(&mut self) -> Vec<Effect> {
-        self.preview_visible = !self.preview_visible;
+        match self.previews_hidden.iter().position(|&t| t == self.tab) {
+            Some(i) => {
+                self.previews_hidden.remove(i);
+            }
+            None => self.previews_hidden.push(self.tab),
+        }
         self.previewed = None;
         self.preview_if_changed()
     }
@@ -824,6 +901,13 @@ pub(crate) mod tests {
         (a, now)
     }
 
+    /// An app whose tab shows its preview whatever the tab's default (Files starts without one).
+    pub fn app_with_preview(tab: Tab) -> (App, Instant) {
+        let (mut a, now) = app(tab);
+        a.previews_hidden.clear();
+        (a, now)
+    }
+
     #[test]
     fn engine_options_go_to_their_tab_only() {
         let (mut a, now) = app(Tab::Files);
@@ -1051,7 +1135,7 @@ pub(crate) mod tests {
 
     #[test]
     fn first_rows_request_a_preview() {
-        let (mut a, _) = app(Tab::Files);
+        let (mut a, _) = app_with_preview(Tab::Files);
         let g0 = a.preview_gen;
         assert_eq!(feed(&mut a, &["a", "b"]), [Effect::Preview]);
         assert_eq!(a.preview_gen, g0 + 1);
@@ -1072,7 +1156,7 @@ pub(crate) mod tests {
 
     #[test]
     fn current_row_change_requests_a_preview() {
-        let (mut a, now) = app(Tab::Files);
+        let (mut a, now) = app_with_preview(Tab::Files);
         feed(&mut a, &["a", "b"]);
         // as fzf: the first row at the bottom, Up goes to the next one
         assert_eq!(a.handle_key(key(KeyCode::Up), now), [Effect::Preview]);
@@ -1314,7 +1398,7 @@ pub(crate) mod tests {
 
     #[test]
     fn stale_generation_ignored() {
-        let (mut a, now) = app(Tab::Files);
+        let (mut a, now) = app_with_preview(Tab::Files);
         let old = a.list_gen;
         a.handle_key(ctrl('r'), now);
         a.on_list(ListMsg::Items(old, rows(ParseKind::Files, &["stale"])));
@@ -1449,8 +1533,85 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn preview_scroll_and_toggle() {
+    fn deep_previews_once_the_cursor_rests() {
+        let ms = Duration::from_millis;
+        let (mut a, t0) = app(Tab::Deep);
+        assert_eq!(feed(&mut a, &["a.dll", "b.dll"]), [], "not at once");
+        assert_eq!(a.tick(t0), []);
+        assert_eq!(a.tick(t0 + ms(60)), []);
+        assert_eq!(
+            a.handle_key(key(KeyCode::Up), t0 + ms(70)),
+            [],
+            "another row: the wait starts again"
+        );
+        assert_eq!(a.tick(t0 + ms(80)), []);
+        assert_eq!(a.tick(t0 + ms(150)), []);
+        assert_eq!(a.tick(t0 + ms(190)), [Effect::Preview]);
+        assert_eq!(a.tick(t0 + ms(400)), [], "once");
+    }
+
+    #[test]
+    fn a_slow_preview_says_it_is_searching() {
+        let ms = Duration::from_millis;
+        let shown = |a: &App| -> String {
+            a.preview
+                .lines
+                .iter()
+                .flat_map(|l| l.spans.iter().map(|s| s.content.to_string()))
+                .collect()
+        };
+        let (mut a, t0) = app_with_preview(Tab::Content);
+        a.preview = Text::raw("the previous file");
+        assert_eq!(feed(&mut a, &["src/a.c"]), [Effect::Preview]);
+        a.tick(t0);
+        a.tick(t0 + ms(200));
+        assert_eq!(
+            shown(&a),
+            "the previous file",
+            "a quick preview just takes its place"
+        );
+        a.tick(t0 + ms(300));
+        assert_eq!(shown(&a), "searching inside src/a.c…");
+        a.on_preview(PreviewMsg {
+            header_lines: 0,
+            generation: a.preview_gen,
+            text: Text::raw("a.c's matches"),
+        });
+        a.tick(t0 + ms(600));
+        assert_eq!(shown(&a), "a.c's matches");
+    }
+
+    #[test]
+    fn an_empty_list_puts_up_no_searching_note() {
+        let ms = Duration::from_millis;
+        let (mut a, t0) = app_with_preview(Tab::Content);
+        feed(&mut a, &["src/a.c"]);
+        a.handle_key(ctrl('r'), t0);
+        a.on_list(ListMsg::Done(a.list_gen));
+        a.tick(t0);
+        a.tick(t0 + ms(400));
+        assert_eq!(a.preview, Text::default());
+    }
+
+    #[test]
+    fn files_starts_without_a_preview_the_others_with_one() {
         let (mut a, now) = app(Tab::Files);
+        assert!(!a.preview_visible());
+        a.handle_key(key(KeyCode::Tab), now);
+        assert_eq!(a.tab, Tab::Content);
+        assert!(a.preview_visible());
+        a.handle_key(ctrl('l'), now);
+        assert!(!a.preview_visible(), "Ctrl-L hides Content's");
+        a.handle_key(key(KeyCode::BackTab), now);
+        a.handle_key(ctrl('l'), now);
+        assert!(a.preview_visible(), "Ctrl-L shows Files'");
+        a.handle_key(key(KeyCode::Tab), now);
+        assert!(!a.preview_visible(), "each tab keeps its own");
+    }
+
+    #[test]
+    fn preview_scroll_and_toggle() {
+        let (mut a, now) = app(Tab::Content);
         feed(&mut a, &["a"]);
         a.layout.preview = Rect::new(1, 2, 80, 10);
         a.on_preview(PreviewMsg {
@@ -1464,7 +1625,7 @@ pub(crate) mod tests {
         a.handle_key(alt(KeyCode::Up), now);
         assert_eq!(a.preview_scroll, 0);
         assert_eq!(a.handle_key(ctrl('l'), now), []);
-        assert!(!a.preview_visible);
+        assert!(!a.preview_visible());
         assert_eq!(a.handle_key(ctrl('l'), now), [Effect::Preview]);
     }
 
@@ -1524,7 +1685,7 @@ pub(crate) mod tests {
 
     #[test]
     fn click_row_selects() {
-        let (mut a, now) = app(Tab::Files);
+        let (mut a, now) = app_with_preview(Tab::Files);
         feed(&mut a, &["a", "b", "c"]);
         drawn(&mut a);
         assert_eq!(
@@ -1715,7 +1876,7 @@ pub(crate) mod tests {
 
     #[test]
     fn wheel_over_preview_scrolls() {
-        let (mut a, now) = app(Tab::Files);
+        let (mut a, now) = app_with_preview(Tab::Files);
         feed(&mut a, &["a"]);
         a.on_preview(PreviewMsg {
             header_lines: 0,
@@ -1755,7 +1916,7 @@ pub(crate) mod tests {
 
     #[test]
     fn refresh_preview_requests_the_same_row_again() {
-        let (mut a, _) = app(Tab::Files);
+        let (mut a, _) = app_with_preview(Tab::Files);
         feed(&mut a, &["a"]);
         let g0 = a.preview_gen;
         assert_eq!(a.refresh_preview(), [Effect::Preview]);
@@ -1766,7 +1927,7 @@ pub(crate) mod tests {
 
     #[test]
     fn empty_list_clears_the_preview() {
-        let (mut a, now) = app(Tab::Files);
+        let (mut a, now) = app_with_preview(Tab::Files);
         feed(&mut a, &["a"]);
         a.on_preview(PreviewMsg {
             header_lines: 0,

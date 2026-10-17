@@ -55,14 +55,15 @@ character. The exit status is 0 when something was listed, 1 when nothing, 2 on 
 |-----|-------|--------|------------------------------|
 | Files | every file below the folder | filters the names | Hidden files ✗, Ignored files ✓ |
 | Content | the files that contain the pattern (ugrep); every text file while it is empty | the pattern, searched 150 ms after the last key; the preview shows the file, the pattern, how often it occurs and each match numbered ("Match #1", …) with two lines around it | Matching lines ✗ (list the lines instead), Each match ✗ (a row for every match with the text around it, as `detailedsearch`), Archives & documents ✗ (zip, tar, 7z, PDF, Office via `ugrep+`), Hidden files ✗, Ignored files ✓ |
-| Deep | as Content, in every file: binaries (dll, exe, …) and archives (zip, tar, 7z, gz) too; every file while the pattern is empty. Together `advancedsearch`, `advancedsearch_plus` and `detailedsearch` | the pattern, as in Content; the preview numbers the matches, in a binary each with the bytes around it | Each match ✗ (`detailedsearch`: every match with the text around it, in binaries too), Documents ✗ (PDF, Office, e-books as text via `ugrep+`, as `advancedsearch_plus`; slower), Hidden files ✗, Ignored files ✓ |
+| Deep | as Content, in every file: binaries (dll, exe, …) and archives (zip, tar, 7z, gz) too; every file while the pattern is empty. Together `advancedsearch`, `advancedsearch_plus` and `detailedsearch` | the pattern, as in Content; the preview numbers the matches, in a binary the first 300 each with the bytes around it, and starts once the cursor rests | Each match ✗ (`detailedsearch`: every match with the text around it, in binaries too), Documents ✗ (PDF, Office, e-books as text via `ugrep+`, as `advancedsearch_plus`; slower), Hidden files ✗, Ignored files ✓ |
 | Folders | every folder, `..` first | filters the names; `Enter` goes inside | Hidden folders ✗, Ignored folders ✓ |
 | Git | the commit graph, numbered | filters the commits; `Enter` shows one | All branches ✓ |
 
 As in fzf, the list fills from the bottom: the first row sits right above the input line, `Up` goes to the next
 one, `Home` to the top. Click a tab or use `Tab` / `Shift-Tab`; click **⚙ Config** (or `Ctrl-S`) for the tab's options, `Space` or a click
 toggles one. A double click is `Enter`, the wheel scrolls the list or the preview. `Alt-Up` / `Alt-Down` scroll the
-preview, `Ctrl-L` hides it, `Ctrl-R` runs the list again, `Esc` quits. The keys for the selected item are those under
+preview, `Ctrl-L` hides or shows it (each tab keeps its own; Files starts without one), `Ctrl-R` runs the list
+again, `Esc` quits. The keys for the selected item are those under
 [Keyboard Shortcuts](#-keyboard-shortcuts) and are shown in the middle of the tab bar. A bar on the right of the list and
 the preview shows where you are in them. Filtering is case-insensitive and
 every word must match (as `fzf -i -e`); the matches are shown red. The options are remembered in `~/.config/sf/config.toml`

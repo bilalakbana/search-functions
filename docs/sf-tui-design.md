@@ -346,3 +346,25 @@ between the two instead of an option in the popup):
   Archives & documents (Bilal: keep them there too). The code shares Content's: `commands::Search` says how a
   tab searches, `Tab::searches()` which tabs take a pattern.
 - Case: smart case as in the rest of sf (the scripts always passed `-i`); `sf deep P -- -i` for that.
+
+After v0.5.0 (2026-10-17):
+
+- Files starts without its preview (Bilal: the list is what Files is for; Ctrl-L shows it). Each tab keeps its
+  own (`App::previews_hidden`), so hiding Content's leaves Deep's; without a preview the list's border names the
+  root, which was in the preview's border only.
+- Fixed after Bilal saw Deep's preview fail on binaries: (1) ansi-to-tui breaks a line at every carriage
+  return, so a binary's match ending in `\r\r\n` became empty "Match #2, #3…" blocks; `items::ansi_text` now
+  leaves `\r` out (the fzf previews ran `tr -d '\r'`), which also helps a CRLF file anywhere. (2) A file sf calls
+  text (`is_text` looks at its first 8 KiB) with a NUL byte later made ugrep print "Binary file … matches"
+  instead of the lines: an empty preview under "Matches 2". The numbered preview's lines command has `-a` now.
+- Deep's preview made cheaper (Bilal chose all four; measured on this PC): a preview runs for the selected row
+  only, so many binaries cost the list (Deep on /opt, 2.6 GB in 1909 files: 0.46 s, the first row after 16 ms),
+  not the preview; one big file does. (1) A binary shows its first 300 matches, then the worker stops reading and
+  ends ugrep (`run_limited`): a 312 MB ELF with 5522 matches took 0.77 s and 2.5 MB of text, its first 300 take
+  0.09 s; the header still counts them all. (2) The header's count runs beside the matches (`with_header`, the
+  worker kills every group it runs when a newer request comes): a 634 MB zip took 4.8 s per scan, 9.5 s for the
+  two, now about 4.7 s. (3) A preview not there after 250 ms shows "searching inside NAME…" ("loading NAME…"
+  outside Content and Deep) instead of the previous row's. (4) Deep starts a preview once the cursor rests for
+  100 ms (`App::preview_wait`), so running down a list of binaries starts no scans. No size limit: it would hide
+  what was searched for.
+

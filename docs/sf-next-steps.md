@@ -31,6 +31,8 @@ How Bilal starts the next session (paste):
   - Step 4 (Each match, numbered preview): `cargo test` 290; `tests/e2e.sh` 121/121; platform_action 20/20;
     sub_functions 7/7.
   - Deep tab: `cargo test` 306; `tests/e2e.sh` 131/131; platform_action 20/20; sub_functions 7/7.
+  - v0.5.1 (Files without a preview, binary preview fixes, Deep preview speed): `cargo test` 316;
+    `tests/e2e.sh` 132/132.
   - Step 2 (same day): `cargo test` 243; `tests/e2e.sh` 86/86 (with a release package's layout);
     `tests/sub_functions.sh NEW_EMPTY_DIR` 7/7 (`-L sfrs-sub-functions`); `python3 -I packaging/test_build.py` 7;
     `packaging/test_package.sh PACKAGE NEW_EMPTY_DIR` all passed on Ubuntu 22.04, Debian 12, Ubuntu 24.04.
