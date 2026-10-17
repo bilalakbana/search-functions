@@ -374,7 +374,16 @@ keys "clear; '$SF' git" Enter
 expect 'views: the Git tab'                'second \(feat\)'
 keys C-f
 type_ 'feat'
-expect 'git: Ctrl-F finds in the preview'  'Find in preview › feat .*line [0-9]+/[0-9]+'
+expect 'git: Ctrl-F finds in the preview'  'Find in preview › feat .* 1/[0-9]+ *$'
+red_on 'feat' && ok 'git: Ctrl-F marks the match red' || bad 'git: Ctrl-F marks no match red'
+keys C-s
+expect 'git: Ctrl-S while finding, Find'"'"'s options'  ' Find options .*'
+expect 'git: Find has a regular expression' 'Regular expression'
+keys Down Space Escape
+expect 'git: Whole word on the input line' 'Find in preview › feat .*whole word'
+find_saved=$(awk '/^\[/ { s = ($0 == "[find]") } s' "$XDG/sf/config.toml" 2>/dev/null)
+[[ $find_saved == $'[find]\nmatch_case = false\nwhole_word = true\nregex = false'* ]] \
+    && ok 'git: Find'"'"'s options saved as [find]' || bad "git: [find] not saved: ${find_saved:-none}"
 keys Escape
 expect 'git: Esc back to the list'         'Git › '
 keys Enter

@@ -1275,6 +1275,7 @@ dependencies = [
  "dirs",
  "libc",
  "ratatui",
+ "regex",
  "serde",
  "toml",
 ]

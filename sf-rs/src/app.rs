@@ -2,6 +2,7 @@
 
 use std::cell::RefCell;
 use std::ffi::OsString;
+use std::ops::Range;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -16,6 +17,7 @@ use crate::actions::ActionKind;
 use crate::commands::{self, ListPlan, PreviewPlan};
 use crate::engines::Engines;
 use crate::filter::{Filter, TypeCounts};
+use crate::find::Finder;
 use crate::items::{self, Item};
 use crate::model::{Opt, Options, Tab};
 use crate::preview::PreviewMsg;
@@ -125,11 +127,23 @@ pub struct ScreenLayout {
     pub help: Rect,
 }
 
-/// Ctrl-F: what is looked for in the preview and the line it was found on.
+/// Ctrl-F: what is looked for in the preview, everywhere it was found and the current one.
 #[derive(Debug, Default)]
 pub struct Find {
     pub text: String,
-    pub found: Option<usize>,
+    /// Every match in the preview, in order: its line and the bytes of that line's text.
+    pub hits: Vec<(usize, Range<usize>)>,
+    /// The current match, an index into `hits`.
+    pub current: Option<usize>,
+    /// The regular expression typed does not parse (Regular expression is on).
+    pub bad: bool,
+}
+
+impl Find {
+    /// The line of the current match.
+    pub fn found_line(&self) -> Option<usize> {
+        self.current.map(|c| self.hits[c].0)
+    }
 }
 
 /// The Help tab: the manual, how far it is scrolled, what is looked for in it.
@@ -661,8 +675,8 @@ impl App {
         Vec::new()
     }
 
-    /// Ctrl-F's keys: type to find, Enter or Down the next, Up the one before, Esc or Ctrl-F back to the
-    /// list; None for Tab and Shift-Tab, which end it and switch.
+    /// Ctrl-F's keys: type to find, Enter or Down the next match, Up the one before, Ctrl-S Find's
+    /// options, Esc or Ctrl-F back to the list; None for Tab and Shift-Tab, which end it and switch.
     fn find_key(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -670,63 +684,71 @@ impl App {
         match key.code {
             KeyCode::Esc => self.preview_find = None,
             KeyCode::Char('f') if ctrl => self.preview_find = None,
+            KeyCode::Char('s') if ctrl => self.popup = Some(0),
             KeyCode::Tab | KeyCode::BackTab => {
                 self.preview_find = None;
                 return None;
             }
-            KeyCode::Enter | KeyCode::Down => {
-                let from = f.found;
-                self.find_in_preview(from, true);
-            }
-            KeyCode::Up => {
-                let from = f.found;
-                self.find_in_preview(from, false);
-            }
+            KeyCode::Enter | KeyCode::Down => self.next_match(true),
+            KeyCode::Up => self.next_match(false),
             KeyCode::Backspace => {
                 f.text.pop();
-                self.find_in_preview(None, true);
+                self.find_in_preview();
             }
             KeyCode::Char(c) if !ctrl && !alt => {
                 f.text.push(c);
-                self.find_in_preview(None, true);
+                self.find_in_preview();
             }
             _ => {}
         }
         Some(Vec::new())
     }
 
-    /// The next line of the preview after `from` (forward, round to the top) or before it that holds
-    /// what Ctrl-F looks for, case aside; scrolled to with two lines above it.
-    fn find_in_preview(&mut self, from: Option<usize>, forward: bool) {
+    /// Every match of what Ctrl-F looks for in the preview, by Find's options; the first is the current
+    /// one, scrolled to.
+    fn find_in_preview(&mut self) {
         let Some(f) = self.preview_find.as_mut() else {
             return;
         };
-        let needle = f.text.to_lowercase();
-        let lines = &self.preview.lines;
-        let n = lines.len();
-        let holds = |i: usize| {
-            let line: String = lines[i].spans.iter().map(|s| s.content.as_ref()).collect();
-            line.to_lowercase().contains(&needle)
+        f.hits.clear();
+        f.current = None;
+        f.bad = false;
+        match Finder::new(&f.text, &self.options.find) {
+            Ok(Some(finder)) => {
+                for (i, line) in self.preview.lines.iter().enumerate() {
+                    let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
+                    f.hits
+                        .extend(finder.matches(&text).into_iter().map(|r| (i, r)));
+                }
+            }
+            Ok(None) => {}
+            Err(_) => f.bad = true,
+        }
+        if !f.hits.is_empty() {
+            f.current = Some(0);
+        }
+        self.scroll_to_match();
+    }
+
+    /// The next match (forward, round to the first) or the one before (round to the last).
+    fn next_match(&mut self, forward: bool) {
+        let Some(f) = self.preview_find.as_mut() else {
+            return;
         };
-        f.found = if needle.is_empty() || n == 0 {
-            None
-        } else {
-            let start = match (from, forward) {
-                (None, _) => 0,
-                (Some(i), true) => i + 1,
-                (Some(i), false) => i + n - 1,
-            };
-            (0..n)
-                .map(|k| {
-                    if forward {
-                        (start + k) % n
-                    } else {
-                        (start + n - k) % n
-                    }
-                })
-                .find(|&i| holds(i))
-        };
-        if let Some(i) = f.found {
+        let n = f.hits.len();
+        if let Some(c) = f.current {
+            f.current = Some(if forward {
+                (c + 1) % n
+            } else {
+                (c + n - 1) % n
+            });
+        }
+        self.scroll_to_match();
+    }
+
+    /// The current match's line with two lines above it.
+    fn scroll_to_match(&mut self) {
+        if let Some(i) = self.preview_find.as_ref().and_then(Find::found_line) {
             self.preview_scroll = u16::try_from(i.saturating_sub(2)).unwrap_or(u16::MAX);
         }
     }
@@ -846,7 +868,7 @@ impl App {
         if self.preview_find.is_some() {
             // another row's preview while finding: looked for in it from the top
             self.preview = msg.text;
-            self.find_in_preview(None, true);
+            self.find_in_preview();
             return;
         }
         self.preview = msg.text;
@@ -1239,6 +1261,7 @@ impl App {
     /// the most first, and those turned off.
     pub fn popup_rows(&self) -> Vec<PopupRow> {
         let options = match self.scope {
+            _ if self.preview_find.is_some() => self.options.find_list(),
             Some(_) => self.options.in_file_list(),
             None => self.options.list(self.tab),
         };
@@ -1246,7 +1269,10 @@ impl App {
             .into_iter()
             .map(|(opt, on)| PopupRow::Opt(opt, on))
             .collect();
-        if !matches!(self.tab, Tab::Files | Tab::Content | Tab::Deep) || self.scope.is_some() {
+        if !matches!(self.tab, Tab::Files | Tab::Content | Tab::Deep)
+            || self.scope.is_some()
+            || self.preview_find.is_some()
+        {
             return rows;
         }
         let mut counts = self.types_of_rows();
@@ -1332,8 +1358,16 @@ impl App {
         self.preview_if_changed()
     }
 
-    /// Toggles the current tab's option at `index` (popup order).
+    /// Toggles the current tab's option at `index` (popup order); while finding, Find's.
     pub fn toggle_option(&mut self, index: usize, now: Instant) -> Vec<Effect> {
+        if self.preview_find.is_some() {
+            let Some(&(opt, _)) = self.options.find_list().get(index) else {
+                return Vec::new();
+            };
+            self.options.toggle_find(opt);
+            self.find_in_preview();
+            return self.save_options(Vec::new(), now);
+        }
         if self.scope.is_some() {
             let Some(&(opt, _)) = self.options.in_file_list().get(index) else {
                 return Vec::new();
@@ -1345,7 +1379,12 @@ impl App {
             };
             self.options.toggle(self.tab, opt);
         }
-        let mut fx = vec![self.run_list()];
+        let fx = vec![self.run_list()];
+        self.save_options(fx, now)
+    }
+
+    /// `fx` and the options saved, or a note that they cannot be.
+    fn save_options(&mut self, mut fx: Vec<Effect>, now: Instant) -> Vec<Effect> {
         if self.save_allowed {
             fx.push(Effect::SaveConfig);
         } else {
@@ -1576,19 +1615,19 @@ pub(crate) mod tests {
         assert!(a.preview_find.is_some());
         typed(&mut a, "needle", now);
         assert_eq!(a.query, "", "the list's filter is left alone");
-        assert_eq!(a.preview_find.as_ref().unwrap().found, Some(7));
+        assert_eq!(a.preview_find.as_ref().unwrap().found_line(), Some(7));
         assert_eq!(a.preview_scroll, 5, "with two lines above it");
         a.handle_key(key(KeyCode::Enter), now);
         assert_eq!(
-            a.preview_find.as_ref().unwrap().found,
+            a.preview_find.as_ref().unwrap().found_line(),
             Some(27),
             "Enter: the next"
         );
         a.handle_key(key(KeyCode::Down), now);
-        assert_eq!(a.preview_find.as_ref().unwrap().found, Some(47));
+        assert_eq!(a.preview_find.as_ref().unwrap().found_line(), Some(47));
         a.handle_key(key(KeyCode::Up), now);
         assert_eq!(
-            a.preview_find.as_ref().unwrap().found,
+            a.preview_find.as_ref().unwrap().found_line(),
             Some(27),
             "Up: the one before"
         );
@@ -1599,6 +1638,118 @@ pub(crate) mod tests {
         );
         assert!(a.preview_find.is_none());
         assert_eq!(a.handle_key(key(KeyCode::Esc), now), [Effect::Quit]);
+    }
+
+    /// Git with a commit and `lines` as its preview, finding (Ctrl-F) in it.
+    fn finding(lines: &[&str]) -> (App, Instant) {
+        let (mut a, now) = app_with_preview(Tab::Git);
+        feed(&mut a, &["abcdef1"]);
+        a.layout.preview = Rect::new(1, 2, 80, 10);
+        let text: Vec<Line> = lines.iter().map(|l| Line::raw(l.to_string())).collect();
+        a.on_preview(PreviewMsg {
+            header_lines: 0,
+            generation: a.preview_gen,
+            text: Text::from(text),
+        });
+        a.handle_key(ctrl('f'), now);
+        (a, now)
+    }
+
+    /// The current match: its line and byte range.
+    fn current(a: &App) -> Option<(usize, std::ops::Range<usize>)> {
+        let f = a.preview_find.as_ref().unwrap();
+        f.current.map(|c| f.hits[c].clone())
+    }
+
+    #[test]
+    fn ctrl_f_goes_from_match_to_match_round_and_counts_them() {
+        let (mut a, now) = finding(&["a x x", "b", "X"]);
+        typed(&mut a, "x", now);
+        assert_eq!(a.preview_find.as_ref().unwrap().hits.len(), 3);
+        assert_eq!(current(&a), Some((0, 2..3)), "the first, from the top");
+        a.handle_key(key(KeyCode::Enter), now);
+        assert_eq!(current(&a), Some((0, 4..5)), "the next on the same line");
+        a.handle_key(key(KeyCode::Down), now);
+        assert_eq!(current(&a), Some((2, 0..1)), "case aside");
+        a.handle_key(key(KeyCode::Enter), now);
+        assert_eq!(current(&a), Some((0, 2..3)), "round to the first");
+        a.handle_key(key(KeyCode::Up), now);
+        assert_eq!(current(&a), Some((2, 0..1)), "round to the last");
+        a.handle_key(key(KeyCode::Backspace), now);
+        let f = a.preview_find.as_ref().unwrap();
+        assert!(f.hits.is_empty() && f.current.is_none(), "nothing typed");
+    }
+
+    #[test]
+    fn ctrl_s_while_finding_shows_finds_options_and_finds_again() {
+        let (mut a, now) = finding(&["config configs", "reconfig config"]);
+        typed(&mut a, "config", now);
+        assert_eq!(a.preview_find.as_ref().unwrap().hits.len(), 4);
+        assert_eq!(a.handle_key(ctrl('s'), now), []);
+        assert_eq!(
+            a.popup_rows(),
+            [
+                PopupRow::Opt(Opt::MatchCase, false),
+                PopupRow::Opt(Opt::WholeWord, false),
+                PopupRow::Opt(Opt::Regex, false)
+            ],
+            "Find's options, no file types"
+        );
+        a.handle_key(key(KeyCode::Down), now);
+        assert_eq!(
+            a.handle_key(key(KeyCode::Char(' ')), now),
+            [Effect::SaveConfig],
+            "saved; the list does not run again"
+        );
+        assert!(a.options.find.whole_word && !a.options.git.match_case);
+        let f = a.preview_find.as_ref().unwrap();
+        assert_eq!(f.hits, [(0, 0..6), (1, 9..15)], "found again, whole words");
+        assert_eq!(f.current, Some(0));
+        a.handle_key(key(KeyCode::Esc), now);
+        assert!(
+            a.popup.is_none() && a.preview_find.is_some(),
+            "Esc closes the popup only"
+        );
+        assert_eq!(a.preview_find.as_ref().unwrap().text, "config");
+    }
+
+    #[test]
+    fn a_regular_expression_that_does_not_parse_finds_nothing_and_says_so() {
+        let (mut a, now) = finding(&["load looad"]);
+        a.options.find.regex = true;
+        typed(&mut a, "lo+ad", now);
+        assert_eq!(a.preview_find.as_ref().unwrap().hits.len(), 2);
+        typed(&mut a, "(", now);
+        let f = a.preview_find.as_ref().unwrap();
+        assert!(f.bad && f.hits.is_empty() && f.current.is_none());
+        a.handle_key(key(KeyCode::Enter), now);
+        a.handle_key(key(KeyCode::Backspace), now);
+        let f = a.preview_find.as_ref().unwrap();
+        assert!(!f.bad && f.hits.len() == 2, "{:?}", f.hits);
+    }
+
+    #[test]
+    fn another_rows_preview_is_found_in_from_the_top() {
+        let (mut a, now) = finding(&["needle"]);
+        typed(&mut a, "needle", now);
+        a.handle_key(key(KeyCode::Enter), now);
+        a.on_preview(PreviewMsg {
+            header_lines: 0,
+            generation: a.preview_gen,
+            text: Text::from(vec![Line::raw("a"), Line::raw("b needle needle")]),
+        });
+        let f = a.preview_find.as_ref().unwrap();
+        assert_eq!((f.hits.len(), current(&a)), (2, Some((1, 2..8))));
+    }
+
+    #[test]
+    fn find_options_not_saved_when_the_config_could_not_be_read() {
+        let (mut a, now) = finding(&["x"]);
+        a.save_allowed = false;
+        a.handle_key(ctrl('s'), now);
+        assert_eq!(a.handle_key(key(KeyCode::Char(' ')), now), []);
+        assert!(a.options.find.match_case, "on for this run");
+        assert!(a.status.as_ref().unwrap().0.contains("not saved"));
     }
 
     #[test]

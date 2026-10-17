@@ -8,6 +8,7 @@ mod config;
 mod doctor;
 mod engines;
 mod filter;
+mod find;
 mod help;
 mod items;
 mod model;

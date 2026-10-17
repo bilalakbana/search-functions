@@ -83,6 +83,10 @@ pub enum Opt {
     MatchCase,
     /// Git: a commit and a file's history (Ctrl-U) show the changed files whole.
     WholeFiles,
+    /// Ctrl-F: not inside a longer word.
+    WholeWord,
+    /// Ctrl-F: what is typed is a regular expression.
+    Regex,
 }
 
 impl Opt {
@@ -103,6 +107,8 @@ impl Opt {
             Opt::WordsInTheFile => "All words in the file",
             Opt::MatchCase => "Match case",
             Opt::WholeFiles => "Whole files",
+            Opt::WholeWord => "Whole word",
+            Opt::Regex => "Regular expression",
         }
     }
 
@@ -120,6 +126,8 @@ impl Opt {
             Opt::WordsInTheFile => "a b: both in the file, any lines",
             Opt::MatchCase => "A is not a",
             Opt::WholeFiles => "the changed files whole, not only around the changes",
+            Opt::WholeWord => "not inside a longer word",
+            Opt::Regex => r"a.*b  \d+  (x|y)",
         }
     }
 }
@@ -166,6 +174,15 @@ pub struct InFileOpts {
     pub words_on_a_line: bool,
     pub words_in_the_file: bool,
     pub match_case: bool,
+}
+
+/// Ctrl-F, finding in the preview (as Notepad++'s Find); all off: the text as typed, case aside.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FindOpts {
+    pub match_case: bool,
+    pub whole_word: bool,
+    pub regex: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -264,6 +281,7 @@ pub struct Options {
     pub content: ContentOpts,
     pub deep: DeepOpts,
     pub in_file: InFileOpts,
+    pub find: FindOpts,
     pub folders: FoldersOpts,
     pub git: GitOpts,
 }
@@ -347,6 +365,27 @@ impl Options {
                 f.words_on_a_line &= !f.words_in_the_file;
             }
             Opt::MatchCase => f.match_case = !f.match_case,
+            _ => {}
+        }
+    }
+
+    /// Ctrl-F's options, in popup order.
+    pub fn find_list(&self) -> Vec<(Opt, bool)> {
+        let f = &self.find;
+        vec![
+            (Opt::MatchCase, f.match_case),
+            (Opt::WholeWord, f.whole_word),
+            (Opt::Regex, f.regex),
+        ]
+    }
+
+    /// Toggles one of Ctrl-F's options; another does nothing.
+    pub fn toggle_find(&mut self, opt: Opt) {
+        let f = &mut self.find;
+        match opt {
+            Opt::MatchCase => f.match_case = !f.match_case,
+            Opt::WholeWord => f.whole_word = !f.whole_word,
+            Opt::Regex => f.regex = !f.regex,
             _ => {}
         }
     }
@@ -552,6 +591,45 @@ mod tests {
             assert!(!o.get(tab, Opt::MatchCase), "{tab:?}: off, as before");
         }
         assert!(!o.get(Tab::Content, Opt::WordsOnALine) && !o.get(Tab::Deep, Opt::WordsOnALine));
+    }
+
+    #[test]
+    fn find_has_its_own_options_all_off_and_saved_as_find() {
+        let mut o = Options::default();
+        assert_eq!(
+            o.find_list(),
+            [
+                (Opt::MatchCase, false),
+                (Opt::WholeWord, false),
+                (Opt::Regex, false)
+            ]
+        );
+        o.toggle_find(Opt::WholeWord);
+        o.toggle_find(Opt::Regex);
+        assert!(o.find.whole_word && o.find.regex && !o.find.match_case);
+        o.toggle_find(Opt::MatchCase);
+        assert!(o.find.match_case);
+        assert!(
+            !o.content.match_case && !o.in_file.match_case,
+            "Find's case leaves the tabs' alone"
+        );
+        o.toggle_find(Opt::Hidden);
+        assert_eq!(
+            o.find_list().len(),
+            3,
+            "an option Find does not have does nothing"
+        );
+        let saved = toml::to_string(&o).unwrap();
+        assert!(
+            saved.contains("[find]\nmatch_case = true\nwhole_word = true\nregex = true\n"),
+            "{saved}"
+        );
+        let old: Options = toml::from_str("[content]\nmatching_lines = true\n").unwrap();
+        assert_eq!(
+            old.find,
+            FindOpts::default(),
+            "a config from before has none"
+        );
     }
 
     #[test]

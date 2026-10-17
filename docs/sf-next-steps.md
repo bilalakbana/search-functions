@@ -6,9 +6,10 @@ was executed, the old handoff describes the state before that.
 
 How Bilal starts the next session (paste):
 
-> ~/.SearchFunctions'taki sf işine devam ediyoruz. Önce docs/sf-next-steps.md'yi oku, sonra sf-tui-design.md'yi.
-> <yapılacak iş: "Next steps"in sonunda açık kalanlar veya yeni bir istek>. Inline, alt agent olmadan, testleriyle.
-> Commit/push/silme için her seferinde benden onay al. Bana Türkçe kısa ara raporlar ver.
+> ~/.SearchFunctions'taki sf işine devam ediyoruz. Önce docs/sf-next-steps.md'yi oku (özellikle en alttaki
+> "Next, asked 2026-10-17 after v0.8.1"), sonra docs/sf-tui-design.md'nin son bölümlerini. Oradaki A ve B
+> işlerini sırayla yap: inline, alt agent olmadan, testleriyle, TDD. Commit/push/sürüm/silme için her
+> seferinde benden onay al. Bana Türkçe kısa ara raporlar ver.
 
 ## State
 
@@ -39,6 +40,8 @@ How Bilal starts the next session (paste):
   - Ctrl-S popup under ⚙ Config in columns (v0.7.1): `cargo test` 362; `tests/e2e.sh` 149/149.
   - git keys in tmux windows, Whole files, Alt-F, Ctrl-T in views (v0.8.0): `cargo test` 374; `tests/e2e.sh` 156/156.
   - Ctrl-F finds in the preview, Ctrl-Alt-F filters (Alt-F is KDE's; v0.8.1): `cargo test` 375; `tests/e2e.sh` 156/156.
+  - Ctrl-F as Notepad++'s Find (marks, count, Match case / Whole word / Regular expression): `cargo test` 399;
+    `tests/e2e.sh` 161/161.
   - Step 2 (same day): `cargo test` 243; `tests/e2e.sh` 86/86 (with a release package's layout);
     `tests/sub_functions.sh NEW_EMPTY_DIR` 7/7 (`-L sfrs-sub-functions`); `python3 -I packaging/test_build.py` 7;
     `packaging/test_package.sh PACKAGE NEW_EMPTY_DIR` all passed on Ubuntu 22.04, Debian 12, Ubuntu 24.04.
@@ -75,6 +78,7 @@ How Bilal starts the next session (paste):
 | `commands.rs` | pure: `list_plan` (engine command per tab/options/query; `Search` says how Content or Deep searches) and `preview_plan` (Sniff/Numbered/Run/Pipe, Content/Deep `Header` with `ugrep -c -o` counts) |
 | `items.rs` | compact rows (`Look::{Path, Match, Styled}`, ~160 B/row), parsers, `path_spans` (folders blue, `/` yellow, name green), `printable`, `ansi_text` (no escape gets through) |
 | `filter.rs` | fzf `-i -e --no-sort` semantics, parallel from 50 000 rows |
+| `find.rs` | Ctrl-F's `Finder`: where a preview line holds the text, by `[find]` (Match case, Whole word, Regular expression through the `regex` crate) |
 | `runner.rs` | list child in its own process group (kill on cancel), bounded records (64 KiB), batches, sorting/numbering |
 | `preview.rs` | preview worker (newest wins, kills the old), `is_text`, header lines, Content's numbered matches (`numbered_blocks`, `numbered_lines`) |
 | `app.rs` | state machine: keys, mouse, effects; list fills bottom-up like fzf (Up → next row, Home → top) |
@@ -195,3 +199,42 @@ results after a fixed pattern) followed in v0.5.2 (Bilal's OK), see the design d
 - The prototype `~/.SearchFunctions/sf` still calls xdg-open / open_in_file_manager / wl-copy itself (Linux only).
 - `cargo clippy` names 6 older spots (collapsible `if`s in app.rs, ui.rs, main.rs, preview.rs, runner.rs; a manual
   range check in a preview test); none in the Step 4 code.
+
+## Next, asked 2026-10-17 after v0.8.1 (the session ended at a full context)
+
+State at the hand-over:
+- sf 0.8.1: commits 8e19561 + 4d7b20d pushed; released as v0.8.1 (run 39036722844), downloaded from the
+  README's `releases/latest` URL, sha256 OK, `sf doctor` says 0.8.1: verified before the hand-over.
+  This hand-over note itself (docs/sf-next-steps.md) is uncommitted: commit it with his OK.
+  (Its dry run failed once on a DNS error of GitHub's runner while fetching a license text; `gh run rerun`
+  passed: a network hiccup, not our code.)
+- `~/.cargo/bin/sf` is 0.8.1. `~/.dot-files` commit a4ee358 (tmux Ctrl+F only in Claude Code panes) is
+  NOT pushed (master ahead 1): push only with his OK.
+- Tests at the hand-over: `cargo test` 375, `tests/e2e.sh` 156/156, platform_action 20/20, sub_functions 7/7;
+  clippy: the 6 old warnings only.
+- Keys now: Ctrl-F find in the preview (every tab; app.rs `Find`, `find_key`, `find_in_preview`; ui
+  `draw_preview` bands the found line), Ctrl-Alt-F Content/Deep result filter (Alt+F is KDE's rofi launcher),
+  Ctrl-S options + file types (popup at the right edge, `ui::popup_geometry`), Ctrl-T in file (tmux: window
+  `sf in`), Ctrl-G/Alt-G/Ctrl-U/Alt-U views (tmux: windows `sf diff|history|log`), Help tab (help.rs).
+
+A. Ctrl-F, find in the preview, as Notepad++'s Find (Bilal, 2026-10-17) — built 2026-10-17, uncommitted; what and
+why: `docs/sf-tui-design.md` → "Ctrl-F as Notepad++'s Find" (his choices: all three options, saved, red marks).
+The ask was:
+- He asked whether Files and Content need it. Answer to give: it finds inside the SELECTED document's preview
+  (Files: the file itself; Content: its numbered matches; Git: the commit), which neither tab's own search
+  does; he liked that, but:
+- It highlights no word: only the found line gets a band. Mark the typed text red in every visible line
+  (all occurrences, the current one stronger), and show a count ("3/17").
+- Give Ctrl-F options of its own, like Notepad++/Notepadqq's Find: at least Match case, Whole word, Regular
+  expression; maybe Wrap around (now always on), direction. Research Notepad++'s Find dialog first (official
+  docs: npp-user-manual.org "Searching"; Notepadqq on Linux); he allowed web search and Brave
+  (Claude in Chrome tools). Then a short proposal with a mockup and AskUserQuestion before building.
+  Where the options live: probably a Ctrl-S popup while finding (as inside a file, `in_file`), saved.
+- Mind: crossterm/tmux/KDE key conflicts (memory feedback-sf-keys-vs-tmux-root: check `tmux list-keys -T
+  root`, `~/.config/kglobalshortcutsrc`, `ghostty +list-keybinds --default`).
+
+B. After A: what other search tools offer in their options (ripgrep/ugrep flags, fzf, VS Code's search
+  panel: include/exclude globs, whole word, regex, preserve case; Everything; Notepad++ Find in Files;
+  Double Commander / Dolphin search), and propose the few that would help sf. Bilal's taste: minimal, no
+  feature overload; give a recommendation with reasons and one alternative each; ask before building.
+

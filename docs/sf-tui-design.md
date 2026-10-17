@@ -456,3 +456,29 @@ four git keys get windows, Alt-F for finding):
   config (`-f /dev/null`) and could not see it. His tmux now opens that popup in Claude Code panes only and
   hands Ctrl-F to every other program. None of sf's other keys is bound at his tmux root.
 
+Ctrl-F as Notepad++'s Find (2026-10-17; Bilal asked whether Files and Content need it: it finds inside the
+selected document's preview, the file itself, Content's numbered matches, a commit, which neither tab's own
+search does; he wanted the found text marked, a count and options of its own; his choices from a proposal with
+mockups: all three options, saved, red marks):
+
+- Looked at first: Notepad++'s Find (npp-user-manual.org "Searching": Normal / Extended / Regular expression,
+  Match whole word only, Match case, Wrap around, Backward direction, In selection, Count, Find All, Mark) and its
+  incremental search bar (Highlight all, Match case, a "2/5" count); Notepadqq's dialog (its source: Match case,
+  Match whole word only, plain text or regular expressions, Find ⇧ ⇩).
+- Every match on the lines shown is red and bold, the current one dark on red; the current one's line keeps its
+  band. The input line counts them ("3/17"), says "not found", or "bad regex" while a regular expression does not
+  parse. Enter or ↓ goes to the next match (on the same line too), ↑ to the one before, round at either end;
+  typing, an option or another row's preview finds again from the top.
+- Ctrl-S while finding opens Find's own options (popup " Find options ", no file types): Match case (off: case
+  aside, not smart case: it is an editor's find, not a pattern), Whole word (no word character, a letter, digit
+  or `_` in any script, right before or after, as Notepad++ says; with a regular expression too, as VS Code),
+  Regular expression (Rust's `regex` crate, already in Cargo.lock through a dependency: RE2-like, no look-around
+  or back-references, so not ugrep's dialect). Saved as `[find]`; the ones on are named on the input line.
+  `find.rs` (`Finder`) does the matching, pure and unit-tested; a match that is not a whole word lets the search
+  go on from its next character, so a whole word starting inside it is still found.
+- Left out on purpose: Wrap around (always round; the count shows where one is), Backward direction (↑),
+  Extended (`\n`, `\t`: the preview is lines), Find All (Content's Matching lines), Mark and In selection
+  (nothing to mark or select in a preview). VS Code's Alt-C / Alt-W / Alt-R were not taken: Bilal's KDE launches
+  programs on Alt+C and Alt+R.
+- Fixed on the way: finding from Content's result filter (Ctrl-Alt-F) showed the filter's "· filter: …" on the
+  input line next to what is found.

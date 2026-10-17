@@ -69,7 +69,7 @@ const KEYS: &[(&str, &str)] = &[
     ("Ctrl-S", "options and file types (⚙ Config)"),
     (
         "Ctrl-F",
-        "find in the preview: Enter ↓ the next, ↑ the one before, Esc back",
+        "find in the preview: Enter ↓ the next, ↑ the one before, Ctrl-S its options, Esc back",
     ),
     (
         "Ctrl-Alt-F",
@@ -113,7 +113,18 @@ const OPTIONS: &[(&str, &str)] = &[
         "All words in the file",
         "ankara izmir: the files with both, on any lines",
     ),
-    ("Match case", "A is not a (else lower case finds both)"),
+    (
+        "Match case",
+        "A is not a (else lower case finds both; Ctrl-F: else case aside)",
+    ),
+    (
+        "Whole word",
+        "Ctrl-F: not inside a longer word (config, not reconfig)",
+    ),
+    (
+        "Regular expression",
+        "Ctrl-F: what is typed is a regex (Rust's: no look-around)",
+    ),
     (
         "All branches",
         "Git: every branch, not only the current one",
@@ -374,7 +385,8 @@ mod tests {
         let o = Options::default();
         for tab in Tab::ALL {
             assert!(manual.contains(&format!("  {}", tab.title())), "{tab:?}");
-            for (opt, _) in o.list(tab).into_iter().chain(o.in_file_list()) {
+            let lists = o.list(tab).into_iter().chain(o.in_file_list());
+            for (opt, _) in lists.chain(o.find_list()) {
                 let label = opt.label(tab);
                 assert!(manual.contains(label), "{tab:?}: {label}");
             }

@@ -2,6 +2,8 @@
 //! the list (filled from the bottom, as fzf) and the input line; the
 //! Config popup over them. Records where everything went in `app.layout` for the mouse.
 
+use std::ops::Range;
+
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::{Modifier, Style};
@@ -294,19 +296,37 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect, status: Option<Line<'s
         .take(inner.height as usize)
         .cloned()
         .collect();
-    // Ctrl-F: the line it found, in a band over whatever colour its parts have (delta's diff colours)
-    if let Some(i) = app
-        .preview_find
-        .as_ref()
-        .and_then(|f| f.found)
-        .and_then(|f| f.checked_sub(from))
-        .filter(|&i| i < shown.len())
-    {
-        let band = Style::new().bg(theme::SURFACE);
-        let line = &mut shown[i];
-        line.style = line.style.patch(band);
-        for span in &mut line.spans {
-            span.style = span.style.patch(band);
+    // Ctrl-F: the current match's line in a band over whatever colour its parts have (delta's diff
+    // colours), then every match on the lines shown marked
+    if let Some(f) = &app.preview_find {
+        if let Some(i) = f
+            .found_line()
+            .and_then(|f| f.checked_sub(from))
+            .filter(|&i| i < shown.len())
+        {
+            let band = Style::new().bg(theme::SURFACE);
+            let line = &mut shown[i];
+            line.style = line.style.patch(band);
+            for span in &mut line.spans {
+                span.style = span.style.patch(band);
+            }
+        }
+        let first = f.hits.partition_point(|(l, _)| *l < from);
+        for (k, (l, _)) in f.hits.iter().enumerate().skip(first) {
+            if *l >= from + shown.len() {
+                break;
+            }
+            if k > first && f.hits[k - 1].0 == *l {
+                continue; // the line is marked already
+            }
+            let marks: Vec<(Range<usize>, bool)> = f.hits[k..]
+                .iter()
+                .enumerate()
+                .take_while(|(_, (m, _))| m == l)
+                .map(|(j, (_, r))| (r.clone(), f.current == Some(k + j)))
+                .collect();
+            let line = std::mem::take(&mut shown[l - from]);
+            shown[l - from] = mark_matches(line, &marks);
         }
     }
     frame.render_widget(
@@ -321,6 +341,48 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect, status: Option<Line<'s
         inner.height as usize,
     );
     inner
+}
+
+/// Ctrl-F's matches marked in `line`, given as the bytes of its text and whether it is the current
+/// one: every one red, the current one on red; a part a match crosses is split there.
+fn mark_matches(line: Line<'static>, marks: &[(Range<usize>, bool)]) -> Line<'static> {
+    let other = Style::new().fg(theme::RED).add_modifier(Modifier::BOLD);
+    let current = Style::new()
+        .fg(theme::BASE)
+        .bg(theme::RED)
+        .add_modifier(Modifier::BOLD);
+    let mut spans = Vec::with_capacity(line.spans.len() + 2 * marks.len());
+    let mut start = 0; // of the part in the line's text
+    for span in line.spans {
+        let text = span.content.as_ref();
+        let end = start + text.len();
+        let mut at = start; // what of the part is out
+        for (r, is_current) in marks {
+            let (from, to) = (r.start.max(at), r.end.min(end));
+            if from >= to {
+                continue;
+            }
+            if from > at {
+                spans.push(Span::styled(
+                    text[at - start..from - start].to_string(),
+                    span.style,
+                ));
+            }
+            let mark = if *is_current { current } else { other };
+            spans.push(Span::styled(
+                text[from - start..to - start].to_string(),
+                span.style.patch(mark),
+            ));
+            at = to;
+        }
+        if at == start {
+            spans.push(span); // no match in it
+        } else if at < end {
+            spans.push(Span::styled(text[at - start..].to_string(), span.style));
+        }
+        start = end;
+    }
+    Line { spans, ..line }
 }
 
 fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, status: Option<Line<'static>>) -> Rect {
@@ -481,12 +543,14 @@ fn short(opt: Opt) -> &'static str {
         Opt::MatchCase => "match case",
         Opt::WholeFiles => "whole files",
         Opt::AllBranches => "all branches",
+        Opt::WholeWord => "whole word",
+        Opt::Regex => "regex",
     }
 }
 
 fn placeholder(app: &App) -> &'static str {
     if app.preview_find.is_some() {
-        return "type to find · Enter ↓ the next · ↑ the one before · Esc back";
+        return "type to find · Enter ↓ the next · ↑ the one before · ^S options · Esc back";
     }
     if app.scope.is_some() {
         let f = &app.options.in_file;
@@ -519,6 +583,7 @@ fn placeholder(app: &App) -> &'static str {
 
 fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     let options = match app.scope {
+        _ if app.preview_find.is_some() => app.options.find_list(),
         Some(_) => app.options.in_file_list(), // inside one file, its own
         None => app.options.list(app.tab),
     };
@@ -543,11 +608,13 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     }
     let mut count_style = style(theme::DIM);
     if let Some(f) = &app.preview_find {
-        // Ctrl-F: the line found, or that it is nowhere in the preview
-        if !f.text.is_empty() && f.found.is_none() {
+        // Ctrl-F: which match of how many, or that it is nowhere in the preview
+        if f.bad {
+            (count, count_style) = ("bad regex".into(), style(theme::RED));
+        } else if !f.text.is_empty() && f.current.is_none() {
             (count, count_style) = ("not found".into(), style(theme::RED));
-        } else if let Some(i) = f.found {
-            count = format!("line {}/{}", i + 1, app.preview.lines.len());
+        } else if let Some(c) = f.current {
+            count = format!("{}/{}", c + 1, f.hits.len());
         }
     } else if app.tab == Tab::Help {
         // the manual: where it is, or that the search is nowhere in it
@@ -604,8 +671,12 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         left.push(Span::styled(query, style(theme::TEXT)));
     }
-    // Ctrl-Alt-F: the pattern stays; the cursor is in the words that filter the rows
-    if let Some(words) = &app.result_filter {
+    // Ctrl-Alt-F: the pattern stays; the cursor is in the words that filter the rows (not while finding)
+    if let Some(words) = app
+        .result_filter
+        .as_ref()
+        .filter(|_| app.preview_find.is_none())
+    {
         let words = crate::items::printable(words);
         left.push(Span::styled(" · filter: ", style(theme::FAINT)));
         cursor_x += " · filter: ".chars().count() as u16 + Line::raw(words.as_str()).width() as u16;
@@ -820,6 +891,7 @@ fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLa
         "Space / click · Esc close"
     };
     let title = match app.scope {
+        _ if app.preview_find.is_some() => " Find options ".to_string(),
         Some(_) => " In file options ".to_string(),
         None => format!(" {} options ", app.tab.title()),
     };
@@ -1795,6 +1867,170 @@ mod tests {
         let (mut a, _) = app(Tab::Git);
         let top = row(&render(&mut a, 200, 24), 0);
         assert!(top.contains("^F find"), "{top:?}");
+    }
+
+    /// Git with `lines` as the commit's preview, Ctrl-F finding `text` in it.
+    fn finding_in(lines: Vec<Line<'static>>, text: &str) -> (App, Instant) {
+        let (mut a, now) = app_with_preview(Tab::Git);
+        feed(&mut a, &["abcdef1"]);
+        render(&mut a, 120, 30);
+        a.on_preview(crate::preview::PreviewMsg {
+            header_lines: 0,
+            generation: a.preview_gen,
+            text: Text::from(lines),
+        });
+        a.handle_key(ctrl('f'), now);
+        for c in text.chars() {
+            a.handle_key(key(KeyCode::Char(c)), now);
+        }
+        (a, now)
+    }
+
+    #[test]
+    fn ctrl_f_marks_every_match_red_the_current_one_on_red() {
+        let lines = vec![Line::raw("x one"), Line::raw("two x X")];
+        let (mut a, now) = finding_in(lines, "x");
+        let buf = render(&mut a, 120, 30);
+        let (x0, y0) = find(&buf, "x one").unwrap();
+        let (x1, y1) = find(&buf, "two x X").unwrap();
+        let current = &buf[(x0, y0)];
+        assert_eq!(
+            (current.bg, current.fg),
+            (theme::RED, theme::BASE),
+            "the current one"
+        );
+        for x in [x1 + 4, x1 + 6] {
+            let c = &buf[(x, y1)];
+            assert_eq!(c.fg, theme::RED, "every other one red, case aside");
+            assert!(c.modifier.contains(Modifier::BOLD) && c.bg != theme::RED);
+        }
+        assert_ne!(
+            buf[(x1, y1)].fg,
+            theme::RED,
+            "the rest of the line as it was"
+        );
+        a.handle_key(key(KeyCode::Enter), now);
+        let buf = render(&mut a, 120, 30);
+        assert_eq!(
+            buf[(x1 + 4, y1)].bg,
+            theme::RED,
+            "Enter: the next is current"
+        );
+        assert_eq!(
+            (buf[(x1 + 6, y1)].fg, buf[(x1 + 6, y1)].bg),
+            (theme::RED, theme::SURFACE),
+            "red on the current line's band"
+        );
+        assert_eq!(buf[(x0, y0)].fg, theme::RED);
+        assert_ne!(buf[(x0, y0)].bg, theme::RED);
+    }
+
+    #[test]
+    fn a_match_across_coloured_parts_is_marked_whole() {
+        let green = Style::new().bg(ratatui::style::Color::Rgb(0, 80, 0));
+        let line = Line::from(vec![
+            Span::styled("+ ne", green),
+            Span::styled("edle b", green.fg(theme::YELLOW)),
+        ]);
+        let (mut a, _) = finding_in(vec![Line::raw("ctx"), line], "needle");
+        let buf = render(&mut a, 120, 30);
+        let (x, y) = find(&buf, "+ needle b").unwrap();
+        for dx in 2..8 {
+            assert_eq!(buf[(x + dx, y)].bg, theme::RED, "column {dx}");
+        }
+        assert_eq!(buf[(x, y)].bg, theme::SURFACE, "the band before it");
+        assert_eq!(
+            (buf[(x + 9, y)].bg, buf[(x + 9, y)].fg),
+            (theme::SURFACE, theme::YELLOW),
+            "after it, the part's own colour on the band"
+        );
+    }
+
+    #[test]
+    fn ctrl_f_counts_the_matches() {
+        let lines = vec![Line::raw("a b a"), Line::raw("a")];
+        let (mut a, now) = finding_in(lines, "a");
+        let input = |a: &mut App| row(&render(a, 120, 30), 29);
+        assert!(
+            input(&mut a).trim_end().ends_with("1/3"),
+            "{:?}",
+            input(&mut a)
+        );
+        a.handle_key(key(KeyCode::Enter), now);
+        assert!(
+            input(&mut a).trim_end().ends_with("2/3"),
+            "{:?}",
+            input(&mut a)
+        );
+        a.handle_key(key(KeyCode::Char('z')), now);
+        assert!(input(&mut a).contains("not found"), "{:?}", input(&mut a));
+        a.handle_key(key(KeyCode::Backspace), now);
+        a.options.find.regex = true;
+        a.handle_key(key(KeyCode::Char('(')), now);
+        let buf = render(&mut a, 120, 30);
+        let (x, y) = find(&buf, "bad regex").expect("bad regex");
+        assert_eq!(buf[(x, y)].fg, theme::RED);
+    }
+
+    #[test]
+    fn ctrl_s_while_finding_shows_finds_options() {
+        let (mut a, now) = finding_in(vec![Line::raw("a")], "");
+        let buf = render(&mut a, 120, 30);
+        assert!(row(&buf, 29).contains("^S options"), "{:?}", row(&buf, 29));
+        assert!(
+            !row(&buf, 29).contains("all branches"),
+            "the Git tab's options are not Find's: {:?}",
+            row(&buf, 29)
+        );
+        a.handle_key(ctrl('s'), now);
+        let buf = render(&mut a, 120, 30);
+        assert!(find(&buf, " Find options ").is_some());
+        assert!(find(&buf, "Regular expression").is_some());
+        a.handle_key(key(KeyCode::Down), now);
+        a.handle_key(key(KeyCode::Char(' ')), now);
+        a.handle_key(key(KeyCode::Esc), now);
+        let input = row(&render(&mut a, 120, 30), 29);
+        assert!(input.contains("whole word"), "{input:?}");
+    }
+
+    #[test]
+    fn finding_from_the_result_filter_shows_only_what_is_found() {
+        let (mut a, now) = app_with_preview(Tab::Content);
+        feed(&mut a, &["a.txt"]);
+        a.query = "needle".into();
+        a.result_filter = Some("words".into());
+        a.handle_key(ctrl('f'), now);
+        assert!(a.preview_find.is_some());
+        let input = row(&render(&mut a, 120, 30), 29);
+        assert!(
+            input.contains("Find in preview › type to find") && !input.contains("filter"),
+            "{input:?}"
+        );
+        a.handle_key(key(KeyCode::Esc), now);
+        let input = row(&render(&mut a, 120, 30), 29);
+        assert!(input.contains("needle · filter: words"), "back: {input:?}");
+    }
+
+    #[test]
+    fn marks_split_the_parts_they_cross() {
+        let red = Style::new().fg(theme::RED);
+        let line = Line::from(vec![Span::raw("ab"), Span::styled("cd", red)]);
+        let marked = mark_matches(line, &[(1..3, false)]);
+        let parts: Vec<(&str, Style)> = marked
+            .spans
+            .iter()
+            .map(|s| (s.content.as_ref(), s.style))
+            .collect();
+        let other = Style::new().fg(theme::RED).add_modifier(Modifier::BOLD);
+        assert_eq!(
+            parts,
+            [
+                ("a", Style::new()),
+                ("b", Style::new().patch(other)),
+                ("c", red.patch(other)),
+                ("d", red)
+            ]
+        );
     }
 
     #[test]
