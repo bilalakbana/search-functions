@@ -15,8 +15,8 @@ How Bilal starts the next session (paste):
 - `~/.SearchFunctions/sf-rs`: the Rust app `sf` (ratatui 0.30, ~7300 lines incl. tests). Installed as
   `~/.cargo/bin/sf` (`cargo install --path ~/.SearchFunctions/sf-rs`); nothing else in PATH is named sf. The fzf
   prototype `~/.SearchFunctions/sf` still exists (README suggests `alias sf-fzf=…`).
-- Git: `origin` (github.com/bilalakbana/search-functions, public) has Steps 1 and 2 and the command line;
-  releases `v0.1.0` and `v0.2.0` (2026-10-17); later commits: `git log origin/main..main`.
+- Git: `origin` (github.com/bilalakbana/search-functions, public) has Steps 1 to 3 and the command line;
+  releases `v0.1.0`, `v0.2.0` and `v0.3.0` (2026-10-17); later commits: `git log origin/main..main`.
 - Bilal's config `~/.config/sf/config.toml` holds every option explicitly (sf writes all values); on 2026-10-17
   its hidden/ignored values were set to the new defaults (hidden false, ignored true) with his OK.
 - Tests, all green on 2026-10-17 after Step 1:
@@ -135,13 +135,12 @@ Still open:
   requests" in the repo settings), aarch64 packages. A new release: raise `version` in `sf-rs/Cargo.toml`,
   commit, push, then tag `vX.Y.Z` the same.
 
-### Step 3: the terminal windows inside sf — done 2026-10-17 (not released yet)
+### Step 3: the terminal windows inside sf — done and released as v0.3.0, 2026-10-17
 
 What and why: `docs/sf-tui-design.md` → "Step 3". Ctrl-U/Ctrl-G/Alt-G/Alt-U and Enter in Git are views inside sf
 (`views.rs`: git through delta side by side, `/` search, Esc back); Ctrl-T narrows Content to the file (any of the
 typed words); sf runs no script any more, the package drops fzf and the scripts (12 MB). Tests: `cargo test` 277,
-`tests/e2e.sh` 114/114 (real git and delta for the views). Release v0.3.0 needs Bilal's OK (version, commit,
-push, CI dry run, tag).
+`tests/e2e.sh` 114/114 (real git and delta for the views). Released as v0.3.0 (Bilal's OK).
 
 The engines (fd, ugrep, bat, git, delta) stay external on purpose: reimplementing them would change the regex
 dialect and lose ugrep+'s archive/PDF search.
