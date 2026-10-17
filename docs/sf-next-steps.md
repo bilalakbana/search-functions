@@ -15,8 +15,8 @@ How Bilal starts the next session (paste):
 - `~/.SearchFunctions/sf-rs`: the Rust app `sf` (ratatui 0.30, ~7300 lines incl. tests). Installed as
   `~/.cargo/bin/sf` (`cargo install --path ~/.SearchFunctions/sf-rs`); nothing else in PATH is named sf. The fzf
   prototype `~/.SearchFunctions/sf` still exists (README suggests `alias sf-fzf=…`).
-- Git: `origin` (github.com/bilalakbana/search-functions, public) has Steps 1 and 2 (`main` at `02464b8`, tag
-  `v0.1.0`, 2026-10-17); later commits: `git log origin/main..main`.
+- Git: `origin` (github.com/bilalakbana/search-functions, public) has Steps 1 and 2 and the command line;
+  releases `v0.1.0` and `v0.2.0` (2026-10-17); later commits: `git log origin/main..main`.
 - Bilal's config `~/.config/sf/config.toml` holds every option explicitly (sf writes all values); on 2026-10-17
   its hidden/ignored values were set to the new defaults (hidden false, ignored true) with his OK.
 - Tests, all green on 2026-10-17 after Step 1:
@@ -27,7 +27,7 @@ How Bilal starts the next session (paste):
     powershell.exe/wslpath, fresh `XDG_CONFIG_HOME`; WSL mode, OSC 52 through tmux, the commands, `sf doctor`.
   - `tests/platform_action.sh NEW_EMPTY_DIR` → 20/20: the fzf functions' wrapper (with sf, an old sf, no sf) and
     `sub-functions/file_list` in a private tmux server (`-L sfrs-platform-action`).
-  - After v0.1.0 (command line, `--print`, Ctrl-O's editor): `cargo test` 261; `tests/e2e.sh` 98/98.
+  - v0.2.0 (command line, `--print`, Ctrl-O's editor): `cargo test` 261; `tests/e2e.sh` 98/98.
   - Step 2 (same day): `cargo test` 243; `tests/e2e.sh` 86/86 (with a release package's layout);
     `tests/sub_functions.sh NEW_EMPTY_DIR` 7/7 (`-L sfrs-sub-functions`); `python3 -I packaging/test_build.py` 7;
     `packaging/test_package.sh PACKAGE NEW_EMPTY_DIR` all passed on Ubuntu 22.04, Debian 12, Ubuntu 24.04.
@@ -125,9 +125,8 @@ images used for the tests were removed again.
 
 Still open:
 
-- The command line (`sf content needle`, `-- ENGINE-OPTIONS`, `--print`, pipes), Ctrl-O's editor choice and
-  the README's wget line came after v0.1.0 (see the design doc's "Command line"): they reach people with the
-  next release (raise `version` in `sf-rs/Cargo.toml` to 0.2.0, commit, push, tag `v0.2.0`; Bilal's OK).
+- v0.2.0 (same day, Bilal's OK): the command line (`sf content needle`, `-- ENGINE-OPTIONS`, `--print`,
+  pipes), Ctrl-O's editor choice and the README's wget line (see the design doc's "Command line").
 - Bilal on WSL: install with the README's line, then the Step 1 checklist above.
 - Later, if wanted: a weekly workflow that bumps `bundle.toml` (would need "Allow GitHub Actions to create pull
   requests" in the repo settings), aarch64 packages. A new release: raise `version` in `sf-rs/Cargo.toml`,

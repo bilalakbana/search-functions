@@ -257,7 +257,7 @@ Release package (Step 2 of `docs/sf-next-steps.md`, 2026-10-17):
   publish. Only `actions/checkout`, pinned by commit; `permissions: {}` at the top, `contents: write` for the
   job; values reach the scripts as environment variables. No weekly version check for now (Bilal).
 
-Command line (after v0.1.0, 2026-10-17; Bilal asked for engine flags and a print mode):
+Command line (v0.2.0, 2026-10-17; Bilal asked for engine flags and a print mode):
 
 - `sf [files|content|folders|git] [QUERY...] [--print] [-- ENGINE-OPTIONS...]` (`cli.rs`). QUERY (words joined
   by spaces) starts the tab with it: the filter in Files, Folders and Git, the pattern in Content. A word with a
