@@ -69,11 +69,11 @@ const KEYS: &[(&str, &str)] = &[
     ("Ctrl-S", "options and file types (⚙ Config)"),
     (
         "Ctrl-F",
-        "Content, Deep: keep the pattern, typing filters the files found",
+        "find in the preview: Enter ↓ the next, ↑ the one before, Esc back",
     ),
     (
-        "Alt-F",
-        "find in the preview: Enter ↓ the next, ↑ the one before, Esc back",
+        "Ctrl-Alt-F",
+        "Content, Deep: keep the pattern, typing filters the files found",
     ),
     ("Ctrl-L", "hide or show the preview"),
     ("Ctrl-R", "run the list again"),

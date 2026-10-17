@@ -195,8 +195,8 @@ expect 'deep: each match in a binary'      'src/blob\.bin:1:'
 expect 'deep: each match in an archive'    'docs/arch\.zip\{inzip\.txt\}:1:needle inside zip'
 keys C-s Space Escape
 expect 'deep: files again'                 'Deep › needle .* 7/7'
-keys C-f; type_ 'blob'
-expect 'deep: Ctrl-F filters the rows'     'Deep › needle · filter: blob .* 1/7'
+keys C-M-f; type_ 'blob'
+expect 'deep: Ctrl-Alt-F filters the rows' 'Deep › needle · filter: blob .* 1/7'
 keys Escape
 expect 'deep: Esc back to the pattern'     'Deep › needle +ignored +7/7'
 
@@ -372,9 +372,9 @@ keys Escape
 expect 'views: quit'                       '^READY>\s*$'
 keys "clear; '$SF' git" Enter
 expect 'views: the Git tab'                'second \(feat\)'
-keys M-f
+keys C-f
 type_ 'feat'
-expect 'git: Alt-F finds in the preview'   'Find in preview › feat .*line [0-9]+/[0-9]+'
+expect 'git: Ctrl-F finds in the preview'  'Find in preview › feat .*line [0-9]+/[0-9]+'
 keys Escape
 expect 'git: Esc back to the list'         'Git › '
 keys Enter

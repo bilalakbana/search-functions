@@ -60,8 +60,8 @@ selected item are named in the middle of the tab bar. Options are kept in $XDG_C
 (~/.config/sf/config.toml).
 
 QUERY starts the tab with it: what filters the list in Files, Folders and Git, the pattern in Content and
-Deep, where typing then filters the files found by their names (Ctrl-F; Esc edits the pattern, as Ctrl-F
-does at any time). Options after -- go to the starting tab's engine: fd in Files and Folders, ugrep in
+Deep, where typing then filters the files found by their names (Ctrl-Alt-F; Esc edits the pattern, as
+Ctrl-Alt-F does at any time; Ctrl-F finds in the preview). Options after -- go to the starting tab's engine: fd in Files and Folders, ugrep in
 Content and Deep, git log in Git (sf files -- -e rs, sf content TODO -- -t py, sf deep needle -- -i);
 those that change what the engine prints are refused. With --print, or when the output goes to a pipe or
 a file, sf prints the list instead of opening the window: on a terminal as the window shows it, into a

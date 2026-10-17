@@ -294,7 +294,7 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect, status: Option<Line<'s
         .take(inner.height as usize)
         .cloned()
         .collect();
-    // Alt-F: the line it found, in a band over whatever colour its parts have (delta's diff colours)
+    // Ctrl-F: the line it found, in a band over whatever colour its parts have (delta's diff colours)
     if let Some(i) = app
         .preview_find
         .as_ref()
@@ -543,7 +543,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     }
     let mut count_style = style(theme::DIM);
     if let Some(f) = &app.preview_find {
-        // Alt-F: the line found, or that it is nowhere in the preview
+        // Ctrl-F: the line found, or that it is nowhere in the preview
         if !f.text.is_empty() && f.found.is_none() {
             (count, count_style) = ("not found".into(), style(theme::RED));
         } else if let Some(i) = f.found {
@@ -604,7 +604,7 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         left.push(Span::styled(query, style(theme::TEXT)));
     }
-    // Ctrl-F: the pattern stays; the cursor is in the words that filter the rows
+    // Ctrl-Alt-F: the pattern stays; the cursor is in the words that filter the rows
     if let Some(words) = &app.result_filter {
         let words = crate::items::printable(words);
         left.push(Span::styled(" · filter: ", style(theme::FAINT)));
@@ -644,7 +644,7 @@ fn footer_items(tab: Tab, editor: &str) -> Vec<String> {
         Tab::Content | Tab::Deep => &[
             "Enter open",
             "^S options",
-            "^F filter",
+            "^Alt-F filter",
             "^O",
             "^T in file",
             "^U/^G diff",
@@ -663,7 +663,7 @@ fn footer_items(tab: Tab, editor: &str) -> Vec<String> {
         Tab::Git => &[
             "Enter show commit",
             "^S options",
-            "Alt-F find",
+            "^F find",
             "^C copy hash",
             "Esc quit",
         ],
@@ -1267,7 +1267,7 @@ mod tests {
         let (mut a, _) = app(Tab::Content);
         let top = row(&render(&mut a, 200, 24), 0);
         assert!(
-            top.contains("Enter open · ^S options · ^F filter · ^O nvim"),
+            top.contains("Enter open · ^S options · ^Alt-F filter · ^O nvim"),
             "{top:?}"
         );
         let (mut a, _) = app(Tab::Folders);
@@ -1336,7 +1336,7 @@ mod tests {
             ),
             (
                 Tab::Git,
-                "Enter show commit · ^S options · Alt-F find · ^C copy hash · Esc quit",
+                "Enter show commit · ^S options · ^F find · ^C copy hash · Esc quit",
             ),
         ];
         for (tab, want) in cases {
@@ -1719,8 +1719,7 @@ mod tests {
     }
 
     #[test]
-    fn alt_f_draws_what_it_finds() {
-        use crate::app::tests::alt;
+    fn ctrl_f_draws_what_it_finds() {
         let (mut a, now) = app_with_preview(Tab::Git);
         feed(&mut a, &["abcdef1"]);
         render(&mut a, 120, 30);
@@ -1738,7 +1737,7 @@ mod tests {
             generation: a.preview_gen,
             text: Text::from(lines),
         });
-        a.handle_key(alt(KeyCode::Char('f')), now);
+        a.handle_key(ctrl('f'), now);
         let buf = render(&mut a, 120, 30);
         assert!(
             row(&buf, 29).contains("Find in preview › type"),
@@ -1764,8 +1763,7 @@ mod tests {
     }
 
     #[test]
-    fn alt_f_bands_a_line_delta_coloured_too() {
-        use crate::app::tests::alt;
+    fn ctrl_f_bands_a_line_delta_coloured_too() {
         let (mut a, now) = app_with_preview(Tab::Git);
         feed(&mut a, &["abcdef1"]);
         render(&mut a, 120, 30);
@@ -1779,7 +1777,7 @@ mod tests {
             generation: a.preview_gen,
             text: Text::from(lines),
         });
-        a.handle_key(alt(KeyCode::Char('f')), now);
+        a.handle_key(ctrl('f'), now);
         for c in "needle".chars() {
             a.handle_key(key(KeyCode::Char(c)), now);
         }
@@ -1793,10 +1791,10 @@ mod tests {
     }
 
     #[test]
-    fn git_names_alt_f() {
+    fn git_names_ctrl_f() {
         let (mut a, _) = app(Tab::Git);
         let top = row(&render(&mut a, 200, 24), 0);
-        assert!(top.contains("Alt-F find"), "{top:?}");
+        assert!(top.contains("^F find"), "{top:?}");
     }
 
     #[test]

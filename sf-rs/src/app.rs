@@ -125,7 +125,7 @@ pub struct ScreenLayout {
     pub help: Rect,
 }
 
-/// Alt-F: what is looked for in the preview and the line it was found on.
+/// Ctrl-F: what is looked for in the preview and the line it was found on.
 #[derive(Debug, Default)]
 pub struct Find {
     pub text: String,
@@ -194,12 +194,12 @@ pub struct App {
     pub root: PathBuf,
     /// Shared by all tabs: a filter in Files, Folders and Git, the pattern in Content and Deep.
     pub query: String,
-    /// Ctrl-F in Content and Deep: the pattern stays as it is and these words filter the rows found
+    /// Ctrl-Alt-F in Content and Deep: the pattern stays as it is and these words filter the rows found
     /// (as advancedsearch's fzf did).
     pub result_filter: Option<String>,
     /// sf runs inside tmux: Ctrl-T opens a window of its own.
     pub tmux: bool,
-    /// Alt-F: finding in the preview; typing goes there, not to the query.
+    /// Ctrl-F: finding in the preview; typing goes there, not to the query.
     pub preview_find: Option<Find>,
     /// `sf history|log|diff FILE`: the view `start` opens instead of a list.
     start_with: Option<ViewKind>,
@@ -479,7 +479,9 @@ impl App {
         if self.result_filter.is_some() {
             match key.code {
                 KeyCode::Esc => return self.leave_result_filter(),
-                KeyCode::Char('f') if ctrl => return self.leave_result_filter(),
+                KeyCode::Char('f') if ctrl && key.modifiers.contains(KeyModifiers::ALT) => {
+                    return self.leave_result_filter();
+                }
                 _ => {}
             }
         }
@@ -510,10 +512,12 @@ impl App {
                 now,
             ),
             KeyCode::Char('h') if ctrl && alt => self.edit(String::clear, now),
+            // Ctrl-Alt-F, not Alt-F: Bilal's KDE opens rofi on Alt+F
+            KeyCode::Char('f') if ctrl && alt => self.enter_result_filter(),
             KeyCode::Char(c) if ctrl => match c {
                 'w' | 'h' => self.edit(delete_word, now),
                 'l' => self.toggle_preview(),
-                'f' => self.enter_result_filter(),
+                'f' => self.enter_find(now),
                 'r' => vec![self.run_list()],
                 's' => {
                     self.popup = Some(0);
@@ -528,14 +532,6 @@ impl App {
                 _ => Vec::new(),
             },
             KeyCode::Char(c) if alt => match c {
-                'f' => {
-                    if self.preview_visible() && self.tab != Tab::Help {
-                        self.preview_find = Some(Find::default());
-                    } else {
-                        self.set_status("No preview to find in: Ctrl-L shows it", true, now);
-                    }
-                    Vec::new()
-                }
                 'g' => self.act(ActionKind::DiffShort, now),
                 'u' => self.act(ActionKind::Log, now),
                 _ => Vec::new(),
@@ -655,7 +651,17 @@ impl App {
         effects
     }
 
-    /// Alt-F's keys: type to find, Enter or Down the next, Up the one before, Esc or Alt-F back to the
+    /// Ctrl-F: finding in the preview (Bilal: Ctrl-F, as in his Claude panes; it was Alt-F first).
+    fn enter_find(&mut self, now: Instant) -> Vec<Effect> {
+        if self.preview_visible() && self.tab != Tab::Help {
+            self.preview_find = Some(Find::default());
+        } else {
+            self.set_status("No preview to find in: Ctrl-L shows it", true, now);
+        }
+        Vec::new()
+    }
+
+    /// Ctrl-F's keys: type to find, Enter or Down the next, Up the one before, Esc or Ctrl-F back to the
     /// list; None for Tab and Shift-Tab, which end it and switch.
     fn find_key(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
@@ -663,7 +669,7 @@ impl App {
         let f = self.preview_find.as_mut()?;
         match key.code {
             KeyCode::Esc => self.preview_find = None,
-            KeyCode::Char('f') if alt => self.preview_find = None,
+            KeyCode::Char('f') if ctrl => self.preview_find = None,
             KeyCode::Tab | KeyCode::BackTab => {
                 self.preview_find = None;
                 return None;
@@ -690,7 +696,7 @@ impl App {
     }
 
     /// The next line of the preview after `from` (forward, round to the top) or before it that holds
-    /// what Alt-F looks for, case aside; scrolled to with two lines above it.
+    /// what Ctrl-F looks for, case aside; scrolled to with two lines above it.
     fn find_in_preview(&mut self, from: Option<usize>, forward: bool) {
         let Some(f) = self.preview_find.as_mut() else {
             return;
@@ -1066,7 +1072,7 @@ impl App {
         self.query = query;
     }
 
-    /// Ctrl-F: the pattern stays, typing filters the rows found.
+    /// Ctrl-Alt-F: the pattern stays, typing filters the rows found.
     fn enter_result_filter(&mut self) -> Vec<Effect> {
         if self.tab.searches() && self.scope.is_none() {
             self.result_filter = Some(String::new());
@@ -1074,7 +1080,7 @@ impl App {
         Vec::new()
     }
 
-    /// Esc or Ctrl-F again: typing edits the pattern again; every row found is back.
+    /// Esc or Ctrl-Alt-F again: typing edits the pattern again; every row found is back.
     fn leave_result_filter(&mut self) -> Vec<Effect> {
         self.result_filter = None;
         self.filter.set_query("");
@@ -1548,7 +1554,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn alt_f_finds_in_the_preview() {
+    fn ctrl_f_finds_in_the_preview() {
         let (mut a, now) = app_with_preview(Tab::Git);
         feed(&mut a, &["abcdef1"]);
         a.layout.preview = Rect::new(1, 2, 80, 10);
@@ -1566,7 +1572,7 @@ pub(crate) mod tests {
             generation: a.preview_gen,
             text: Text::from(lines),
         });
-        assert_eq!(a.handle_key(alt(KeyCode::Char('f')), now), []);
+        assert_eq!(a.handle_key(ctrl('f'), now), []);
         assert!(a.preview_find.is_some());
         typed(&mut a, "needle", now);
         assert_eq!(a.query, "", "the list's filter is left alone");
@@ -1596,9 +1602,9 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn alt_f_without_a_preview_says_so() {
+    fn ctrl_f_without_a_preview_says_so() {
         let (mut a, now) = app(Tab::Files); // Files starts without its preview
-        a.handle_key(alt(KeyCode::Char('f')), now);
+        a.handle_key(ctrl('f'), now);
         assert!(a.preview_find.is_none());
         assert!(
             a.status.as_ref().unwrap().0.contains("Ctrl-L"),
@@ -1702,6 +1708,10 @@ pub(crate) mod tests {
 
     pub fn ctrl(c: char) -> KeyEvent {
         KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL)
+    }
+
+    pub fn ctrl_alt(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), KeyModifiers::CONTROL | KeyModifiers::ALT)
     }
 
     pub fn alt(code: KeyCode) -> KeyEvent {
@@ -2149,9 +2159,9 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn ctrl_f_keeps_the_pattern_and_filters_the_rows() {
+    fn ctrl_alt_f_keeps_the_pattern_and_filters_the_rows() {
         let (mut a, now) = found(Tab::Content);
-        assert_eq!(a.handle_key(ctrl('f'), now), []);
+        assert_eq!(a.handle_key(ctrl_alt('f'), now), []);
         assert_eq!(a.result_filter.as_deref(), Some(""));
         typed(&mut a, "SRC", now);
         assert_eq!((a.query.as_str(), a.filter.len()), ("needle", 1));
@@ -2173,24 +2183,32 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn ctrl_f_again_or_another_tab_ends_the_filter() {
+    fn alt_f_alone_does_nothing() {
+        // Bilal's KDE opens rofi on Alt+F: sf leaves the key alone
+        let (mut a, now) = found(Tab::Content);
+        assert_eq!(a.handle_key(alt(KeyCode::Char('f')), now), []);
+        assert!(a.result_filter.is_none() && a.preview_find.is_none());
+    }
+
+    #[test]
+    fn ctrl_alt_f_again_or_another_tab_ends_the_filter() {
         let (mut a, now) = found(Tab::Deep);
-        a.handle_key(ctrl('f'), now);
-        a.handle_key(ctrl('f'), now);
+        a.handle_key(ctrl_alt('f'), now);
+        a.handle_key(ctrl_alt('f'), now);
         assert_eq!(a.result_filter, None);
-        a.handle_key(ctrl('f'), now);
+        a.handle_key(ctrl_alt('f'), now);
         a.handle_key(key(KeyCode::Tab), now);
         assert_eq!((a.tab, a.result_filter.as_deref()), (Tab::Folders, None));
     }
 
     #[test]
-    fn ctrl_f_is_for_a_pattern_only() {
+    fn ctrl_alt_f_is_for_a_pattern_only() {
         let (mut a, now) = app(Tab::Files);
-        a.handle_key(ctrl('f'), now);
+        a.handle_key(ctrl_alt('f'), now);
         assert_eq!(a.result_filter, None);
         let (mut a, now) = found(Tab::Content);
         a.handle_key(ctrl('t'), now);
-        a.handle_key(ctrl('f'), now);
+        a.handle_key(ctrl_alt('f'), now);
         assert_eq!(a.result_filter, None, "not inside a file");
     }
 

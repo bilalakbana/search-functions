@@ -447,4 +447,12 @@ four git keys get windows, Alt-F for finding):
   searched from the top. The found line gets a band over every part of it, so delta's own diff colours do not
   hide it. Without a visible preview it says that Ctrl-L shows it.
 - Ctrl-T in a view searches it, as `/` does (Bilal: a mode, not a window).
+- Ctrl-F and Alt-F changed places the same day (Bilal): Ctrl-F finds in the preview, in every tab;
+  Ctrl-Alt-F keeps Content's or Deep's pattern and filters the rows found (not Alt-F: his KDE opens a rofi
+  file browser on Alt+F, so the key never reaches a terminal; Ctrl+Alt+F is free in KDE, Ghostty and tmux,
+  and so are sf's Alt-G, Alt-U, Alt-↑/↓). Alt-F alone does nothing in sf. Found on his PC: his tmux bound Ctrl-F at
+  the root (`bind -n C-f`, a popup searching a pane's history, meant for Claude Code panes), so sf never got
+  the key in tmux and the filter (then on Ctrl-F) had never worked there; the e2e's tmux runs without his
+  config (`-f /dev/null`) and could not see it. His tmux now opens that popup in Claude Code panes only and
+  hands Ctrl-F to every other program. None of sf's other keys is bound at his tmux root.
 

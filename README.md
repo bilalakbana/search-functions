@@ -40,7 +40,7 @@ A collection of efficient and flexible search tools to search inside file conten
 
 ```bash
 sf                         # starts in Files
-sf content needle          # Content searching for "needle", typing then filters the files found (Ctrl-F)
+sf content needle          # Content searching for "needle", typing then filters the files found (Ctrl-Alt-F)
 sf deep needle -- -i       # Deep: binaries and archives too, as advancedsearch (-i: ignore case)
 sf in src/main.rs 'ankara izmir'   # inside one file, as Ctrl-T (the lines with both words)
 sf help                    # the manual: tabs, keys, options, patterns, commands with examples
@@ -136,11 +136,11 @@ These shortcuts apply when using the interactive search tools (`fzf`, `ugrep-fzf
 | `Ctrl-o` | Open the file in nvim in a new tmux window (`sf`: at the matching line, with nvim or else `$VISUAL`, `$EDITOR`, vim, vi; outside tmux in the same terminal) |
 | `Ctrl-t` | Search inside the selected file in a new tmux window (`sf`: in tmux a window of its own, else inside sf; the lines with all the typed words, `Ctrl-s` for all in the file or any of them, Match case; `Esc` back) |
 | `Ctrl-u` / `Ctrl-g` / `Alt-g` / `Alt-u` | git diff / diff (delta) / short diff / log of the file (`sf`: history with changes / changes against HEAD / short / log; in tmux each in a window of its own (`sf history|diff|log FILE`), else inside sf; `/` or `Ctrl-t` searches, `Esc` back; `Enter` in Git shows a commit) |
-| `Alt-f` | `sf`: find in the preview (`Enter` the next, `Esc` back), e.g. a word in a Git commit |
+| `Ctrl-f` | `sf`: find in the preview (`Enter` the next, `Esc` back), e.g. a word in a Git commit. In tmux a root binding of `C-f` (`bind -n C-f …`) would take the key before sf sees it (`tmux list-keys -T root`) |
 | `Alt-j` / `Ctrl-j` | Folder list / file list in a new tmux window |
 | `Ctrl-l` | Toggle the preview                       |
 | `Ctrl-s` | `sf`: the tab's options (⚙ Config); in Files, Content and Deep also the file types of the list, all on: `Space` turns one off or on, `a` all of them (each tab its own, not saved); it opens under ⚙ Config at the right edge and takes more columns, growing to the left, when the list is long (`←` `→` go across) |
-| `Ctrl-f` | `sf`, Content and Deep: keep the pattern, typing filters the files found by their names (as `advancedsearch PATTERN`); `Esc` back to the pattern |
+| `Ctrl-Alt-f` | `sf`, Content and Deep: keep the pattern, typing filters the files found by their names (as `advancedsearch PATTERN`); `Esc` back to the pattern |
 
 > These are customizable if you tweak your FZF or terminal bindings.
 

@@ -38,6 +38,7 @@ How Bilal starts the next session (paste):
   - Ctrl-T window in tmux, words, Match case, Help (v0.7.0): `cargo test` 355; `tests/e2e.sh` 149/149.
   - Ctrl-S popup under ⚙ Config in columns (v0.7.1): `cargo test` 362; `tests/e2e.sh` 149/149.
   - git keys in tmux windows, Whole files, Alt-F, Ctrl-T in views (v0.8.0): `cargo test` 374; `tests/e2e.sh` 156/156.
+  - Ctrl-F finds in the preview, Ctrl-Alt-F filters (Alt-F is KDE's): `cargo test` 375; `tests/e2e.sh` 156/156.
   - Step 2 (same day): `cargo test` 243; `tests/e2e.sh` 86/86 (with a release package's layout);
     `tests/sub_functions.sh NEW_EMPTY_DIR` 7/7 (`-L sfrs-sub-functions`); `python3 -I packaging/test_build.py` 7;
     `packaging/test_package.sh PACKAGE NEW_EMPTY_DIR` all passed on Ubuntu 22.04, Debian 12, Ubuntu 24.04.
@@ -59,6 +60,9 @@ How Bilal starts the next session (paste):
   unstubbed `dbus-send` would open his real file manager. tmux tests only in a private socket
   (`tmux -L name -f /dev/null`), never his server.
 - Verify flags against the installed tool (`--help`), and look at rendered screens, not text dumps.
+- A new key for sf: check his tmux root table (`tmux list-keys -T root`) and KDE's global shortcuts
+  (`~/.config/kglobalshortcutsrc`) first: either takes the key before sf sees it, and the e2e (`-f /dev/null`)
+  cannot notice (Ctrl-F in tmux, Alt-F in KDE: rofi, 2026-10-17).
 - The background security review runs on commits: fix real findings with a failing test first.
 
 ## Map of sf-rs/src
