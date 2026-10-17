@@ -447,7 +447,8 @@ four git keys get windows, Alt-F for finding):
   with two above it, Enter or ↓ the next, ↑ the one before (round), Esc or Alt-F back; a new row's preview is
   searched from the top. The found line gets a band over every part of it, so delta's own diff colours do not
   hide it. Without a visible preview it says that Ctrl-L shows it.
-- Ctrl-T in a view searches it, as `/` does (Bilal: a mode, not a window).
+- Ctrl-T in a view searches it, as `/` does (Bilal: a mode, not a window). Removed after v0.9.0 (Bilal: `/` does
+  it): Ctrl-T in a view does nothing.
 - Ctrl-F and Alt-F changed places the same day (Bilal): Ctrl-F finds in the preview, in every tab;
   Ctrl-Alt-F keeps Content's or Deep's pattern and filters the rows found (not Alt-F: his KDE opens a rofi
   file browser on Alt+F, so the key never reaches a terminal; Ctrl+Alt+F is free in KDE, Ghostty and tmux,
@@ -468,13 +469,13 @@ mockups: all three options, saved, red marks):
   Match whole word only, plain text or regular expressions, Find ⇧ ⇩).
 - Every match on the lines shown is red and bold, the current one dark on red; the current one's line keeps its
   band. The input line counts them ("3/17"), says "not found", or "bad regex" while a regular expression does not
-  parse. Enter or ↓ goes to the next match (on the same line too), ↑ to the one before, round at either end;
+  parse. (Changed after v0.9.0: words coloured, no band, the count at the preview's top right; see below.) Enter or ↓ goes to the next match (on the same line too), ↑ to the one before, round at either end;
   typing, an option or another row's preview finds again from the top.
 - Ctrl-S while finding opens Find's own options (popup " Find options ", no file types): Match case (off: case
   aside, not smart case: it is an editor's find, not a pattern), Whole word (no word character, a letter, digit
   or `_` in any script, right before or after, as Notepad++ says; with a regular expression too, as VS Code),
   Regular expression (Rust's `regex` crate, already in Cargo.lock through a dependency: RE2-like, no look-around
-  or back-references, so not ugrep's dialect). Saved as `[find]`; the ones on are named on the input line.
+  or back-references, so not ugrep's dialect; fancy-regex since after v0.9.0, see below). Saved as `[find]`; the ones on are named on the input line.
   `find.rs` (`Finder`) does the matching, pure and unit-tested; a match that is not a whole word lets the search
   go on from its next character, so a whole word starting inside it is still found.
 - Left out on purpose: Wrap around (always round; the count shows where one is), Backward direction (↑),
@@ -515,3 +516,22 @@ of four proposals, not "Newest first" in Files):
   exclude glob fields (a text field in the popup; file types and `-- -g '!vendor/'` cover it), files NOT
   containing, depth, symlinks, size, attributes, hex, encodings, duplicates (rarely needed; Deep searches
   binaries), ratings and tags (no such data), only changed files (the Git tab and Ctrl-G).
+
+After v0.9.0 (2026-10-17, Bilal's three requests; his choices from a proposal: the current match underlined, the
+count only at the preview's top right, Perl's syntax):
+
+- Ctrl-T in the views (Ctrl-U, Alt-U, Ctrl-G, Alt-G, Enter in Git) is gone: `/` searches a view, Ctrl-T there does
+  nothing; the view's hint reads "/ search".
+- Ctrl-F colours the words instead of banding the line (Bilal: as the rest of sf does): every match red, the
+  current one red, bold and underlined; no background, so delta's diff colours stay under them.
+- The preview's top border names, at its right, what is looked for as typed (control characters shown as
+  `items::printable` does) and "3/17", "not found", "bad regex" or "too slow" (`ui::find_title`); a border title
+  does not scroll with the text. It is drawn after the root, so on a short border it covers the root's end and
+  stays whole; a long text is cut with "…" to half the width. The input line no longer counts while finding.
+- Alt-↑↓ scroll the preview while finding (they went to the next match before, as ↑↓ do).
+- Ctrl-F's Regular expression is fancy-regex 0.19 (pure Rust, MIT): Perl's look-around and back-references; a
+  pattern without them runs on the regex crate's engines, so it stays linear. One that backtracks past
+  fancy-regex's limit (1 000 000 steps, ~20 ms for `(a|aa)+\1b` on 40 a's) is "bad regex", as Notepad++ calls an
+  expression too complex; as a pattern just under the limit on every line of a 4 MiB preview would keep sf from
+  answering for minutes, finding stops after 500 ms (`FIND_BUDGET`, `find::find_all`) and says "too slow". sf's
+  own dependency on the regex crate went with it.

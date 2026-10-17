@@ -12,7 +12,7 @@ use ratatui::widgets::{
     Block, BorderType, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
 };
 
-use crate::app::{App, PopupRow, ScreenLayout};
+use crate::app::{App, Find, PopupRow, ScreenLayout};
 use crate::filter::{Kind, Query, Term};
 use crate::model::{Opt, Tab};
 use crate::theme;
@@ -228,7 +228,7 @@ fn draw_view(frame: &mut Frame, app: &App) -> Rect {
         )
     } else {
         Line::styled(
-            "Esc back · ↑↓ PgUp PgDn Home End · / or ^T search · n N next",
+            "Esc back · ↑↓ PgUp PgDn Home End · / search · n N next",
             style(theme::DIM),
         )
     };
@@ -285,6 +285,14 @@ fn draw_help(frame: &mut Frame, app: &App, area: Rect) -> Rect {
 
 fn draw_preview(frame: &mut Frame, app: &App, area: Rect, status: Option<Line<'static>>) -> Rect {
     let mut block = bordered().title_top(root_title(app));
+    if let Some(found) = app
+        .preview_find
+        .as_ref()
+        .and_then(|f| find_title(f, area.width / 2))
+    {
+        // drawn after the root, over its end when the border is short: it stays whole
+        block = block.title_top(found.right_aligned());
+    }
     if let Some(status) = status {
         block = block.title_bottom(status);
     }
@@ -297,21 +305,8 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect, status: Option<Line<'s
         .take(inner.height as usize)
         .cloned()
         .collect();
-    // Ctrl-F: the current match's line in a band over whatever colour its parts have (delta's diff
-    // colours), then every match on the lines shown marked
+    // Ctrl-F: every match on the lines shown coloured, over whatever colours their parts have
     if let Some(f) = &app.preview_find {
-        if let Some(i) = f
-            .found_line()
-            .and_then(|f| f.checked_sub(from))
-            .filter(|&i| i < shown.len())
-        {
-            let band = Style::new().bg(theme::SURFACE);
-            let line = &mut shown[i];
-            line.style = line.style.patch(band);
-            for span in &mut line.spans {
-                span.style = span.style.patch(band);
-            }
-        }
         let first = f.hits.partition_point(|(l, _)| *l < from);
         for (k, (l, _)) in f.hits.iter().enumerate().skip(first) {
             if *l >= from + shown.len() {
@@ -344,14 +339,44 @@ fn draw_preview(frame: &mut Frame, app: &App, area: Rect, status: Option<Line<'s
     inner
 }
 
-/// Ctrl-F's matches marked in `line`, given as the bytes of its text and whether it is the current
-/// one: every one red, the current one on red; a part a match crosses is split there.
+/// Ctrl-F, at the preview's top right: what is looked for as typed, and which match of how many, or
+/// that it is nowhere or does not parse; the text cut to fit `max` columns. None while nothing is typed.
+fn find_title(f: &Find, max: u16) -> Option<Line<'static>> {
+    if f.text.is_empty() {
+        return None;
+    }
+    let (said, said_style) = match f.current {
+        _ if f.bad => ("bad regex".to_string(), style(theme::RED)),
+        _ if f.slow => ("too slow".to_string(), style(theme::RED)),
+        None => ("not found".to_string(), style(theme::RED)),
+        Some(c) => (format!("{}/{}", c + 1, f.hits.len()), style(theme::SUB)),
+    };
+    let mut text = crate::items::printable(&f.text);
+    let room = usize::from(max).saturating_sub(said.chars().count() + 5);
+    if text.chars().count() > room {
+        text = text
+            .chars()
+            .take(room.saturating_sub(1))
+            .collect::<String>()
+            + "…";
+    }
+    Some(Line::from(vec![
+        Span::raw(" "),
+        Span::styled(text, style(theme::RED)),
+        Span::styled(" · ", style(theme::FAINT)),
+        Span::styled(said, said_style),
+        Span::raw(" "),
+    ]))
+}
+
+/// Ctrl-F's matches coloured in `line`, given as the bytes of its text and whether it is the current
+/// one: every one red as in the list, the current one bold and underlined; no background, so the
+/// line keeps its own (delta's diff colours). A part a match crosses is split there.
 fn mark_matches(line: Line<'static>, marks: &[(Range<usize>, bool)]) -> Line<'static> {
-    let other = Style::new().fg(theme::RED).add_modifier(Modifier::BOLD);
+    let other = Style::new().fg(theme::RED);
     let current = Style::new()
-        .fg(theme::BASE)
-        .bg(theme::RED)
-        .add_modifier(Modifier::BOLD);
+        .fg(theme::RED)
+        .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
     let mut spans = Vec::with_capacity(line.spans.len() + 2 * marks.len());
     let mut start = 0; // of the part in the line's text
     for span in line.spans {
@@ -624,15 +649,8 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         count.push_str(" …");
     }
     let mut count_style = style(theme::DIM);
-    if let Some(f) = &app.preview_find {
-        // Ctrl-F: which match of how many, or that it is nowhere in the preview
-        if f.bad {
-            (count, count_style) = ("bad regex".into(), style(theme::RED));
-        } else if !f.text.is_empty() && f.current.is_none() {
-            (count, count_style) = ("not found".into(), style(theme::RED));
-        } else if let Some(c) = f.current {
-            count = format!("{}/{}", c + 1, f.hits.len());
-        }
+    if app.preview_find.is_some() {
+        count.clear(); // Ctrl-F's count is at the preview's top right (`find_title`)
     } else if app.tab == Tab::Help {
         // the manual: where it is, or that the search is nowhere in it
         let h = &app.help;
@@ -642,9 +660,10 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
             count = format!("{}/{}", h.scroll + 1, h.text.lines.len());
         }
     }
+    let gap = if count.is_empty() { "" } else { "   " };
     let right = Line::from(vec![
         Span::styled(active.join(" · "), style(theme::SUB)),
-        Span::raw("   "),
+        Span::raw(gap),
         Span::styled(count, count_style),
         Span::raw(" "),
     ]);
@@ -977,7 +996,7 @@ fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLa
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::app::tests::{app, app_with_preview, ctrl, feed, key};
+    use crate::app::tests::{alt, app, app_with_preview, ctrl, feed, key};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
@@ -1893,15 +1912,20 @@ mod tests {
             row(&buf, 29)
         );
         let (x, y) = find(&buf, "a Needle here").unwrap();
-        assert_eq!(buf[(x, y)].bg, theme::SURFACE, "the found line in a band");
+        assert_ne!(
+            buf[(x, y)].bg,
+            theme::SURFACE,
+            "no band: the word is coloured"
+        );
+        assert_eq!(buf[(x + 2, y)].fg, theme::RED);
         for c in "zzz".chars() {
             a.handle_key(key(KeyCode::Char(c)), now);
         }
-        assert!(row(&render(&mut a, 120, 30), 29).contains("not found"));
+        assert!(row(&render(&mut a, 120, 30), 1).contains("needlezzz · not found"));
     }
 
     #[test]
-    fn ctrl_f_bands_a_line_delta_coloured_too() {
+    fn ctrl_f_colours_the_word_over_delta_colours() {
         let (mut a, now) = app_with_preview(Tab::Git);
         feed(&mut a, &["abcdef1"]);
         render(&mut a, 120, 30);
@@ -1921,10 +1945,13 @@ mod tests {
         }
         let buf = render(&mut a, 120, 30);
         let (x, y) = find(&buf, "+ the new Needle").unwrap();
+        let green = ratatui::style::Color::Rgb(0, 80, 0);
+        assert_eq!(buf[(x, y)].bg, green, "no band over delta's own colour");
+        let word = &buf[(x + 10, y)];
         assert_eq!(
-            buf[(x, y)].bg,
-            theme::SURFACE,
-            "the band over delta's own colour"
+            (word.fg, word.bg),
+            (theme::RED, green),
+            "red on delta's colour"
         );
     }
 
@@ -1953,22 +1980,26 @@ mod tests {
     }
 
     #[test]
-    fn ctrl_f_marks_every_match_red_the_current_one_on_red() {
+    fn ctrl_f_colours_every_match_red_the_current_one_underlined() {
         let lines = vec![Line::raw("x one"), Line::raw("two x X")];
         let (mut a, now) = finding_in(lines, "x");
         let buf = render(&mut a, 120, 30);
         let (x0, y0) = find(&buf, "x one").unwrap();
         let (x1, y1) = find(&buf, "two x X").unwrap();
+        let underlined = |c: &ratatui::buffer::Cell| c.modifier.contains(Modifier::UNDERLINED);
         let current = &buf[(x0, y0)];
-        assert_eq!(
-            (current.bg, current.fg),
-            (theme::RED, theme::BASE),
-            "the current one"
-        );
+        assert_eq!(current.fg, theme::RED, "the current one red");
+        assert!(underlined(current) && current.modifier.contains(Modifier::BOLD));
         for x in [x1 + 4, x1 + 6] {
             let c = &buf[(x, y1)];
             assert_eq!(c.fg, theme::RED, "every other one red, case aside");
-            assert!(c.modifier.contains(Modifier::BOLD) && c.bg != theme::RED);
+            assert!(!underlined(c));
+        }
+        for c in [&buf[(x0, y0)], &buf[(x0 + 2, y0)], &buf[(x1 + 4, y1)]] {
+            assert!(
+                c.bg != theme::RED && c.bg != theme::SURFACE,
+                "no zone, no band"
+            );
         }
         assert_ne!(
             buf[(x1, y1)].fg,
@@ -1977,18 +2008,8 @@ mod tests {
         );
         a.handle_key(key(KeyCode::Enter), now);
         let buf = render(&mut a, 120, 30);
-        assert_eq!(
-            buf[(x1 + 4, y1)].bg,
-            theme::RED,
-            "Enter: the next is current"
-        );
-        assert_eq!(
-            (buf[(x1 + 6, y1)].fg, buf[(x1 + 6, y1)].bg),
-            (theme::RED, theme::SURFACE),
-            "red on the current line's band"
-        );
-        assert_eq!(buf[(x0, y0)].fg, theme::RED);
-        assert_ne!(buf[(x0, y0)].bg, theme::RED);
+        assert!(underlined(&buf[(x1 + 4, y1)]), "Enter: the next is current");
+        assert!(!underlined(&buf[(x0, y0)]) && buf[(x0, y0)].fg == theme::RED);
     }
 
     #[test]
@@ -2001,41 +2022,88 @@ mod tests {
         let (mut a, _) = finding_in(vec![Line::raw("ctx"), line], "needle");
         let buf = render(&mut a, 120, 30);
         let (x, y) = find(&buf, "+ needle b").unwrap();
+        let green = ratatui::style::Color::Rgb(0, 80, 0);
         for dx in 2..8 {
-            assert_eq!(buf[(x + dx, y)].bg, theme::RED, "column {dx}");
+            let c = &buf[(x + dx, y)];
+            assert_eq!((c.fg, c.bg), (theme::RED, green), "column {dx}");
+            assert!(c.modifier.contains(Modifier::UNDERLINED), "column {dx}");
         }
-        assert_eq!(buf[(x, y)].bg, theme::SURFACE, "the band before it");
+        assert_eq!(buf[(x, y)].bg, green, "no band before it");
         assert_eq!(
             (buf[(x + 9, y)].bg, buf[(x + 9, y)].fg),
-            (theme::SURFACE, theme::YELLOW),
-            "after it, the part's own colour on the band"
+            (green, theme::YELLOW),
+            "after it, the part's own colours"
         );
     }
 
     #[test]
-    fn ctrl_f_counts_the_matches() {
+    fn the_preview_names_what_is_found_and_how_often_at_its_top_right() {
         let lines = vec![Line::raw("a b a"), Line::raw("a")];
         let (mut a, now) = finding_in(lines, "a");
-        let input = |a: &mut App| row(&render(a, 120, 30), 29);
+        let top = |a: &mut App| row(&render(a, 120, 30), 1);
         assert!(
-            input(&mut a).trim_end().ends_with("1/3"),
+            top(&mut a).trim_end().ends_with("a · 1/3 ╮"),
             "{:?}",
-            input(&mut a)
+            top(&mut a)
+        );
+        assert!(
+            !row(&render(&mut a, 120, 30), 29).contains("1/3"),
+            "the count is not on the input line too"
         );
         a.handle_key(key(KeyCode::Enter), now);
         assert!(
-            input(&mut a).trim_end().ends_with("2/3"),
+            top(&mut a).trim_end().ends_with("a · 2/3 ╮"),
             "{:?}",
-            input(&mut a)
+            top(&mut a)
         );
         a.handle_key(key(KeyCode::Char('z')), now);
-        assert!(input(&mut a).contains("not found"), "{:?}", input(&mut a));
+        assert!(top(&mut a).contains("az · not found"), "{:?}", top(&mut a));
         a.handle_key(key(KeyCode::Backspace), now);
         a.options.find.regex = true;
         a.handle_key(key(KeyCode::Char('(')), now);
         let buf = render(&mut a, 120, 30);
-        let (x, y) = find(&buf, "bad regex").expect("bad regex");
-        assert_eq!(buf[(x, y)].fg, theme::RED);
+        let (x, y) = find(&buf, "a( · bad regex").expect("bad regex");
+        assert_eq!(y, 1, "on the preview's border");
+        assert_eq!(buf[(x + 5, y)].fg, theme::RED);
+    }
+
+    #[test]
+    fn a_search_that_ran_out_of_time_says_so() {
+        let (mut a, _) = finding_in(vec![Line::raw("a")], "a");
+        let f = a.preview_find.as_mut().unwrap();
+        (f.hits, f.current, f.slow) = (Vec::new(), None, true);
+        let top = row(&render(&mut a, 120, 30), 1);
+        assert!(top.contains(" a · too slow "), "{top:?}");
+    }
+
+    #[test]
+    fn what_is_found_stays_at_the_top_while_the_preview_scrolls() {
+        let lines: Vec<Line> = (0..200).map(|i| Line::raw(format!("{i} x"))).collect();
+        let pattern = r"(?<=\d )x\b";
+        let (mut a, now) = finding_in(lines, pattern);
+        a.handle_key(key(KeyCode::Down), now);
+        render(&mut a, 120, 30);
+        for _ in 0..5 {
+            a.handle_key(alt(KeyCode::Down), now);
+        }
+        let top = row(&render(&mut a, 120, 30), 1);
+        assert!(a.preview_scroll > 20, "scrolled: {}", a.preview_scroll);
+        assert!(top.contains(&format!(" {pattern} · ")), "as typed: {top:?}");
+        let (mut a, _) = finding_in(vec![Line::raw("a")], "");
+        assert!(
+            !row(&render(&mut a, 120, 30), 1).contains(" · "),
+            "nothing typed, nothing said"
+        );
+    }
+
+    #[test]
+    fn what_is_found_keeps_its_place_when_the_preview_is_narrow() {
+        let (mut a, _) = finding_in(vec![Line::raw("needle")], "needle");
+        a.root = std::path::PathBuf::from(
+            "/a/very/long/folder/name/that/fills/the/whole/border/and/more",
+        );
+        let top = row(&render(&mut a, 60, 30), 1);
+        assert!(top.contains("needle · 1/1"), "{top:?}");
     }
 
     #[test]
@@ -2087,7 +2155,7 @@ mod tests {
             .iter()
             .map(|s| (s.content.as_ref(), s.style))
             .collect();
-        let other = Style::new().fg(theme::RED).add_modifier(Modifier::BOLD);
+        let other = Style::new().fg(theme::RED);
         assert_eq!(
             parts,
             [

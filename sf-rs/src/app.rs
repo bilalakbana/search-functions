@@ -17,7 +17,7 @@ use crate::actions::ActionKind;
 use crate::commands::{self, ListPlan, PreviewPlan};
 use crate::engines::Engines;
 use crate::filter::{Filter, TypeCounts};
-use crate::find::Finder;
+use crate::find::{self, Finder, Trouble};
 use crate::items::{self, Item};
 use crate::model::{Opt, Options, Tab};
 use crate::preview::PreviewMsg;
@@ -35,6 +35,8 @@ const PREVIEW_NOTE: Duration = Duration::from_millis(250);
 const STATUS_ERROR: Duration = Duration::from_secs(6);
 /// Two clicks on the same row within this time are a double click.
 const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+/// Ctrl-F gives up after this long (a look-around backtracking on every line of a long preview).
+const FIND_BUDGET: Duration = Duration::from_millis(500);
 /// Rows (list) or lines (preview) one wheel step moves.
 const WHEEL: usize = 3;
 
@@ -135,8 +137,11 @@ pub struct Find {
     pub hits: Vec<(usize, Range<usize>)>,
     /// The current match, an index into `hits`.
     pub current: Option<usize>,
-    /// The regular expression typed does not parse (Regular expression is on).
+    /// The regular expression typed does not parse, or backtracks past fancy-regex's limit
+    /// (Regular expression is on).
     pub bad: bool,
+    /// Finding took longer than `FIND_BUDGET`; nothing is shown.
+    pub slow: bool,
 }
 
 impl Find {
@@ -702,7 +707,8 @@ impl App {
     }
 
     /// Ctrl-F's keys: type to find, Enter or Down the next match, Up the one before, Ctrl-S Find's
-    /// options, Esc or Ctrl-F back to the list; None for Tab and Shift-Tab, which end it and switch.
+    /// options, Esc or Ctrl-F back to the list; None for Tab and Shift-Tab, which end it and switch,
+    /// and for Alt-↑↓, which scroll the preview.
     fn find_key(&mut self, key: KeyEvent) -> Option<Vec<Effect>> {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
@@ -715,6 +721,8 @@ impl App {
                 self.preview_find = None;
                 return None;
             }
+            // Alt-↑↓ scroll the preview, as outside Ctrl-F; what is found stays
+            KeyCode::Up | KeyCode::Down if alt => return None,
             KeyCode::Enter | KeyCode::Down => self.next_match(true),
             KeyCode::Up => self.next_match(false),
             KeyCode::Backspace => {
@@ -738,13 +746,20 @@ impl App {
         };
         f.hits.clear();
         f.current = None;
-        f.bad = false;
+        (f.bad, f.slow) = (false, false);
         match Finder::new(&f.text, &self.options.find) {
             Ok(Some(finder)) => {
-                for (i, line) in self.preview.lines.iter().enumerate() {
-                    let text: String = line.spans.iter().map(|s| s.content.as_ref()).collect();
-                    f.hits
-                        .extend(finder.matches(&text).into_iter().map(|r| (i, r)));
+                let lines = self.preview.lines.iter().map(|line| {
+                    line.spans
+                        .iter()
+                        .map(|s| s.content.as_ref())
+                        .collect::<String>()
+                });
+                match find::find_all(&finder, lines, FIND_BUDGET) {
+                    Ok(hits) => f.hits = hits,
+                    // past the backtracking limit: as Notepad++, the expression is "bad"
+                    Err(Trouble::Bad) => f.bad = true,
+                    Err(Trouble::Slow) => f.slow = true,
                 }
             }
             Ok(None) => {}
@@ -1222,11 +1237,6 @@ impl App {
             KeyCode::PageDown | KeyCode::Char(' ') => v.scroll = (v.scroll + page).min(last),
             KeyCode::Home | KeyCode::Char('g') => v.scroll = 0,
             KeyCode::End | KeyCode::Char('G') => v.scroll = last,
-            // Ctrl-T searches here as in a file's lines, in the view itself (Bilal)
-            KeyCode::Char('t') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                v.searching = true;
-                v.search.clear();
-            }
             KeyCode::Char('/') => {
                 v.searching = true;
                 v.search.clear();
@@ -1755,6 +1765,39 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn alt_arrows_scroll_the_preview_while_finding() {
+        let lines: Vec<String> = (0..100).map(|i| format!("{i} x")).collect();
+        let lines: Vec<&str> = lines.iter().map(String::as_str).collect();
+        let (mut a, now) = finding(&lines);
+        typed(&mut a, "x", now);
+        let (scroll, current) = (a.preview_scroll, a.preview_find.as_ref().unwrap().current);
+        a.handle_key(alt(KeyCode::Down), now);
+        assert!(a.preview_scroll > scroll, "a page down");
+        assert_eq!(
+            a.preview_find.as_ref().unwrap().current,
+            current,
+            "the same match"
+        );
+        a.handle_key(alt(KeyCode::Up), now);
+        assert_eq!(a.preview_scroll, scroll);
+        assert!(a.preview_find.is_some(), "still finding");
+    }
+
+    #[test]
+    fn a_regular_expression_too_hard_to_finish_says_so() {
+        let long = "a".repeat(40);
+        let (mut a, now) = finding(&["ab", &long]);
+        a.options.find.regex = true;
+        typed(&mut a, r"(a|aa)+\1b", now);
+        let f = a.preview_find.as_ref().unwrap();
+        assert!(
+            f.bad && f.hits.is_empty() && f.current.is_none(),
+            "{:?}",
+            f.hits
+        );
+    }
+
+    #[test]
     fn another_rows_preview_is_found_in_from_the_top() {
         let (mut a, now) = finding(&["needle"]);
         typed(&mut a, "needle", now);
@@ -1791,8 +1834,14 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn ctrl_t_in_a_view_searches_it() {
-        for open in [ctrl('u'), alt(KeyCode::Char('u')), ctrl('g')] {
+    fn ctrl_t_in_a_view_does_nothing() {
+        // / searches a view (Bilal: Ctrl-T there is not needed)
+        for open in [
+            ctrl('u'),
+            alt(KeyCode::Char('u')),
+            ctrl('g'),
+            alt(KeyCode::Char('g')),
+        ] {
             let (mut a, now) = app(Tab::Files);
             feed(&mut a, &["a"]);
             a.handle_key(open, now);
@@ -1801,8 +1850,8 @@ pub(crate) mod tests {
                 [],
                 "no window, no other effect"
             );
-            let v = a.view.as_ref().unwrap();
-            assert!(v.searching, "{:?}: the view's search, as /", v.kind);
+            let v = a.view.as_ref().expect("the view stays");
+            assert!(!v.searching, "{:?}: no search", v.kind);
         }
     }
 

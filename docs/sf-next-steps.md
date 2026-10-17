@@ -44,6 +44,8 @@ How Bilal starts the next session (paste):
     399; `tests/e2e.sh` 161/161.
   - Whole word and Regular expression in Content/Deep, fzf's syntax in the filters (v0.9.0): `cargo test` 410;
     `tests/e2e.sh` 172/172; speed (release, ignored) 1 M rows ≤ 11 ms.
+  - After v0.9.0 (no Ctrl-T in views, Ctrl-F colours words, what/count at the preview's top right, Perl regex,
+    Alt-↑↓ scroll while finding): `cargo test` 418; `tests/e2e.sh` 173/173.
   - Step 2 (same day): `cargo test` 243; `tests/e2e.sh` 86/86 (with a release package's layout);
     `tests/sub_functions.sh NEW_EMPTY_DIR` 7/7 (`-L sfrs-sub-functions`); `python3 -I packaging/test_build.py` 7;
     `packaging/test_package.sh PACKAGE NEW_EMPTY_DIR` all passed on Ubuntu 22.04, Debian 12, Ubuntu 24.04.
@@ -80,7 +82,7 @@ How Bilal starts the next session (paste):
 | `commands.rs` | pure: `list_plan` (engine command per tab/options/query; `Search` says how Content or Deep searches) and `preview_plan` (Sniff/Numbered/Run/Pipe, Content/Deep `Header` with `ugrep -c -o` counts) |
 | `items.rs` | compact rows (`Look::{Path, Match, Styled}`, ~160 B/row), parsers, `path_spans` (folders blue, `/` yellow, name green), `printable`, `ansi_text` (no escape gets through) |
 | `filter.rs` | fzf `-i -e --no-sort` semantics with its extended search (`Query`: `!`, `^`, `$`, `\|`), parallel from 50 000 rows |
-| `find.rs` | Ctrl-F's `Finder`: where a preview line holds the text, by `[find]` (Match case, Whole word, Regular expression through the `regex` crate) |
+| `find.rs` | Ctrl-F's `Finder`: where a preview line holds the text, by `[find]` (Match case, Whole word, Regular expression through fancy-regex: Perl's syntax); `find_all` with a time budget |
 | `runner.rs` | list child in its own process group (kill on cancel), bounded records (64 KiB), batches, sorting/numbering |
 | `preview.rs` | preview worker (newest wins, kills the old), `is_text`, header lines, Content's numbered matches (`numbered_blocks`, `numbered_lines`) |
 | `app.rs` | state machine: keys, mouse, effects; list fills bottom-up like fzf (Up → next row, Home → top) |
@@ -203,6 +205,12 @@ results after a fixed pattern) followed in v0.5.2 (Bilal's OK), see the design d
   range check in a preview test); none in the Step 4 code.
 
 ## Next, asked 2026-10-17 after v0.8.1 (the session ended at a full context)
+
+Done the same day (Bilal's OK for each): A and B below, commits fedd98f, 54902b8, 63ba453 (sf 0.9.0) pushed; CI dry
+run 39040172823 (410 unit, e2e 172/172 on the three distributions), tag `v0.9.0` (lightweight, the earlier ones
+are annotated "sf X.Y.Z"; the workflow only reads the name) published by run 39040468074; downloaded from the
+README's `releases/latest` URL: sha256 OK, `sf doctor` says 0.9.0, the regex crates' licenses in the package.
+`~/.cargo/bin/sf` is 0.9.0. Still open: `~/.dot-files` a4ee358 not pushed; this paragraph is uncommitted.
 
 State at the hand-over:
 - sf 0.8.1: commits 8e19561 + 4d7b20d pushed; released as v0.8.1 (run 39036722844), downloaded from the

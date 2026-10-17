@@ -120,8 +120,8 @@ keys C-g
 expect 'files: Ctrl-G a view of the diff'  'main\.c · changes against HEAD'
 [[ $(tm display-message -p -t e2e '#W') == diff ]] && ok 'files: Ctrl-G in a tmux window, diff' || bad 'files: no diff window'
 expect 'files: an unchanged file says so'  'No local changes in .*main\.c'
-keys C-t
-expect 'view: Ctrl-T searches it'          '^/ ▏'
+keys /
+expect 'view: / searches it'               '^/ ▏'
 keys Escape
 expect 'view: Esc ends the search'         'Esc back'
 keys Escape; back_to_sf
@@ -396,7 +396,8 @@ keys "clear; '$SF' git" Enter
 expect 'views: the Git tab'                'second \(feat\)'
 keys C-f
 type_ 'feat'
-expect 'git: Ctrl-F finds in the preview'  'Find in preview › feat .* 1/[0-9]+ *$'
+expect 'git: Ctrl-F finds in the preview'  'Find in preview › feat'
+expect 'git: what and how often, top right' ' feat · 1/[0-9]+ ╮'
 red_on 'feat' && ok 'git: Ctrl-F marks the match red' || bad 'git: Ctrl-F marks no match red'
 keys C-s
 expect 'git: Ctrl-S while finding, Find'"'"'s options'  ' Find options .*'

@@ -62,7 +62,7 @@ const KEYS: &[(&str, &str)] = &[
     ),
     (
         "  in a view",
-        "/ or Ctrl-T search, n N the next / the one before, Esc back",
+        "/ search, n N the next / the one before, Esc back",
     ),
     ("Ctrl-E", "show it in the file manager"),
     ("Ctrl-C", "copy the path (Git: the hash)"),
@@ -123,7 +123,7 @@ const OPTIONS: &[(&str, &str)] = &[
     ),
     (
         "Regular expression",
-        "Content, Deep: on; off, the text as typed · Ctrl-F: off (Rust's, no look-around)",
+        "Content, Deep: on; off, the text as typed · Ctrl-F: off (Perl's: look-around, \\1)",
     ),
     (
         "All branches",
