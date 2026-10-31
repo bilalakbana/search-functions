@@ -296,7 +296,8 @@ Still open:
   part (window, `--print`, `--print0`); file lists are fine.
 - A long file's preview comes in two steps (first screen, then the whole text up to 4 MiB), not as a stream:
   bat still makes the whole 4 MiB before the rest shows (~400 ms for 17 MB), and Content's and Deep's
-  previews with a count still wait for all of it.
+  previews with a count still wait for all of it. Kept so (card t_264a5864): the reasons and what a stream
+  would need are in `docs/sf-tui-design.md`, "Decided while building".
 
 ## The fzf look (card t_74cd7243, 2026-10-31, on vpsbilal)
 
@@ -378,15 +379,68 @@ Tests after the card:
   1 run of 5 failed so. Green 3 times in a row after the change (226/226).
 - `tests/platform_action.sh` 20/20; `tests/sub_functions.sh` 7/7; `cargo clippy --all-targets`: the 6 old
   warnings only; `cargo fmt --check` clean.
-- How the scripts ran on vpsbilal (no `zip`, `file`, `delta`): from a short workdir
-  `~/workspace/sf-live/t_74cd7243`, `zip` from `card-t_7c990be7/tools/zipbin` first in PATH, and `file` and
-  `delta` as links in a release layout `pkg/lib/sf` beside `pkg/bin/sf` (`SF_BIN=$C/pkg/bin/sf`). A long
-  workdir (~150 characters) cuts path-dependent lines at 160 columns: 24 checks failed there, with HEAD's
-  binary too.
+- How the scripts run on vpsbilal: see "How to run the tests on vpsbilal" in the section of card t_264a5864
+  below.
 
 Open:
 - A scratch git worktree of e4ae243 stays under Claude Code's scratchpad
   (`~/.hermes/profiles/developer/cache/scratch/…/scratchpad/base`, built in `…/base-target`). The guard
   counts that folder as protected and Bilal said to leave it. `git worktree list` shows it. If the folder goes,
   `git worktree prune` clears the entry.
+
+## Empty files and test runs without engines (card t_264a5864, 2026-10-31, on vpsbilal)
+
+Fixed, one commit each:
+
+1. An empty file's preview (Files; Content and Deep without a pattern) shows one dim line, `empty file`.
+   Before, it said "No text preview: binary file". `is_text` still calls an empty file no text; the preview
+   reads one byte to tell an empty file from a binary.
+2. Without `file`, a binary's preview says `No text preview: binary file (install `file` for its type)`.
+3. `tests/tools/make_fixture.sh` builds `docs/arch.zip` with `zip`, or with `python3 -m zipfile` when `zip` is
+   missing (the same member `inzip.txt`). Without both, it stops and names them. Before, a missing `zip` left
+   `inzip.txt` at the root and no archive: 18 e2e checks failed on counts.
+4. `tests/e2e.sh`:
+   - The pane's PATH is `$STUBS:/usr/local/bin:/usr/bin:/bin:` and then the caller's PATH, in one variable
+     (`PANE_PATH`, quoted for WSL's spaces). A run gets delta or file through PATH.
+   - `fd` or Debian's `fdfind`, found once (`$FD`), for the file count and the bundle link. Neither: the run
+     stops.
+   - Before tmux starts, `sf doctor` with the pane's PATH says whether delta and file are found. A missing
+     engine's check prints a `SKIP` line, and the run checks what sf shows instead: git's own `+changed by e2e`
+     for delta; the install hint for file (file must also run `file -b /dev/null`). The last line is
+     `pass=N fail=N skip=N`; only fail sets the exit code.
+   - New checks: an empty file in Files (`│empty file`), `src/blob.bin` in Files, and a name with a newline
+     (`x<LF>y.txt`, in its own folder): one row in Content and in Deep, and Enter opens it (the OPEN stub logs
+     both halves of the path).
+5. The two-step preview stays (a stream needs more than 40 lines): reasons in `docs/sf-tui-design.md`,
+   "Decided while building".
+
+Tests after the card:
+
+- `cargo test`: 487 passed, 2 ignored (one new test; the old binary-file test expects the new text).
+- Run (a), zip and delta through PATH: `pass=237 fail=0 skip=1` (the skip: file).
+- Run (b), `env -i HOME=$HOME PATH=/usr/local/bin:/usr/bin:/bin`: `pass=237 fail=0 skip=2` (file, delta).
+  Before the card: 195 pass, 31 fail.
+- `tests/platform_action.sh` 20/20; `tests/sub_functions.sh` 7/7; `cargo clippy --all-targets`: the 6 old
+  warnings only; `cargo fmt --check` clean.
+
+How to run the tests on vpsbilal (no system `zip`, `file` or `delta`):
+
+```
+C=~/workspace/sf-live/t_264a5864        # tools-a/ holds links named zip and delta
+cd ~/.SearchFunctions/sf-rs && cargo build
+PATH=$C/tools-a:$PATH bash tests/e2e.sh $C/<new empty dir>               # with delta
+env -i HOME=$HOME PATH=/usr/local/bin:/usr/bin:/bin bash tests/e2e.sh $C/<new empty dir>   # Debian only
+```
+
+The links point to Debian's binaries, unpacked in `~/workspace/sf-live/card-t_7c990be7/tools/root/usr/bin/`.
+The `file` there does not run (`libmagic.so.1` is missing). Keep the workdir path short: at about 150
+characters, path-dependent lines are cut at 160 columns. `sudo apt install file zip git-delta` makes the links
+needless.
+
+Open:
+- The e2e check `No text preview: data` (file found and working) did not run: vpsbilal has no working `file`.
+  Run it once on a machine with `file`, e.g. pcbilal.
+- The fixture's branch "neither zip nor python3" did not run: the guard denied the test that hid both tools
+  (links made with `ln -sf`).
+- Still open from card t_7c990be7: Matching lines and Each match split ugrep's records at a newline in a path.
 
