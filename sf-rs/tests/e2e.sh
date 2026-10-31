@@ -129,6 +129,9 @@ engine() { env -i HOME="$HOME" PATH="$PANE_PATH" XDG_CONFIG_HOME="$XDG" "$SF" do
 DELTA=$(engine delta) FILE=$(engine file)
 [[ $FILE == /* ]] && "$FILE" -b /dev/null >/dev/null 2>&1 || FILE=   # found, and it must run too
 
+want="sf $(sed -n 's/^version = "\(.*\)"/\1/p' "$here/../Cargo.toml" | head -1)"
+got=$("$SF" --version) && [[ $got == "$want" ]] && ok "version: --version prints $want" || bad "version: --version printed '$got', want '$want'"
+
 tm kill-server 2>/dev/null
 # \$TMUX and \$TMUX_PANE are the private server's (expanded inside the pane), never the caller's own tmux;
 # the PATH quoted: WSL's has spaces

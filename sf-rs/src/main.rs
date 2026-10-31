@@ -56,6 +56,7 @@ const USAGE: &str = "usage: sf [files|content|deep|folders|git|help] [QUERY...] 
        sf open|reveal|copy-path PATH
        sf copy-text TEXT
        sf doctor
+       sf --version
 
 The search functions in one window: Files, Content (search inside text files), Deep (inside every file:
 binaries, archives, with Documents PDF and Office files), Folders, Git and Help (the manual, with
@@ -110,6 +111,10 @@ fn main() -> ExitCode {
         }
         Ok(Cli::Help) => {
             print!("{USAGE}");
+            return ExitCode::SUCCESS;
+        }
+        Ok(Cli::Version) => {
+            println!("{}", cli::version());
             return ExitCode::SUCCESS;
         }
         Ok(Cli::Doctor) => return doctor(),

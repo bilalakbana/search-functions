@@ -19,6 +19,7 @@ pub enum View {
 #[derive(Debug, PartialEq)]
 pub enum Cli {
     Help,
+    Version,
     Doctor,
     /// `sf open|reveal|copy-path PATH`, `sf copy-text TEXT`.
     Command {
@@ -45,6 +46,11 @@ pub enum Cli {
         nul: bool,
         extra: Vec<OsString>,
     },
+}
+
+/// The line `sf --version` prints: the crate's version at build time.
+pub fn version() -> String {
+    format!("sf {}", env!("CARGO_PKG_VERSION"))
 }
 
 /// The arguments after `sf`; an error is said with the usage.
@@ -115,6 +121,7 @@ pub fn parse(args: &[OsString]) -> Result<Cli, String> {
         };
         match word {
             "-h" | "--help" => return Ok(Cli::Help),
+            "--version" => return Ok(Cli::Version),
             "--print" => print = true,
             "--print0" => (print, nul) = (true, true),
             w if w.starts_with('-') && w.len() > 1 => {
@@ -447,6 +454,29 @@ mod tests {
             ),
             "after -- everything is the engine's"
         );
+    }
+
+    #[test]
+    fn version_before_the_double_dash_only() {
+        for given in [
+            vec!["--version"],
+            vec!["--version", "--print"],
+            vec!["files", "--version"],
+            vec!["files", "QUERY", "--version", "--print"],
+        ] {
+            assert_eq!(parse(&args(&given)), Ok(Cli::Version), "{given:?}");
+        }
+        assert_eq!(
+            parse(&args(&["git", "--", "--version"])),
+            Ok(run(Tab::Git, "", false, &["--version"])),
+            "after -- it is the engine's"
+        );
+        assert_eq!(
+            parse(&args(&["files", "--", "--version"])),
+            Err("sf files: --version is refused: it changes what fd prints, which sf reads".into()),
+            "fd's --version stays refused by the engine check"
+        );
+        assert_eq!(version(), concat!("sf ", env!("CARGO_PKG_VERSION")));
     }
 
     #[test]
