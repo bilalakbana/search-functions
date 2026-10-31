@@ -198,6 +198,16 @@ Decided while building (2026-10-17):
   `git show --patch-with-stat` through delta.
 - The Config popup takes only its own keys while it is open; an unreadable config file is reported and never
   overwritten (the options then are not saved).
+- A long text file's preview comes in two messages, not as a stream (2026-10-31, card t_264a5864): the first
+  screen (200 lines or 64 KiB of bat's output), then the whole text up to 4 MiB, same generation; the scroll
+  stays when the rest comes. Why two: the first message gives the speed-up (first paint, release, 140×40 tmux:
+  `huge.txt` (17 MB) 363–401 → 94–109 ms, `longline.txt` (1 MB) 122–165 → 82–129 ms, `utf8.txt` 78–96 →
+  76–93 ms; `docs/sf-next-steps.md`, card t_7c990be7). A stream would add little and cost more than the 40 lines
+  allowed for it. It would need: an append kind of `PreviewMsg` (every
+  sender and the app's tests change), `App::on_preview` extending the lines and running Ctrl-F's find again on
+  each piece, `read_capped` handing on every chunk cut at a line end, and the colour state kept across pieces
+  (ansi-to-tui parses each piece on its own). bat still makes the whole 4 MiB before the second message, and
+  previews with a count (Content, Deep) still come whole, so their header does not flicker.
 
 Platform layer (Step 1 of `docs/sf-next-steps.md`, 2026-10-17):
 
