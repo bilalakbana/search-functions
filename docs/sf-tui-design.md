@@ -88,6 +88,11 @@ Config popup (Search):
             ╰─────────────────────────────────────────────────────╯
 ```
 
+The look changed on 2026-10-31 to fzf's full style, as Bilal's `f()` in `find_files`: a top border with the
+root as its label, a quiet tab bar, the list beside the preview (right half), the prompt box under both, and
+fzf's palette (256-colour, set in the `[theme]` table of the config file). The sketch above is the earlier
+look; `docs/sf-next-steps.md`, "The fzf look", has the current one.
+
 ## Tabs and their options (defaults)
 
 | Tab | Lists | Typing | Options (default) |

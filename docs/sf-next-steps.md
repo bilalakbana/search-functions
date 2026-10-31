@@ -86,7 +86,7 @@ How Bilal starts the next session (paste):
 
 | File | What |
 |---|---|
-| `model.rs` | `Tab` {Files, Content, Deep, Folders, Git} (`from_name("search")` still → Content; `searches()`: Content and Deep), `Opt`, `Options` (serde; field `content` has `alias = "search"`), defaults |
+| `model.rs` | `Tab` {Files, Content, Deep, Folders, Git} (`from_name("search")` still → Content; `searches()`: Content and Deep), `Opt`, `Options` (serde; field `content` has `alias = "search"`; `theme` written only when not the default), defaults |
 | `config.rs` | load/save `$XDG_CONFIG_HOME/sf/config.toml`; an invalid file is reported and never overwritten |
 | `engines.rs` | finds fd/fdfind, bat/batcat, ugrep, ugrep+, git, delta, file, ls in PATH; `$BAT_THEME`; `bundle_dir` / `with_bundle` (a release package's `lib/sf`, first in PATH) |
 | `commands.rs` | pure: `list_plan` (engine command per tab/options/query; `Search` says how Content or Deep searches) and `preview_plan` (Sniff/Numbered/Run/Pipe, Content/Deep `Header` with `ugrep -c -o` counts) |
@@ -96,7 +96,8 @@ How Bilal starts the next session (paste):
 | `runner.rs` | list child in its own process group (kill on cancel), bounded records (64 KiB), batches, sorting/numbering |
 | `preview.rs` | preview worker (newest wins, kills the old), `is_text`, header lines, Content's numbered matches (`numbered_blocks`, `numbered_lines`) |
 | `app.rs` | state machine: keys, mouse, effects; list fills bottom-up like fzf (Up → next row, Home → top) |
-| `ui.rs` | drawing: tab bar with the keys centred, preview, list (bottom-up, highlight of typed words, scrollbars), input |
+| `ui.rs` | drawing as fzf's `--style full`: top border with the root, tab bar with the keys at the right, list (bottom-up, highlight of typed words, scrollbars) beside the preview, the prompt box under both |
+| `theme.rs` | the palette (256-colour indexes, fzf's by default) and its `[theme]` table; `init` once in `main`, one accessor per role |
 | `actions.rs` | Enter/^O/^E/^C: open/reveal/copy through `platform.rs`, the editor (`find_editor`) in a tmux window via `sh -c 'cd -- "$1" && shift && exec "$@"'` (never `tmux -c DIR`: format injection), nvim pattern via `$SF_QUERY` |
 | `platform.rs` | `Platform::detect()` / `from_parts()` (Linux or WSL, display, tmux, PATH), `open`, `reveal` (D-Bus FileManager1, fallback xdg-open on the folder; WSL Explorer), `copy_path`/`copy_text` (`Clipboard`: wl-copy, xclip, xsel, PowerShell, tmux OSC 52, OSC 52), `command()` for `sf open|reveal|copy-path|copy-text`, `launch()` |
 | `doctor.rs` | `sf doctor`: the report from injected `run` (versions, D-Bus questions), `run_program` with a timeout |
@@ -291,10 +292,101 @@ vpsbilal has no `file`, `delta` or `zip`: the runs used them unpacked from Debia
 release package's layout (`bin/sf` beside `lib/sf`); `sudo apt install file zip git-delta` makes that needless.
 
 Still open:
-- The fzf look (a card of its own).
 - Matching lines and Each match split ugrep's records at a newline, so a newline in a path loses its first
   part (window, `--print`, `--print0`); file lists are fine.
 - A long file's preview comes in two steps (first screen, then the whole text up to 4 MiB), not as a stream:
   bat still makes the whole 4 MiB before the rest shows (~400 ms for 17 MB), and Content's and Deep's
   previews with a count still wait for all of it.
+
+## The fzf look (card t_74cd7243, 2026-10-31, on vpsbilal)
+
+The main screen looks as Bilal's fzf screen (`f()` in `find_files`: `fzf --style full --border top
+--border-label`, measured from a 150×42 tmux pane). Keys, tabs, output, the preview worker and the views
+did not change. The views keep their full-screen layout.
+
+```
+row 0     ──────────────────  ~/Documents/Projects/app  ──────────────────   top border, root in the middle
+row 1      Files  Content  Deep  Folders  Git  Help      Enter open · ^S options  ⚙ Config
+row 2     ╭──────────────────────────────╮╭──────────────────────────────╮
+          │   src/lib.rs                 ││ 1  needle in main            │   list: left half (w/2)
+          │▌ src/main.rs                 ││ 2  second line               │   preview: right half
+row h-4   ╰──────────────────────────────╯╰──────────────────────────────╯   both boxes end here
+row h-3   ╭─────────────────────────────────────────────────────────────╮
+row h-2   │ > Files › type to filter file names            ignored 3/40 │   prompt box, full width
+row h-1   ╰─────────────────────────────────────────────────────────────╯
+```
+
+- Top border: `─` in the border colour, the root (`~` for the home folder, path colours) with one space on
+  each side, in the middle. A root wider than the pane is cut at the right.
+- Tab bar: no block and no border. The selected tab is bold in the prompt colour, the others in info. The key
+  hints sit at the right, before ⚙ Config. ⚙ Config has the accent background while the popup is open.
+- List and preview side by side: the preview's left edge at column `w/2`. The root is no longer on the
+  preview's border: the top border shows it. The preview keeps
+  `pattern · N matches` and Ctrl-F's count at its top right. The status ("Copied …", errors) is on the
+  preview's bottom border, or on the list's when the preview is hidden.
+- Prompt box: `>` in the prompt colour, then the same text as the old input line; the counter in info at the
+  right, the loading ` …` in the spinner colour. On a narrow screen the hint and the options are cut with
+  `…`; the typed text, ` · pattern: X` and the counter stay.
+- Ctrl-L (unchanged) hides the preview: the list takes the full width, the prompt box stays. Help: the manual
+  above the prompt box, full width.
+- The Ctrl-S popup hangs from row 2 and ends above the prompt box (3 rows fewer per column than before). At
+  90×24 the options and a few file types fit. With more types it scrolls, as on small screens before. Its
+  frame keeps the accent colour (161), so it stands out from the boxes.
+- The whole main screen has the bg colour. A cell with no colour of its own gets fg/bg: also where an
+  engine's output (bat, git) resets its colours, as fzf does. A colour an engine sets (delta's) stays.
+
+Palette (`theme.rs`), the defaults as measured; each one can be changed in `~/.config/sf/config.toml`:
+
+```toml
+[theme]
+fg = 252          # body text, list text, the typed query
+fg_sel = 252      # the selected row's text
+bg = 234          # the screen's background
+bg_sel = 235      # the selected row's background
+hl = 5            # matched words: the filter's, Ctrl-F's, the preview's
+hl_sel = 5        # matched words in the selected row
+info = 144        # counter, key hints, secondary labels, dim explanations
+border = 240      # every border, the top border's fill, faint text
+prompt = 161      # >, the selected tab, titles, the accent (scroll bar thumb, popup frame)
+pointer = 161     # the ▌ in column 1 of the selected row
+marker = 118      # a success in the status
+spinner = 118     # the loading …
+header = 168      # section headers (Help, the popup's rules), the preview's found title, Match #N
+path_dir = 4      # folders in a path (also a version's hash)
+path_slash = 3    # every / (also a version's name and branch)
+path_name = 2     # a path's last part
+error = 1         # sf's own errors (a match is hl, not error)
+```
+
+All keys are optional, integers 0–255. A value outside that range is a config error, like any other invalid
+value. While the file has an error, sf does not save over it. A custom theme is saved with the options.
+The default theme is not written. Tests never set the global palette: they see the defaults.
+
+Tests after the card:
+
+- `cargo test`: 486 passed, 2 ignored. New tests: the palette defaults; `[theme]` partial, invalid and saved;
+  the screen at 150×42 and 90×24 (top border, `╮╭` and `╯╰` at `w/2`, the prompt box the last 3 rows, `>` and
+  the counter, the selected row bg 235 and `▌` in column 1, no `Reset` background); the popup at 90×24; a
+  narrow prompt box. The old drawing tests read the new rows.
+- `tests/e2e.sh`: 226/226. New checks: the top border (only `─` and the root, in the middle ±1), `╮╭` at
+  `w/2 - 1`, preview text right of it, the boxes ending at h-4, the prompt box the last 3 lines across the
+  width with `>` and `N/M`; the same with the preview hidden and shown again; a 90×24 capture
+  (`screens/narrow.ansi`); `38;5;240` borders by default and `38;5;99` with a separate `XDG_CONFIG_HOME`
+  that holds `[theme] border = 99` (its file stays untouched). `red_on` looks for `38;5;5m`.
+  "views: Ctrl-G shows the change" waits for delta's `│changed by e2e` now. Files' preview shows that line too
+  (bat), so the check could pass before the view's text came. The search typed next then found nothing:
+  1 run of 5 failed so. Green 3 times in a row after the change (226/226).
+- `tests/platform_action.sh` 20/20; `tests/sub_functions.sh` 7/7; `cargo clippy --all-targets`: the 6 old
+  warnings only; `cargo fmt --check` clean.
+- How the scripts ran on vpsbilal (no `zip`, `file`, `delta`): from a short workdir
+  `~/workspace/sf-live/t_74cd7243`, `zip` from `card-t_7c990be7/tools/zipbin` first in PATH, and `file` and
+  `delta` as links in a release layout `pkg/lib/sf` beside `pkg/bin/sf` (`SF_BIN=$C/pkg/bin/sf`). A long
+  workdir (~150 characters) cuts path-dependent lines at 160 columns: 24 checks failed there, with HEAD's
+  binary too.
+
+Open:
+- A scratch git worktree of e4ae243 stays under Claude Code's scratchpad
+  (`~/.hermes/profiles/developer/cache/scratch/…/scratchpad/base`, built in `…/base-target`). The guard
+  counts that folder as protected and Bilal said to leave it. `git worktree list` shows it. If the folder goes,
+  `git worktree prune` clears the entry.
 

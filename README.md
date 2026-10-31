@@ -66,15 +66,15 @@ rows end in NUL; on a terminal the rows stay as `--print` shows them (`sf conten
 | Git | the commit graph, numbered | filters the commits; `Enter` shows one; `Ctrl-Shift-Alt-f` is Search in versions: the files of every version searched (`git grep`; rows `hash version path:line:text`, the version the tag it is in, `v7.8.5~3`, or its date; nothing typed: each file's every change once; `Enter` the file as it was) | All branches ✓, Whole files ✗ (a commit and `Ctrl-u` show the changed files whole), Match case ✗; searching versions has its own: Whole word ✗, Regular expression ✓ (Perl's), Binary files ✗, Documents ✗ (PDF, Office, e-books, archives, read from git, never copied to disk), Match case ✗, and the versions to search in (all, or those chosen: hash, date, author, branch, subject) |
 | Help | the manual: tabs, keys, options, patterns, commands with examples | finds in it, `Enter` the next one | — |
 
-As in fzf, the list fills from the bottom: the first row sits right above the input line, `Up` goes to the next
+As in fzf, the list fills from the bottom: the first row sits right above the prompt box, `Up` goes to the next
 one, `Home` to the top. Click a tab or use `Tab` / `Shift-Tab`; click **⚙ Config** (or `Ctrl-S`) for the tab's options, `Space` or a click
 toggles one. A double click is `Enter`, the wheel scrolls the list or the preview. `Alt-Up` / `Alt-Down` scroll the
 preview, `Ctrl-L` hides or shows it (each tab keeps its own), `Ctrl-R` runs the list
 again, `Esc` quits. The keys for the selected item are those under
-[Keyboard Shortcuts](#-keyboard-shortcuts) and are shown in the middle of the tab bar. A bar on the right of the list and
+[Keyboard Shortcuts](#-keyboard-shortcuts) and are shown at the right of the tab bar. A bar on the right of the list and
 the preview shows where you are in them. Filtering is case-insensitive and
 every word must match (as `fzf -i -e`, with its syntax: `!test` leaves out, `^src/` at the start, `.rs$` at the end,
-`.rs$ | .md$` either, `my\ file` a space in a word); the matches are shown red. The options are remembered in `~/.config/sf/config.toml`
+`.rs$ | .md$` either, `my\ file` a space in a word); the matches are shown in magenta. The options are remembered in `~/.config/sf/config.toml`
 (`$XDG_CONFIG_HOME/sf/config.toml`).
 
 `sf` works the same on any Linux desktop and on WSL. `Enter` opens with the default application (on WSL Windows'
@@ -140,7 +140,7 @@ These shortcuts apply when using the interactive search tools (`fzf`, `ugrep-fzf
 | `Ctrl-o` | Open the file in nvim in a new tmux window (`sf`: at the matching line, with nvim or else `$VISUAL`, `$EDITOR`, vim, vi; outside tmux in the same terminal) |
 | `Ctrl-t` | Search inside the selected file in a new tmux window (`sf`: in tmux a window of its own, else inside sf; the lines with all the typed words, `Ctrl-s` for all in the file or any of them, Match case; `Esc` back) |
 | `Ctrl-u` / `Ctrl-g` / `Alt-g` / `Alt-u` | git diff / diff (delta) / short diff / log of the file (`sf`: history with changes / changes against HEAD / short / log; in tmux each in a window of its own (`sf history|diff|log FILE`), else inside sf; `/` searches, `Esc` back; `Enter` in Git shows a commit) |
-| `Ctrl-f` | `sf`: find in the preview, as Notepad++'s Find (every match red, the current one underlined; what is looked for and `3/17` stay at the preview's top right; `Enter` `↓` the next, `↑` the one before, `Ctrl-s` Match case, Whole word, Regular expression (Perl's syntax); `Esc` back), e.g. a word in a Git commit. In tmux a root binding of `C-f` (`bind -n C-f …`) would take the key before sf sees it (`tmux list-keys -T root`) |
+| `Ctrl-f` | `sf`: find in the preview, as Notepad++'s Find (every match in magenta, the current one underlined; what is looked for and `3/17` stay at the preview's top right; `Enter` `↓` the next, `↑` the one before, `Ctrl-s` Match case, Whole word, Regular expression (Perl's syntax); `Esc` back), e.g. a word in a Git commit. In tmux a root binding of `C-f` (`bind -n C-f …`) would take the key before sf sees it (`tmux list-keys -T root`) |
 | `Alt-j` / `Ctrl-j` | Folder list / file list in a new tmux window |
 | `Ctrl-p` | `sf`, Content and Deep: the files to search in, chosen from those listed (all at first); the others leave the list and the next searches look only in the chosen ones; All files: as before. The file types (`Ctrl-s`) stand above it: changing them ends the choice |
 | `Ctrl-l` | Toggle the preview                       |
@@ -212,7 +212,7 @@ Rust 1.88 or newer (ratatui 0.30 needs it); sf then runs the fd, ugrep, bat, git
 cargo install --path ~/.SearchFunctions/sf-rs   # installs ~/.cargo/bin/sf
 sf doctor
 ```
-Content needs ugrep 3.6.0 or newer for Matching lines; before 5.0.0 only the first match of a line is marked red
+Content needs ugrep 3.6.0 or newer for Matching lines; before 5.0.0 only the first match of a line is marked
 (Ubuntu 22.04 ships 3.7.2, Debian 12 3.11.2; Ubuntu 24.04 and Debian 13 are fine). With `sf` installed, `Enter`,
 `Ctrl-e` and `Ctrl-c` of the fzf functions go through it (`sub-functions/platform_action`), so they work on WSL too;
 without it they use xdg-open, `open_in_file_manager` and wl-copy.
