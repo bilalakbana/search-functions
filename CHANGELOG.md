@@ -44,6 +44,8 @@ This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the 
   file with its byte order mark. A run without `file` and `delta` gives 238 pass, 0 fail and 2 skips.
 - The release workflow and `packaging/test_package.sh` run the suite with `SF_STRICT_SKIPS=1`, so an
   unexpected skip fails the release.
+- `tests/speed_ratio.sh` measures the TUI's first row against `sf files --print` on 100,000 files (5 paired
+  release runs; it fails when the median of their ratios is above 1.5).
 
 ## Earlier releases
 

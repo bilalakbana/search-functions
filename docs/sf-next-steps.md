@@ -446,6 +446,25 @@ Open:
 
 ## Release 0.13.0 (card t_018e8b5b, 2026-10-31)
 
+### Speed ratio (before a tag)
+
+```
+cd ~/.SearchFunctions/sf-rs && cargo build --release && bash tests/speed_ratio.sh
+```
+
+- What it measures, on a tree of 100,000 files: the time from Enter in a waiting bash (a private tmux pane,
+  140x40, made before the timer starts) to the first file name on the screen, then `sf files --print` on the same
+  tree (wall clock), back to back, so each pair sees the same load; each run's ratio is TUI / `--print`.
+- The rule: one warm-up run, then 5 runs; the median of the 5 run ratios fails (exit 1) above 1.5.
+- The script makes its own tree at `sf-rs/target/speed-ratio-tree` (100,000 empty files `f000000` … `f099999`)
+  unless it is given one: `bash tests/speed_ratio.sh TREE`. It needs tmux and a release build.
+- Files needs all rows first (sorted; `read_items` in `src/runner.rs`), so the TUI's first row is by design the
+  list time plus the TUI's own start and first frame: a ratio above 1 is not a regression, and the card's
+  "first row ≈170 ms" was a rough poll.
+- Measured 2026-10-31 on vpsbilal (2 vCPU), three script runs, load average 0.58–0.94: medians TUI 294, 271 and
+  265 ms, `--print` 207, 177 and 171 ms; median run ratios 1.41 (PASS), 1.54 (FAIL), 1.55 (FAIL). On this VPS
+  the ratio sits at the limit. The harness alone (Enter to a printed name, no sf) takes about 16 ms.
+
 ### WSL
 
 `sf doctor` warns when the search root (sf's current folder) is `/mnt` or under `/mnt/`, as WSL mounts Windows
