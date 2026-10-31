@@ -180,7 +180,8 @@ expect 'search: back to needle'            '5/5'
 keys C-p
 expect 'files: Ctrl-P lists the files found' ' Files to search in '
 keys Down Space Escape
-expect 'files: one left out of the rows'   'Content › needle .*4 files chosen +4/5'
+# 4/5 lasts only until the search over the chosen files ends (4/4), often within one look at the screen
+expect 'files: one left out of the rows'   'Content › needle .*4 files chosen +4/[45]'
 clear_query; type_ 'ignored'
 expect 'files: searched in the chosen only' 'No match'
 keys C-p a Escape
