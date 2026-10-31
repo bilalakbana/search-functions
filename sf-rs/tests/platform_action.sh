@@ -108,7 +108,8 @@ mkdir -p "$T/d" && : > "$T/d/x y.txt"
 tm() { tmux -L sfrs-platform-action -f /dev/null "$@"; }
 tm kill-server 2>/dev/null
 fzf_dir=$(dirname -- "$(command -v fzf)")   # e.g. ~/.local/bin; the stub sf stays first
-tm new-session -d -s pa -x 120 -y 30 "env -i HOME=$HOME PATH=$WITH:$fzf_dir:/usr/local/bin:/usr/bin:/bin TERM=xterm-256color \
+fd_dir=$(dirname -- "$(command -v fd)")     # file_list runs fd: Debian names its own fdfind, fd is often ~/.local/bin's
+tm new-session -d -s pa -x 120 -y 30 "env -i HOME=$HOME PATH=$WITH:$fzf_dir:$fd_dir:/usr/local/bin:/usr/bin:/bin TERM=xterm-256color \
     LANG=C.UTF-8 bash --norc --noprofile"
 pane() { tm capture-pane -p -t pa; }
 wait_for() { local i; for i in $(seq 50); do eval "$1" && return 0; sleep 0.1; done; return 1; }
