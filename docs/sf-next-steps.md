@@ -67,8 +67,9 @@ How Bilal starts the next session (paste):
 - Conversation Turkish; code, comments, commit messages English. Short replies, result first.
 - **No `Co-Authored-By` / Claude / Opus / Fable in commit messages or PR texts**, also not in commands drafted for
   him (global CLAUDE.md + `~/.claude/settings.json` `attribution` since 2026-10-17).
-- Every commit, push, tag, branch, rebase: his explicit OK per action. `git commit` from Claude is blocked by the
-  auto-mode classifier: stage nothing, give him the exact `! cd ~/.SearchFunctions && git add … && git commit -m …`.
+- Git is the undo button (Bilal, 2026-10-31): use it freely (add, commit, branch, merge, tag, stash, push without
+  force). Only risky steps ask him first: force-push, `reset --hard`, `clean`, `rebase`, `filter-branch`,
+  `branch -D`, `stash drop/clear`, `checkout --`, `restore`, making a repository public or deleting it.
 - Every deletion or overwrite of a file not just created: his OK for exactly those paths. Never put `rm` into a
   chained command (a stray `rm -f /dev/null` happened once).
 - No subagents unless he says so (state count and cost first).
@@ -259,4 +260,31 @@ After A: what other search tools offer in their options (ripgrep/ugrep flags, fz
   panel: include/exclude globs, whole word, regex, preserve case; Everything; Notepad++ Find in Files;
   Double Commander / Dolphin search), and propose the few that would help sf. Bilal's taste: minimal, no
   feature overload; give a recommendation with reasons and one alternative each; ask before building.
+
+## Live-sweep defects (card t_7c990be7, 2026-10-31, on vpsbilal)
+
+Fixed, one commit each (details in `docs/sf-tui-design.md`, "Command line" and "After v0.5.0"):
+
+1. Files shows its preview at once (no Ctrl-L); a preview asked for before the frame that lays it out is
+   asked for again at the real width (bat had wrapped at 20 columns). Corpus `shapes/` checked in tmux: text,
+   CRLF, no final newline, UTF-8, empty, binary (`file -b`), NUL bytes, 1 MB line, 300k lines; nothing hangs.
+2. `--print0`: a NUL after each path (fd `-0`, ugrep `-0`); a newline in a name survives `xargs -0`.
+3. Paths ugrep cannot read: one line, "2 paths could not be read", in the window and with `--print` (exit 2).
+4. An empty Git list says why: "this repository has no commits yet" / "bare repository, no commits yet".
+5. UTF-16LE with a byte order mark: no defect, ugrep reads it as text; the corpus file `shapes/utf16le.txt`
+   holds only "hello" in UTF-16 (its " needle" is ASCII bytes). An e2e case guards it.
+
+Tests after the card: `cargo test` 475 passed, 2 ignored; `tests/e2e.sh` 215/215; `tests/sub_functions.sh`
+7/7; `tests/platform_action.sh` 20/20 with `~/.local/bin` in its pane's PATH (on vpsbilal `fd` is only there,
+so the fzf case fails as the script is); `cargo clippy`: the 6 old warnings only. On vpsbilal (2 CPUs) the
+release speed test `speed_1m_items` takes 31–54 ms against its 30 ms limit, before the card too.
+vpsbilal has no `file`, `delta` or `zip`: the runs used them unpacked from Debian's packages, through a
+release package's layout (`bin/sf` beside `lib/sf`); `sudo apt install file zip git-delta` makes that needless.
+
+Still open:
+- The fzf look (a card of its own).
+- Matching lines and Each match split ugrep's records at a newline, so a newline in a path loses its first
+  part (window, `--print`, `--print0`); file lists are fine.
+- A 17 MB file's first preview takes ~420 ms (release): the preview reads up to 4 MiB of bat's output before
+  it shows anything; no streaming yet.
 
