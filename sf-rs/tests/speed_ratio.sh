@@ -1,8 +1,12 @@
 #!/bin/bash
-# Speed of sf as a ratio, not a stopwatch (needs tmux): the time until the window draws its first row of a tree
-# of 100,000 files, over the time of `sf files --print` on the same tree. Each of 5 release runs measures both
-# back to back (same load) and gives its ratio; the median of the 5 ratios fails (exit 1) above 1.5. One
-# warm-up run first (page cache, tmux server). Not part of cargo test.
+# Speed of sf as its own overhead, not a stopwatch and not a ratio (needs tmux). Files collects the whole list
+# before the first frame (sorted; `read_items`), so the TUI's first row is `sf files --print` plus sf's own start
+# and first frame. A ratio of the two therefore divides a ~40-80 ms constant by a baseline that moves with the
+# tree: on 100,000 files it flapped around 1.5 (1.34, 1.57, 1.54 on a quiet VPS), while the overhead itself stayed
+# small and stable. The overhead is what a change in sf can make worse, so it is the number to gate.
+# Each of 5 release runs measures both back to back (same load); the medians of the two sets give the overhead
+# (median TUI - median --print), and it fails (exit 1) above SF_SPEED_OVERHEAD_MS (default 150 ms). The ratio of
+# the medians is printed for information. One warm-up run first (page cache, tmux server). Not part of cargo test.
 # The window runs in a private tmux server (socket "sf-speed-ratio", never the user's own), 140x40, in a waiting
 # bash made before the timer starts: the TUI time runs from Enter on the typed command to the first file name in
 # a capture of the pane; it includes that send-keys call and the poll step (one capture-pane every ~5 ms), not
@@ -11,15 +15,15 @@
 #
 # usage: bash tests/speed_ratio.sh [TREE]   (from sf-rs/; TREE default target/speed-ratio-tree, made when
 #        missing: 100,000 empty files f000000 … f099999 in one folder)
-#        SF_BIN=path/to/sf (default target/release/sf); SF_SPEED_LIMIT=1.5 (the ratio's limit)
+#        SF_BIN=path/to/sf (default target/release/sf); SF_SPEED_OVERHEAD_MS=150 (the overhead's limit)
 set -u
 die() { echo "speed_ratio.sh: $*" >&2; exit 2; }
 crate=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SF=${SF_BIN:-$crate/target/release/sf}
 [[ -f $SF && -x $SF ]] || die "no sf at $SF: build it first: cargo build --release"
 SF=$(realpath -- "$SF")
-limit=${SF_SPEED_LIMIT:-1.5}
-[[ $limit =~ ^[0-9]+(\.[0-9]+)?$ ]] || die "SF_SPEED_LIMIT is not a number: $limit"
+limit=${SF_SPEED_OVERHEAD_MS:-150}
+[[ $limit =~ ^[0-9]+$ ]] || die "SF_SPEED_OVERHEAD_MS is not a whole number of ms: $limit"
 command -v tmux >/dev/null || die "tmux not found"
 
 TREE=${1:-$crate/target/speed-ratio-tree}
@@ -95,8 +99,9 @@ done
 median() { printf '%s\n' "$@" | LC_ALL=C sort -n | sed -n 3p; } # the 3rd of 5
 LC_ALL=C awk -v t="$(median "${tui[@]}")" -v p="$(median "${print[@]}")" -v r="$(median "${ratios[@]}")" \
     -v l="$limit" 'BEGIN {
-    over = (r > l) # in printf or exit, a bare > would be an output redirect
-    printf "median: TUI %d ms, --print %d ms; median of the 5 run ratios %.2f (limit %s) %s\n", t, p, r, l,
+    over = ((t - p) > l) # in printf or exit, a bare > would be an output redirect
+    printf "median: TUI %d ms, --print %d ms -> overhead %d ms (limit %d ms) %s\n", t, p, t - p, l,
         (over ? "FAIL" : "PASS")
+    printf "ratio of the medians %.2f (information only; the median of the 5 run ratios is %.2f)\n", t / p, r
     exit over
 }'

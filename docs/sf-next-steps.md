@@ -454,26 +454,33 @@ cd ~/.SearchFunctions/sf-rs && cargo build --release && bash tests/speed_ratio.s
 
 - What it measures, on a tree of 100,000 files: the time from Enter in a waiting bash (a private tmux pane,
   140x40, made before the timer starts) to the first file name on the screen, then `sf files --print` on the same
-  tree (wall clock), back to back, so each pair sees the same load; each run's ratio is TUI / `--print`.
-- The rule: one warm-up run, then 5 runs; the median of the 5 run ratios fails (exit 1) above 1.5.
+  tree (wall clock), back to back, so each pair sees the same load.
+- The rule (Bilal, 2026-10-31): one warm-up run, then 5 runs; the **overhead** is the median TUI time minus the
+  median `--print` time, and it fails (exit 1) above `SF_SPEED_OVERHEAD_MS` (default 150 ms). The ratio is printed
+  for information only.
+- Why not the ratio: Files collects the whole list before the first frame (sorted; `read_items` in
+  `src/runner.rs`), so the TUI time is the list time plus sf's own start and first frame. A ratio divides a ~40–80
+  ms constant by a baseline that moves with the tree and the load; on this VPS it sat exactly at the old 1.5 limit
+  and flipped between pass and fail on an unchanged tree (1.34, 1.57, 1.54 in three runs). The overhead is the part
+  a change in sf can make worse, and it stayed at 79 ms in the run that produced ratio 1.58.
 - The script makes its own tree at `sf-rs/target/speed-ratio-tree` (100,000 empty files `f000000` … `f099999`)
   unless it is given one: `bash tests/speed_ratio.sh TREE`. It needs tmux and a release build.
-- Files needs all rows first (sorted; `read_items` in `src/runner.rs`), so the TUI's first row is by design the
-  list time plus the TUI's own start and first frame: a ratio above 1 is not a regression, and the card's
-  "first row ≈170 ms" was a rough poll.
-- Measured 2026-10-31 22:50 on a quiet vpsbilal (2 vCPU), three script runs, each run's pairs as TUI / `--print`
-  in ms:
+- The card's "first row ≈170 ms" was a rough poll, not this harness; the harness adds its own ~16 ms.
+- Measured 2026-10-31 23:20 on vpsbilal (2 vCPU), after the switch to the overhead rule:
 
-  | Run (load average) | The five pairs | Median ratio |
-  |---|---|---|
-  | 1 (0.45) | 192/154, 193/157, 218/130, 251/161, 223/167 | 1.34 PASS |
-  | 2 (0.45) | 226/144, 220/305, 389/167, 252/148, 209/166 | 1.57 FAIL |
-  | 3 (0.82) | 227/126, 211/137, 213/138, 185/126, 214/125 | 1.54 FAIL |
+  | Run | TUI / `--print` (ms) | Ratio | Overhead |
+  |---|---|---|---|
+  | warm-up | 193 / 123 | 1.57 | 70 ms |
+  | 1 | 211 / 162 | 1.30 | 49 ms |
+  | 2 | 241 / 127 | 1.90 | 114 ms |
+  | 3 | 186 / 141 | 1.32 | 45 ms |
+  | 4 | 215 / 124 | 1.73 | 91 ms |
+  | 5 | 223 / 136 | 1.64 | 87 ms |
 
-- On a quiet VPS too the ratio sits at the limit: two of the three runs fail at 1.5. Both times are lower than
-  under load (TUI 213–226 ms against 265–294 ms, `--print` 126–166 ms against 171–207 ms), the ratio is not.
-  Earlier the same day, with three stale debug sf processes using about 30 % of one CPU (load 0.58–0.94), the
-  median ratios were 1.41, 1.54 and 1.55. The harness alone (Enter to a printed name, no sf) takes about 16 ms.
+  Median: TUI 215 ms, `--print` 136 ms → **overhead 79 ms (limit 150) PASS**; the ratio of the medians is 1.58,
+  which the old 1.5 rule would have failed on the same unchanged tree.
+- Earlier the same day, with three stale debug sf processes using about 30 % of one CPU (load 0.58–0.94), the
+  median ratios were 1.41, 1.54 and 1.55 — the same flapping.
 
 ### WSL
 
