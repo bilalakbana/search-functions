@@ -274,9 +274,18 @@ Fixed, one commit each (details in `docs/sf-tui-design.md`, "Command line" and "
 5. UTF-16LE with a byte order mark: no defect, ugrep reads it as text; the corpus file `shapes/utf16le.txt`
    holds only "hello" in UTF-16 (its " needle" is ASCII bytes). An e2e case guards it.
 
-Tests after the card: `cargo test` 475 passed, 2 ignored; `tests/e2e.sh` 215/215; `tests/sub_functions.sh`
-7/7; `tests/platform_action.sh` 20/20 with `~/.local/bin` in its pane's PATH (on vpsbilal `fd` is only there,
-so the fzf case fails as the script is); `cargo clippy`: the 6 old warnings only. On vpsbilal (2 CPUs) the
+Second round (same card):
+
+6. `tests/platform_action.sh` puts `fd`'s folder in its fzf pane's PATH (on vpsbilal `fd` is only in
+   `~/.local/bin`, so `file_list` listed nothing).
+7. A long text file's preview sends its first screen (200 lines or 64 KiB of bat's output) at once and the
+   whole text (up to 4 MiB, as before) after it, same generation; the scroll stays when the rest comes.
+   Previews with a count (Content, Deep) come whole, so their header never flickers. First paint, release,
+   140×40 tmux, from `sf files NAME` to the first line: `huge.txt` (17 MB) 363–401 → 94–109 ms,
+   `longline.txt` (1 MB) 122–165 → 82–129 ms, `utf8.txt` 78–96 → 76–93 ms.
+
+Tests after the card: `cargo test` 479 passed, 2 ignored; `tests/e2e.sh` 215/215; `tests/sub_functions.sh`
+7/7; `tests/platform_action.sh` 20/20; `cargo clippy`: the 6 old warnings only. On vpsbilal (2 CPUs) the
 release speed test `speed_1m_items` takes 31–54 ms against its 30 ms limit, before the card too.
 vpsbilal has no `file`, `delta` or `zip`: the runs used them unpacked from Debian's packages, through a
 release package's layout (`bin/sf` beside `lib/sf`); `sudo apt install file zip git-delta` makes that needless.
@@ -285,6 +294,7 @@ Still open:
 - The fzf look (a card of its own).
 - Matching lines and Each match split ugrep's records at a newline, so a newline in a path loses its first
   part (window, `--print`, `--print0`); file lists are fine.
-- A 17 MB file's first preview takes ~420 ms (release): the preview reads up to 4 MiB of bat's output before
-  it shows anything; no streaming yet.
+- A long file's preview comes in two steps (first screen, then the whole text up to 4 MiB), not as a stream:
+  bat still makes the whole 4 MiB before the rest shows (~400 ms for 17 MB), and Content's and Deep's
+  previews with a count still wait for all of it.
 
