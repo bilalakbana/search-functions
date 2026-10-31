@@ -6,17 +6,17 @@
 //! 0 something was listed, 1 nothing, 2 an error.
 
 use std::ffi::OsString;
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, BufRead, BufReader, IsTerminal, Write};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::mpsc::channel;
 
 use crate::commands::{Cmd, ListPlan, list_plan_with};
 use crate::engines::Engines;
 use crate::filter::Filter;
 use crate::model::{Opt, Options, Tab};
-use crate::runner::{ListMsg, Runner};
+use crate::runner::{self, ListMsg, Runner};
 
 /// Prints the list of `tab`; returns the exit status. `nul` (`--print0`): a NUL after each path instead
 /// of the newline (or ugrep's colon), so any name gets through; a terminal gets the rows as drawn.
@@ -56,12 +56,35 @@ pub fn print(
         }
         ListPlan::Run { cmd, .. } => {
             let cmd = piped(cmd, nul);
-            let status = Command::new(&cmd.program)
+            let child = Command::new(&cmd.program)
                 .args(&cmd.args)
                 .envs(cmd.env.iter().map(|(k, v)| (k, v)))
                 .current_dir(root)
-                .status();
-            match status {
+                .stderr(Stdio::piped())
+                .spawn();
+            let mut child = match child {
+                Ok(child) => child,
+                Err(e) => {
+                    eprintln!("sf: {}: {e}", cmd.program.display());
+                    return 2;
+                }
+            };
+            // its messages as they are, but the paths it could not read as one line, as in the window
+            let mut unread = 0;
+            let mut err = io::stderr().lock();
+            if let Some(stderr) = child.stderr.take() {
+                for line in BufReader::new(stderr).split(b'\n').map_while(Result::ok) {
+                    if runner::unreadable(&line) {
+                        unread += 1;
+                    } else {
+                        let _ = err.write_all(&line).and_then(|()| err.write_all(b"\n"));
+                    }
+                }
+            }
+            if unread > 0 {
+                let _ = writeln!(err, "{}", runner::unreadable_note(unread));
+            }
+            match child.wait() {
                 Ok(s) => s.code().map_or(2, |c| c.clamp(0, 2) as u8),
                 Err(e) => {
                     eprintln!("sf: {}: {e}", cmd.program.display());

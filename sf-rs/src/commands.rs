@@ -464,7 +464,8 @@ pub fn list_plan_with(
                 };
                 p
             };
-            // -s: no messages about unreadable files; what stays on stderr (a broken pattern) is shown.
+            // No -s: ugrep's warnings about paths it cannot read come, and the runner makes them one
+            // line; a broken pattern is shown as it is.
             // sf reads NUL after a path, 0x1f after a line number and every match between 0x01 and 0x02;
             // printed (`sf --print`), ugrep's own output goes out, coloured on a terminal.
             // Each match (detailedsearch): -o with 50 characters of the line on either side; --replace
@@ -485,7 +486,6 @@ pub fn list_plan_with(
             } else if each_match {
                 cmd = cmd.arg("-a"); // a binary's matches as text, as detailedsearch
             }
-            cmd = cmd.arg("-s");
             let around = ["-B50", "-A50"];
             if print {
                 cmd = cmd.arg("--color=auto");
@@ -895,7 +895,6 @@ mod tests {
             "--sort=name",
             "-i",
             "--ignore-binary",
-            "-s",
             "--null",
             "--exclude-dir=.git",
             "-e",
@@ -949,7 +948,6 @@ mod tests {
                 "--sort=name",
                 "-i",
                 "--ignore-binary",
-                "-s",
                 "--null",
                 "--exclude-dir=.git",
                 "-e",
@@ -992,7 +990,6 @@ mod tests {
                 "-rzl",
                 "--sort=name",
                 "-i",
-                "-s",
                 "--null",
                 "--exclude=*.rar",
                 "--exclude-dir=.git",
@@ -1034,7 +1031,6 @@ mod tests {
                 "--sort=name",
                 "-i",
                 "-a",
-                "-s",
                 "--null",
                 "--separator=\x1f",
                 "--color=always",
@@ -1068,7 +1064,6 @@ mod tests {
                 "-rlU",
                 "--sort=name",
                 "-i",
-                "-s",
                 "--null",
                 "--exclude-dir=.git",
                 "-e",
@@ -1093,6 +1088,23 @@ mod tests {
 
     fn has(cmd: &Cmd, arg: &str) -> bool {
         cmd.args.iter().any(|a| a == arg)
+    }
+
+    #[test]
+    fn ugrep_says_which_paths_it_could_not_read() {
+        // no -s: the runner makes its warnings one line ("2 paths could not be read")
+        let mut o = Options::default();
+        for (tab, lines, print) in [
+            (Tab::Content, false, false),
+            (Tab::Content, true, false),
+            (Tab::Content, false, true),
+            (Tab::Deep, false, false),
+        ] {
+            o.content.matching_lines = lines;
+            let plan = list_plan_with(tab, &o, "needle", &engines(), &[], print);
+            let (cmd, _) = run(plan);
+            assert!(!has(&cmd, "-s"), "{tab:?} {:?}", cmd.args);
+        }
     }
 
     #[test]
@@ -1446,7 +1458,6 @@ mod tests {
                 "-rzl",
                 "--sort=name",
                 "-i",
-                "-s",
                 "--null",
                 "--exclude=*.rar",
                 "--exclude-dir=.git",
@@ -1471,7 +1482,6 @@ mod tests {
                 "--sort=name",
                 "-i",
                 "--ignore-binary",
-                "-s",
                 "--null",
                 "--separator=\x1f",
                 "--color=never",
@@ -1558,7 +1568,6 @@ mod tests {
                 "--sort=name",
                 "-i",
                 "--ignore-binary",
-                "-s",
                 "--color=auto",
                 "--exclude-dir=.git",
                 "-e",

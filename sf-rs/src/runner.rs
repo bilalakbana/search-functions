@@ -134,22 +134,42 @@ fn reap(job: &Mutex<(Child, bool)>) {
     }
 }
 
+/// ugrep's warning about a path it cannot read or open, or one that is gone (ugrep runs without -s).
+pub fn unreadable(line: &[u8]) -> bool {
+    line.starts_with(b"ugrep: warning: ")
+}
+
+/// The one line that stands for `n` such warnings.
+pub fn unreadable_note(n: usize) -> String {
+    format!(
+        "{n} {} could not be read",
+        if n == 1 { "path" } else { "paths" }
+    )
+}
+
+/// The engine's stderr lines as errors; the `unreadable` ones as one line at the end.
 fn read_errors(generation: u64, stderr: impl Read, tx: &Sender<ListMsg>) {
     let mut shown = 0;
     let mut more = 0;
+    let mut unread = 0;
     let (mut reader, mut line) = (BufReader::new(stderr), Vec::new());
     while let Ok(Some(_)) = read_record(&mut reader, b'\n', &mut line, MAX_ERROR_LINE) {
         let line = String::from_utf8_lossy(&line).trim().to_string();
         if line.is_empty() {
             continue;
         }
-        if shown == MAX_ERRORS {
+        if unreadable(line.as_bytes()) {
+            unread += 1;
+        } else if shown == MAX_ERRORS {
             more += 1;
         } else if tx.send(ListMsg::Error(generation, line)).is_ok() {
             shown += 1;
         } else {
             return;
         }
+    }
+    if unread > 0 {
+        let _ = tx.send(ListMsg::Error(generation, unreadable_note(unread)));
     }
     if more > 0 {
         let _ = tx.send(ListMsg::Error(
@@ -500,6 +520,27 @@ mod tests {
         );
         assert!(items.is_empty());
         assert_eq!(errors, ["oops", "two"]);
+    }
+
+    #[test]
+    fn paths_that_could_not_be_read_are_one_line() {
+        let script = "echo 'ugrep: warning: cannot read a.txt: Permission denied' >&2; \
+                      echo 'ugrep: error: error at position 0' >&2; \
+                      echo 'ugrep: warning: cannot open directory d: Permission denied' >&2; \
+                      echo 'ugrep: warning: gone.txt: No such file or directory' >&2";
+        let (_, errors) = run(sh(script), ParseKind::SearchFiles { archives: false });
+        assert_eq!(
+            errors,
+            [
+                "ugrep: error: error at position 0",
+                "3 paths could not be read"
+            ]
+        );
+        let (_, errors) = run(
+            sh("echo 'ugrep: warning: cannot read a: Permission denied' >&2"),
+            ParseKind::SearchFiles { archives: false },
+        );
+        assert_eq!(errors, ["1 path could not be read"]);
     }
 
     #[test]

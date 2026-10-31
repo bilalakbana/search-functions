@@ -273,6 +273,9 @@ Command line (v0.2.0, 2026-10-17; Bilal asked for engine flags and a print mode)
   ugrep `-0` prints it (path NUL `line:text` newline). The pass-through gets ugrep's `--null` (`print::piped`),
   which puts the NUL in place of the newline of `-l` or the colon before the line number. A terminal keeps the
   rows as `--print` draws them. `sf in FILE` reads `--print0` as a word, as every word after FILE.
+- Paths ugrep cannot read (2026-10-31, card t_7c990be7): ugrep runs without `-s`, so its warnings (cannot read,
+  cannot open directory, gone) come; the window and `--print` make them one line, "2 paths could not be read"
+  (`runner::unreadable`), and other messages (a broken pattern) stay as they are. The exit status stays 2.
 - Options after `--` go to the starting tab's engine only (fd in Files and Folders, ugrep in Content, git log
   in Git): fd and git get them last, ugrep before `--exclude-dir=.git -e QUERY .`; Content's preview count and
   matches get them too, so the preview counts as the list does. They show in the input line (`-- -w -i`).

@@ -369,6 +369,23 @@ mkdir "$W/names" && printf 'needle\n' > "$W/names/a"$'\n'"b.txt" && printf 'need
 keys "clear; cd '$W/names'; '$SF' content needle --print0 | tr '\0\n' '|~'; echo; '$SF' files --print0 | tr '\0\n' '#~'; echo; cd '$T'" Enter
 expect 'print0: content, a NUL after each path' '^a~b\.txt\|c d\.txt\|\s*$'
 expect 'print0: files, a NUL after each path'   '^a~b\.txt#c d\.txt#\s*$'
+# a file and a folder sf may not read: one line says so (as Bilal's user: root reads them anyway)
+mkdir -p "$W/perms/locked" && printf 'needle\n' | tee "$W/perms/r.txt" "$W/perms/u.txt" "$W/perms/locked/x.txt" >/dev/null
+chmod 000 "$W/perms/u.txt" "$W/perms/locked"
+keys "clear; cd '$W/perms'; '$SF' content needle --print 2>&1 | cat; echo rc-perms=\${PIPESTATUS[0]}" Enter
+expect 'perms: --print names the count'    '^2 paths could not be read\s*$'
+expect 'perms: --print exits 2'            '^rc-perms=2'
+keys "clear; '$SF' content needle" Enter
+expect 'perms: the window says it once'    '2 paths could not be read'
+expect 'perms: the readable file listed'   'Content filter › .* · pattern: needle .* 1/1'
+[[ $(pane | grep -c 'could not be read') -eq 1 ]] && ok 'perms: one line, not one a path' || bad 'perms: more than one line'
+shot perms
+keys Escape
+expect 'perms: Esc back to the pattern'    'Content › needle .* 1/1'
+keys Escape
+expect 'perms: quit'                       '^READY>\s*$'
+chmod 700 "$W/perms/u.txt" "$W/perms/locked"
+keys "cd '$T'" Enter
 keys "clear; '$SF' deep needle | grep -F 'arch.zip{'" Enter
 expect "piped: deep prints ugrep's members" '^docs/arch\.zip\{inzip\.txt\}\s*$'
 keys "clear; '$SF' files -- -l; echo rc-refused=\$?" Enter
