@@ -470,3 +470,79 @@ cd ~/.SearchFunctions/sf-rs && cargo build --release && bash tests/speed_ratio.s
 `sf doctor` warns when the search root (sf's current folder) is `/mnt` or under `/mnt/`, as WSL mounts Windows
 drives there; the numbers wait for Bilal's WSL machine.
 
+### Scale measurements
+
+Measured 2026-10-31, 22:41–22:44, on vpsbilal (2 vCPU, 3.8 GiB RAM, load average 0.8–2.1 during the runs) with
+the release build `sf-rs/target/release/sf` (sf 0.13.0, HEAD 0db7d42) and the system's engines (no delta in
+PATH: diffs are git's own). Each case: one warm-up run, then 3 runs, each shown; the median is the middle one.
+
+How each number was taken (the method of `tests/speed_ratio.sh`): a private tmux server (`-L sf-scale -f
+/dev/null`), a 140x40 pane with a waiting `bash --noprofile --norc` made before the timer starts, a fresh
+`XDG_CONFIG_HOME` per run, a new sf per run. A TUI time runs from the send-keys call (Enter, or the key) to a
+pattern in a capture of the pane, polled every ~5 ms; the harness alone takes about 16 ms (12–30), so a time
+near 16 ms means "at the first poll". A `--print` time is the wall clock of the plain command, stdout to
+`/dev/null`. Peak memory is the kernel's VmHWM of the process. The scripts, kept for repeating: in
+`/home/bilal/workspace/sf-live/scale-tools/` `case_1m.sh`, `case_git.sh`, `case_bigline.sh` (helpers `lib.sh`,
+`peak_mem.py`); their output is in `results-1m.txt`, `results-git.txt`, `results-bigline.txt` there.
+
+**1. A flat folder of 1,000,000 empty files** (`/home/bilal/workspace/sf-live/scale-1m`, `f0000000` …
+`f0999999`, made in 58 s with `seq -f 'f%07.0f' 0 999999 | xargs touch`; it costs 1,000,000 inodes and a
+22,642,688-byte directory, no data blocks; free before: 34 GB, 3.4M inodes)
+
+| What | Runs (ms) | Median |
+|---|---|---|
+| list: `sf files --print` | 2162, 2228, 2052 | 2162 ms |
+| filter: `sf files f09999 --print` (100 rows: `f0999900` … `f0999999`) | 2011, 1949, 2044 | 2011 ms |
+| TUI first row: Enter on `sf files` to the first `f0nnnnnn` on screen | 2410, 2218, 2206 | 2218 ms |
+
+Peak memory: `sf files --print` sf 141.2 MiB, fd 29.7 MiB; the window with all 1,000,000 rows listed, sf
+142.3 MiB. The TUI's first row over the list time is 1.03 here (at 100k files the median run ratios were
+1.41–1.55, see "Speed ratio"): sf's own start weighs less at 1M.
+
+**2. A repository with 100,000 commits** (`/home/bilal/workspace/sf-live/scale-git/repo`, built in 17 s by
+`python3 -I /home/bilal/workspace/sf-live/scale-git/make_repo.py repo 100000` run in `scale-git/`, through
+`git fast-import`: one branch `main`, 100 files `src/file_00.txt` … `src/file_99.txt` of 20 lines, each commit
+changes one line of one file, so each file has 1,000 commits; 400,000 objects in one 51.84 MiB pack as
+fast-import wrote it, no gc; `.git` 52 MB)
+
+| What | Runs (ms) | Median |
+|---|---|---|
+| Git tab first row: Enter on `sf git` to a numbered commit row | 2548, 2550, 2543 | 2548 ms |
+| Enter on the newest commit to the commit view (its `╭ commit <hash>` border) | 14, 19, 14 | 14 ms |
+| Ctrl-U on `src/file_00.txt` in Files (the file's history with its changes, a tmux window) to its first commit | 1964, 2037, 2041 | 2037 ms |
+
+- Ctrl-U on a commit in the Git tab does nothing, by design: the file keys are not bound in Git (`src/app.rs`,
+  "a file's keys are not bound in Git (Bilal): nothing happens, nothing is said"). Checked: the screen was the same
+  2 s after Ctrl-U, and no tmux window opened. The card's "Ctrl-U history" is a file's key, so the third row
+  measures it on a file.
+- Peak memory: the Git tab with 100,000 rows listed, sf 120.1 MiB.
+- One exploratory run right after building the two cases (load 2.45) took 4325 ms to the Git tab's first row:
+  the number moves with the load.
+
+**3. One line of 50 MiB** (`/home/bilal/workspace/sf-live/scale-bigline/bigline.txt`, 52,428,800 bytes of `a`,
+no newline, made with `head -c 52428800 /dev/zero | tr '\0' a`)
+
+| What | Runs (ms) | Median |
+|---|---|---|
+| Files, Enter on `sf files` to the preview's first screen (a row of 60 `a`) | 442, 551, 508 | 508 ms |
+| 2,000 Alt-Down in one `tmux send-keys -N 2000 M-Down` to `… preview cut at 4 MiB` on screen | 15, 17, 18 | 17 ms |
+
+- Before the scroll the preview shows `1 aaaa…`, the line wrapped at 58 `a` per row; after it, the preview's top
+  row is `… preview cut at 4 MiB` (the scroll stops at the last line). Each Alt-Down scrolls one preview page;
+  1,000 pages were not enough in a trial, 2,000 were. The scroll keys were sent 6 s after the first screen, when
+  the whole 4 MiB had come (the cut line belongs to it); the time until the whole text comes was not measured.
+- 17 ms is the harness's floor: sf takes the 2,000 keys and draws within one poll.
+- Peak memory: sf 25.3 MiB after the scroll. bat's own peak was not measured (it is a short-lived child).
+- Not explained: in an 80x24 pane, 7,000 Alt-Down never showed the cut line, while 140x40 reached it with
+  2,000. Nothing hung. A lead, not a finding: `scroll_preview` in `src/app.rs` casts the clamped position with
+  `as u16`, so a preview of more than 65,535 rows would wrap; a two-step test of that (3,856 pages down, past
+  row 65,535 if a page is 17 rows as the 80x24 layout gives; then one up; look for row 1) did not show the wrap.
+
+Nothing panicked, hung or ran out of memory. Not measured: WSL (no WSL machine here), delta's diffs (no delta in
+PATH), the time until a long preview's whole text has come.
+
+Folders left for Bilal to delete when he no longer needs them: `/home/bilal/workspace/sf-live/scale-1m`
+(1,000,000 files), `/home/bilal/workspace/sf-live/scale-git`,
+`/home/bilal/workspace/sf-live/scale-bigline` (50 MiB), `/home/bilal/workspace/sf-live/scale-tools` (scripts,
+results and the per-run config folders in `work/`).
+
