@@ -78,7 +78,8 @@ tm kill-server 2>/dev/null
 tm new-session -d -s e2e -x 160 -y 40 "env -i HOME=$HOME PATH=$STUBS:/usr/local/bin:/usr/bin:/bin TERM=xterm-256color \
     COLORTERM=truecolor LANG=C.UTF-8 XDG_CONFIG_HOME=$XDG LESS=-R WAYLAND_DISPLAY=wayland-e2e \
     TMUX=\$TMUX TMUX_PANE=\$TMUX_PANE bash --norc --noprofile"
-# as Bilal's tmux: modified keys apart for the programs that ask (sf: Ctrl-Shift-Alt-F is not Ctrl-Alt-F)
+# as Bilal's tmux: modified keys apart for the programs that ask (sf: Ctrl-Shift-Alt-F is not Ctrl-Alt-F);
+# the format is tmux 3.5's, older ones send csi-u anyway
 tm set -s extended-keys on
 tm set -s extended-keys-format csi-u
 keys "PS1='READY> '; cd '$T'" Enter

@@ -629,6 +629,7 @@ impl App {
         if key.kind == KeyEventKind::Release {
             return Vec::new();
         }
+        let key = ctrl_letter(key);
         if self.view.is_some() {
             return self.view_key(key);
         }
@@ -1817,6 +1818,16 @@ impl App {
         }
         fx
     }
+}
+
+/// A control character that comes with modifiers is Ctrl and its letter, as crossterm reads a lone
+/// one: tmux 3.2a's extended keys send Ctrl-Shift-Alt-F as `ESC[6;4u`, ^F with Shift and Alt.
+fn ctrl_letter(mut key: KeyEvent) -> KeyEvent {
+    if let KeyCode::Char(c @ '\u{1}'..='\u{1a}') = key.code {
+        key.code = KeyCode::Char((c as u8 - 1 + b'a') as char);
+        key.modifiers |= KeyModifiers::CONTROL;
+    }
+    key
 }
 
 /// Deletes the word before the end and the spaces after it (unix-word-rubout).
@@ -3123,6 +3134,20 @@ pub(crate) mod tests {
         assert!(c.result_filter.is_some());
         c.handle_key(ctrl_shift_alt('f'), now);
         assert!(c.result_filter.is_some(), "nor does it end the filter");
+    }
+
+    #[test]
+    fn a_control_character_with_modifiers_is_ctrl_and_its_letter() {
+        // tmux 3.2a (Ubuntu 22.04) sends Ctrl-Shift-Alt-F as ESC[6;4u: ^F, Shift and Alt
+        let (mut a, now) = app(Tab::Git);
+        let tmux_32 = KeyEvent::new(
+            KeyCode::Char('\u{6}'),
+            KeyModifiers::SHIFT | KeyModifiers::ALT,
+        );
+        a.handle_key(tmux_32, now);
+        assert!(a.versions.is_some(), "Search in versions");
+        a.handle_key(tmux_32, now);
+        assert!(a.versions.is_none(), "and back");
     }
 
     #[test]

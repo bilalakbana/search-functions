@@ -622,6 +622,10 @@ lines):
   passes on as csi-u when `extended-keys` is on and `extended-keys-format` csi-u (tried in a private tmux:
   Ctrl-Alt-F `ESC[102;7u`, Ctrl-Shift-Alt-F `ESC[102;8u`, Ctrl-F stays `^F`); elsewhere the kitty protocol
   when the terminal answers crossterm's query (Ghostty does). crossterm reads csi-u as the letter with SHIFT.
+  `extended-keys-format` is tmux 3.5's; older ones send csi-u anyway, but not alike (tried in the release
+  test's containers): tmux 3.3a and 3.4 `ESC[70;8u` (F, all three), 3.2a `ESC[6;4u` (^F with Shift and Alt),
+  which crossterm reads as the character ^F; sf takes a control character that comes so as Ctrl and its letter
+  (`app::ctrl_letter`). The first dry run of v0.13.0 failed on Ubuntu 22.04 for that.
   Bilal's `~/.dot-files/.tmux.conf` got `extended-keys on`, `extended-keys-format csi-u` and
   `terminal-features ',xterm*:extkeys'` (tmux asks Ghostty for such keys; detach and attach again). Without
   them both keys reach sf as Ctrl-Alt-F and Search in versions has no key. The e2e's tmux runs with the first
