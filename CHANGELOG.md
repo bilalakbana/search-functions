@@ -17,6 +17,8 @@ This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the 
   `~/.config/sf/config.toml`.
 - In the Git tab, Ctrl-Shift-Alt-F opens Search in versions. Ctrl-Alt-F stays the result filter of Content
   and Deep, and the filter's input line names itself.
+- `sf doctor` warns when the search root is under `/mnt/` (WSL drive mounts are much slower), and the README
+  says so.
 
 ### Fixed
 - Files shows its preview at once. A preview asked for before the frame that lays it out is asked for again
