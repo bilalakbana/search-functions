@@ -212,7 +212,7 @@ Rust 1.88 or newer (ratatui 0.30 needs it); sf then runs the fd, ugrep, bat, git
 cargo install --path ~/.SearchFunctions/sf-rs   # installs ~/.cargo/bin/sf
 sf doctor
 ```
-Content needs ugrep 3.6.0 or newer for Matching lines; before 5.0.0 only the first match of a line is marked
+Content needs ugrep 3.6.0 or newer for Matching lines; before 5.0.0 only the first match of a line is marked red
 (Ubuntu 22.04 ships 3.7.2, Debian 12 3.11.2; Ubuntu 24.04 and Debian 13 are fine). With `sf` installed, `Enter`,
 `Ctrl-e` and `Ctrl-c` of the fzf functions go through it (`sub-functions/platform_action`), so they work on WSL too;
 without it they use xdg-open, `open_in_file_manager` and wl-copy.
