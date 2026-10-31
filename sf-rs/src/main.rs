@@ -50,7 +50,7 @@ use crate::preview::Previewer;
 use crate::runner::Runner;
 use crate::views::ViewKind;
 
-const USAGE: &str = "usage: sf [files|content|deep|folders|git|help] [QUERY...] [--print] [-- ENGINE-OPTIONS...]
+const USAGE: &str = "usage: sf [files|content|deep|folders|git|help] [QUERY...] [--print|--print0] [-- ENGINE-OPTIONS...]
        sf in FILE [WORDS...]
        sf history|log|diff [--short] FILE
        sf open|reveal|copy-path PATH
@@ -71,7 +71,9 @@ Content and Deep, git log in Git (sf files -- -e rs, sf content TODO -- -t py, s
 those that change what the engine prints are refused. With --print, or when the output goes to a pipe or
 a file, sf prints the list instead of opening the window: on a terminal as the window shows it, into a
 pipe the real paths (Content and Deep: ugrep's own path:line:text); exit status 0 when something was
-listed, 1 when nothing, 2 on an error.
+listed, 1 when nothing, 2 on an error. --print0 puts a NUL after each path instead of the newline (as
+fd -0 and ugrep -0) for xargs -0: a list of files is path NUL path NUL ..., Matching lines and Each match
+path NUL line:text, Git's rows end in NUL; a terminal gets the rows as with --print.
 
 sf in FILE [WORDS...] opens the window inside FILE, as Ctrl-T does (in tmux Ctrl-T opens it in a window
 of its own); the words are read as its options say (all on a line by default), Esc quits. sf history,
@@ -94,7 +96,7 @@ const MESSAGES_PER_FRAME: usize = 2000;
 fn main() -> ExitCode {
     use_bundle();
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
-    let (tab, query, print, extra) = match cli::parse(&args) {
+    let (tab, query, print, nul, extra) = match cli::parse(&args) {
         Ok(Cli::InFile { file, query }) => {
             return report(run(Tab::Content, query, Vec::new(), Start::InFile(file)));
         }
@@ -117,8 +119,9 @@ fn main() -> ExitCode {
             tab,
             query,
             print,
+            nul,
             extra,
-        }) => (tab, query, print, extra),
+        }) => (tab, query, print, nul, extra),
         // a wrong word gets the usage; a refused option or a command's argument only the reason
         Err(e) if e.starts_with("sf ") => {
             eprintln!("{e} (sf --help)");
@@ -130,7 +133,7 @@ fn main() -> ExitCode {
         }
     };
     if print || !std::io::stdout().is_terminal() {
-        return print_list(tab, &query, &extra);
+        return print_list(tab, &query, &extra, nul);
     }
     report(run(tab, query, extra, Start::Tab))
 }
@@ -222,8 +225,8 @@ fn load_options() -> (Options, Option<String>) {
     }
 }
 
-/// `sf --print`: the list instead of the window.
-fn print_list(tab: Tab, query: &str, extra: &[OsString]) -> ExitCode {
+/// `sf --print`: the list instead of the window; `nul` (`--print0`): a NUL after each path.
+fn print_list(tab: Tab, query: &str, extra: &[OsString], nul: bool) -> ExitCode {
     let root = match std::env::current_dir() {
         Ok(root) => root,
         Err(e) => {
@@ -237,7 +240,9 @@ fn print_list(tab: Tab, query: &str, extra: &[OsString]) -> ExitCode {
     if let Some(e) = config_error {
         eprintln!("sf: {e} (the defaults are used)");
     }
-    ExitCode::from(print::print(tab, &options, query, &engines, extra, &root))
+    ExitCode::from(print::print(
+        tab, &options, query, &engines, extra, &root, nul,
+    ))
 }
 
 /// `sf open|reveal|copy-path PATH`, `sf copy-text TEXT`: a note or the error on stderr; exit 1 on error.

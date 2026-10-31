@@ -364,6 +364,11 @@ keys "clear; '$SF' content needle | wc -l; '$SF' folders deep | cat; '$SF' files
 expect 'piped: content prints its files'   '^5\s*$'
 expect 'piped: folders'                    '^src/deep dir\s*$'
 expect 'print: nothing found exits 1'      '^rc-none=1'
+# --print0: a newline in a name stays inside its record (shown here as ~, the NUL as | or #)
+mkdir "$W/names" && printf 'needle\n' > "$W/names/a"$'\n'"b.txt" && printf 'needle\n' > "$W/names/c d.txt"
+keys "clear; cd '$W/names'; '$SF' content needle --print0 | tr '\0\n' '|~'; echo; '$SF' files --print0 | tr '\0\n' '#~'; echo; cd '$T'" Enter
+expect 'print0: content, a NUL after each path' '^a~b\.txt\|c d\.txt\|\s*$'
+expect 'print0: files, a NUL after each path'   '^a~b\.txt#c d\.txt#\s*$'
 keys "clear; '$SF' deep needle | grep -F 'arch.zip{'" Enter
 expect "piped: deep prints ugrep's members" '^docs/arch\.zip\{inzip\.txt\}\s*$'
 keys "clear; '$SF' files -- -l; echo rc-refused=\$?" Enter

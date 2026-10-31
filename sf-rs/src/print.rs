@@ -12,13 +12,15 @@ use std::path::Path;
 use std::process::Command;
 use std::sync::mpsc::channel;
 
-use crate::commands::{ListPlan, list_plan_with};
+use crate::commands::{Cmd, ListPlan, list_plan_with};
 use crate::engines::Engines;
 use crate::filter::Filter;
 use crate::model::{Opt, Options, Tab};
 use crate::runner::{ListMsg, Runner};
 
-/// Prints the list of `tab`; returns the exit status.
+/// Prints the list of `tab`; returns the exit status. `nul` (`--print0`): a NUL after each path instead
+/// of the newline (or ugrep's colon), so any name gets through; a terminal gets the rows as drawn.
+#[allow(clippy::too_many_arguments)]
 pub fn print(
     tab: Tab,
     options: &Options,
@@ -26,6 +28,7 @@ pub fn print(
     engines: &Engines,
     extra: &[OsString],
     root: &Path,
+    nul: bool,
 ) -> u8 {
     let terminal = io::stdout().is_terminal();
     let plan = list_plan_with(tab, options, query, engines, extra, false);
@@ -40,6 +43,7 @@ pub fn print(
             options.get(tab, Opt::MatchCase),
             root,
             terminal,
+            nul,
             &mut out,
             &mut io::stderr(),
         );
@@ -51,6 +55,7 @@ pub fn print(
             2
         }
         ListPlan::Run { cmd, .. } => {
+            let cmd = piped(cmd, nul);
             let status = Command::new(&cmd.program)
                 .args(&cmd.args)
                 .envs(cmd.env.iter().map(|(k, v)| (k, v)))
@@ -67,6 +72,15 @@ pub fn print(
     }
 }
 
+/// ugrep's command for a pipe; with `nul` its `--null`: a NUL after each path, in place of the newline
+/// of a list of files or the colon before a line number.
+fn piped(mut cmd: Cmd, nul: bool) -> Cmd {
+    if nul {
+        cmd.args.insert(0, "--null".into());
+    }
+    cmd
+}
+
 /// The window's rows of `plan` (sorted, numbered, filtered by `query`) to `out`, the engine's messages
 /// to `err`: for a `terminal` as drawn in the window, else Files' and Folders' paths as they are.
 #[allow(clippy::too_many_arguments)]
@@ -77,6 +91,7 @@ fn rows(
     match_case: bool,
     root: &Path,
     terminal: bool,
+    nul: bool,
     out: &mut impl Write,
     err: &mut impl Write,
 ) -> u8 {
@@ -107,21 +122,32 @@ fn rows(
     }
     let mut listed = false;
     let parent = crate::items::parent();
+    let nul = nul && !terminal;
+    let end = if nul { "\0" } else { "\n" };
     let rows = (0..filter.len()).filter_map(|i| filter.get(i));
     // Folders' first row, "..", is for going up in the window, not a folder of the list
     for item in rows.filter(|i| i.selectable && **i != parent) {
-        // the drawn row has no control character: names through `printable`, Git through `ansi_text`
-        let written = if terminal || tab == Tab::Git || tab.searches() {
+        let parts = if nul { item.match_parts() } else { None };
+        let written = if let Some((shown, text)) = parts {
+            // a matching line as ugrep -0 prints it: the path's real bytes (and its archive member),
+            // NUL, line:text
+            let path = crate::items::printable(&String::from_utf8_lossy(item.key.as_bytes()));
+            let member = shown.strip_prefix(path.as_str()).unwrap_or_default();
+            out.write_all(item.key.as_bytes())
+                .and_then(|()| writeln!(out, "{member}\0{}:{text}", item.line.unwrap_or(0)))
+        } else if terminal || tab == Tab::Git || tab.searches() {
+            // the drawn row has no control character: names through `printable`, Git through
+            // `ansi_text`
             let line: String = item
                 .display()
                 .spans
                 .iter()
                 .map(|s| s.content.as_ref())
                 .collect();
-            writeln!(out, "{line}")
+            write!(out, "{line}{end}")
         } else {
             out.write_all(item.key.as_bytes())
-                .and_then(|()| out.write_all(b"\n"))
+                .and_then(|()| out.write_all(end.as_bytes()))
         };
         match written {
             Ok(()) => listed = true,
@@ -157,11 +183,68 @@ mod tests {
     }
 
     fn printed(tab: Tab, query: &str, engines: &Engines, terminal: bool) -> (u8, Vec<u8>, String) {
+        printed_with(tab, &Options::default(), query, engines, terminal, false)
+    }
+
+    fn printed_with(
+        tab: Tab,
+        options: &Options,
+        query: &str,
+        engines: &Engines,
+        terminal: bool,
+        nul: bool,
+    ) -> (u8, Vec<u8>, String) {
         let (mut out, mut err) = (Vec::new(), Vec::new());
         let root = temp_dir("print_root");
-        let plan = list_plan_with(tab, &Options::default(), query, engines, &[], false);
-        let code = rows(tab, plan, query, false, &root, terminal, &mut out, &mut err);
+        let plan = list_plan_with(tab, options, query, engines, &[], false);
+        let code = rows(
+            tab, plan, query, false, &root, terminal, nul, &mut out, &mut err,
+        );
         (code, out, String::from_utf8(err).unwrap())
+    }
+
+    #[test]
+    fn print0_puts_a_nul_after_each_path_its_real_bytes() {
+        let e = fd("./match\nnewline.txt\0./b.txt\0", "");
+        let (code, out, _) = printed_with(Tab::Files, &Options::default(), "", &e, false, true);
+        assert_eq!(
+            (code, out.as_slice()),
+            (0, b"b.txt\0match\nnewline.txt\0".as_slice()),
+            "a newline in a name stays inside its record"
+        );
+        let (_, out, _) = printed_with(Tab::Files, &Options::default(), "", &e, true, true);
+        assert_eq!(
+            out,
+            "b.txt\nmatch\u{fffd}newline.txt\n".as_bytes(),
+            "a terminal keeps the rows as drawn"
+        );
+    }
+
+    #[test]
+    fn print0_in_a_list_of_matches_as_ugrep_0() {
+        // sf's own rows (words kept by their lines): path NUL line:text, as ugrep -0 prints them
+        let bin = temp_dir("print0_ugrep");
+        let script = "#!/bin/sh\nprintf 'a\\tb.txt\\0001\\037\\001needle\\002 in a tab name\\n'\n";
+        executable(&bin.join("ugrep"), script);
+        let e = Engines {
+            ugrep: Some(bin.join("ugrep")),
+            ..Engines::default()
+        };
+        let mut o = Options::default();
+        o.content.matching_lines = true;
+        let (code, out, err) = printed_with(Tab::Content, &o, "needle name", &e, false, true);
+        assert_eq!(
+            (code, out.as_slice()),
+            (0, b"a\tb.txt\x001:needle in a tab name\n".as_slice()),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn print0_asks_ugrep_for_a_nul_after_each_path() {
+        let cmd = crate::commands::Cmd::new("ugrep").args(["-rlU", "-e", "x", "."]);
+        assert_eq!(piped(cmd.clone(), false).args, cmd.args);
+        assert_eq!(piped(cmd, true).args[0], "--null");
     }
 
     #[test]
@@ -198,6 +281,7 @@ mod tests {
             false,
             &temp_dir("print_c"),
             true,
+            false,
             &mut out,
             &mut err,
         );
@@ -261,6 +345,7 @@ mod tests {
             "Main",
             true,
             &root,
+            false,
             false,
             &mut out,
             &mut err,

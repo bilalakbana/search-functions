@@ -230,6 +230,10 @@ pub const EXAMPLES: &[(&str, &str)] = &[
     ),
     ("sf files rs --print", "the list on the terminal, no window"),
     (
+        "sf content TODO --print0 | xargs -0 ls -l",
+        "a NUL after each path (fd -0, ugrep -0): any name, a newline too",
+    ),
+    (
         "sf open PATH",
         "open it (also: reveal, copy-path; copy-text TEXT)",
     ),

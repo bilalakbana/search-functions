@@ -99,7 +99,7 @@ How Bilal starts the next session (paste):
 | `actions.rs` | Enter/^O/^E/^C: open/reveal/copy through `platform.rs`, the editor (`find_editor`) in a tmux window via `sh -c 'cd -- "$1" && shift && exec "$@"'` (never `tmux -c DIR`: format injection), nvim pattern via `$SF_QUERY` |
 | `platform.rs` | `Platform::detect()` / `from_parts()` (Linux or WSL, display, tmux, PATH), `open`, `reveal` (D-Bus FileManager1, fallback xdg-open on the folder; WSL Explorer), `copy_path`/`copy_text` (`Clipboard`: wl-copy, xclip, xsel, PowerShell, tmux OSC 52, OSC 52), `command()` for `sf open|reveal|copy-path|copy-text`, `launch()` |
 | `doctor.rs` | `sf doctor`: the report from injected `run` (versions, D-Bus questions), `run_program` with a timeout |
-| `cli.rs` | `sf [TAB] [QUERY] [--print] [-- ENGINE-OPTIONS]`, the commands, `doctor`; refuses output-changing engine options |
+| `cli.rs` | `sf [TAB] [QUERY] [--print\|--print0] [-- ENGINE-OPTIONS]`, the commands, `doctor`; refuses output-changing engine options |
 | `print.rs` | `--print` / piped output (rows as the window draws them on a terminal, real bytes into a pipe) |
 | `views.rs` | the views' git/delta plans (diff, history, log, commit, a file as it was in a version) |
 | `versions.rs` | `sf grep-versions`: git grep over every version, documents through ugrep from `git cat-file`; the popup's versions (`git log --source`) |

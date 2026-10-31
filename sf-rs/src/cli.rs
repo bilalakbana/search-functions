@@ -1,4 +1,4 @@
-//! sf's command line: `sf [TAB] [QUERY...] [--print] [-- ENGINE-OPTIONS...]`, `sf in FILE [WORDS...]`,
+//! sf's command line: `sf [TAB] [QUERY...] [--print|--print0] [-- ENGINE-OPTIONS...]`, `sf in FILE [WORDS...]`,
 //! the one-action commands and `sf doctor`. Engine options go to the starting tab's engine (fd, ugrep, git); those that change what
 //! the engine prints, which sf reads, are refused.
 
@@ -37,11 +37,12 @@ pub enum Cli {
     },
     /// `sf grep-versions …`: the Git tab's search in every version (Ctrl-Shift-Alt-F), run as its list.
     GrepVersions(crate::versions::Query),
-    /// The window, or with `print` the list it would show.
+    /// The window, or with `print` the list it would show; `nul` (`--print0`): a NUL after each path.
     Run {
         tab: Tab,
         query: String,
         print: bool,
+        nul: bool,
         extra: Vec<OsString>,
     },
 }
@@ -107,7 +108,7 @@ pub fn parse(args: &[OsString]) -> Result<Cli, String> {
         Some(at) => (&args[..at], args[at + 1..].to_vec()),
         None => (args, Vec::new()),
     };
-    let (mut tab, mut print, mut words) = (None, false, Vec::new());
+    let (mut tab, mut print, mut nul, mut words) = (None, false, false, Vec::new());
     for (i, arg) in own.iter().enumerate() {
         let Some(word) = arg.to_str() else {
             return Err("the query must be valid UTF-8".into());
@@ -115,6 +116,7 @@ pub fn parse(args: &[OsString]) -> Result<Cli, String> {
         match word {
             "-h" | "--help" => return Ok(Cli::Help),
             "--print" => print = true,
+            "--print0" => (print, nul) = (true, true),
             w if w.starts_with('-') && w.len() > 1 => {
                 return Err(format!("unknown option: {w} (engine options go after --)"));
             }
@@ -132,6 +134,7 @@ pub fn parse(args: &[OsString]) -> Result<Cli, String> {
         tab,
         query: words.join(" "),
         print,
+        nul,
         extra,
     })
 }
@@ -319,6 +322,7 @@ mod tests {
             tab,
             query: query.into(),
             print,
+            nul: false,
             extra: args(extra),
         }
     }
@@ -367,6 +371,14 @@ mod tests {
             }),
             "a word with a dash is a word here"
         );
+        assert_eq!(
+            parse(&args(&["in", "a.c", "--print0"])),
+            Ok(Cli::InFile {
+                file: "a.c".into(),
+                query: "--print0".into()
+            }),
+            "sf's --print0 is not read here: the window inside a file prints no list"
+        );
         assert_eq!(parse(&args(&["in"])), Err("sf in: a FILE expected".into()));
     }
 
@@ -393,6 +405,17 @@ mod tests {
         assert_eq!(
             parse(&args(&["--print"])),
             Ok(run(Tab::Files, "", true, &[]))
+        );
+        assert_eq!(
+            parse(&args(&["content", "needle", "--print0", "--", "-i"])),
+            Ok(Cli::Run {
+                tab: Tab::Content,
+                query: "needle".into(),
+                print: true,
+                nul: true,
+                extra: args(&["-i"]),
+            }),
+            "--print0: printed, a NUL after each path"
         );
         assert_eq!(
             parse(&args(&["search", "x"])),

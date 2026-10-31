@@ -52,7 +52,10 @@ sf content TODO | wc -l    # into a pipe or a file (or with --print) sf prints t
 Options that change what the engine prints (`-l`, `--color`, `-c`, `--json`, `-C 3`, `--oneline`, …) are
 refused with the reason. Into a pipe or a file the real paths go (Content and Deep: ugrep's own `path` or
 `path:line:text` lines); on a terminal, with `--print`, the rows as the window shows them, never a raw control
-character. The exit status is 0 when something was listed, 1 when nothing, 2 on an error.
+character. The exit status is 0 when something was listed, 1 when nothing, 2 on an error. `--print0` puts a
+NUL after each path instead of the newline (as `fd -0` and `ugrep -0`), so `xargs -0` gets any name, a newline in
+it too: a list of files is `path` NUL `path` NUL …, Matching lines and Each match `path` NUL `line:text`, Git's
+rows end in NUL; on a terminal the rows stay as `--print` shows them (`sf content TODO --print0 | xargs -0 ls -l`).
 
 | Tab | Lists | Typing | Options (⚙ Config, defaults) |
 |-----|-------|--------|------------------------------|
