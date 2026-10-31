@@ -125,6 +125,7 @@ fn rows(
             return 2;
         }
     };
+    let program = cmd.program.clone();
     let (tx, rx) = channel();
     let mut runner = Runner::new(tx);
     runner.start(1, cmd, kind, keep, root);
@@ -141,6 +142,12 @@ fn rows(
                 let _ = writeln!(err, "{message}");
             }
             ListMsg::Done(_) => break,
+        }
+    }
+    // as the window says it: a repository without a commit, bare or not
+    if tab == Tab::Git && !failed && filter.total() == 0 {
+        if let Some(why) = crate::versions::why_empty(&program, root) {
+            let _ = writeln!(err, "sf: {why}");
         }
     }
     let mut listed = false;

@@ -405,6 +405,12 @@ fn event_loop(
                     Ok(list) => app.on_versions(list),
                     Err(e) => app.set_status(&e, true, now),
                 },
+                Effect::WhyEmpty(generation) => {
+                    let git = app.engines.git.as_ref();
+                    if let Some(why) = git.and_then(|git| versions::why_empty(git, &app.root)) {
+                        app.on_why_empty(generation, why);
+                    }
+                }
                 Effect::SaveConfig => {
                     if let Some(path) = config_path {
                         if let Err(e) = config::save(path, &app.options) {

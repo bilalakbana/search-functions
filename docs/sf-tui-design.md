@@ -276,6 +276,12 @@ Command line (v0.2.0, 2026-10-17; Bilal asked for engine flags and a print mode)
 - Paths ugrep cannot read (2026-10-31, card t_7c990be7): ugrep runs without `-s`, so its warnings (cannot read,
   cannot open directory, gone) come; the window and `--print` make them one line, "2 paths could not be read"
   (`runner::unreadable`), and other messages (a broken pattern) stay as they are. The exit status stays 2.
+- An empty Git list (2026-10-31, card t_7c990be7): in a repository without a commit `git log --all` prints
+  nothing and exits 0. When the list ends empty without a message, `versions::why_empty` asks git
+  (`rev-list -n1 --all`, then `rev-parse --is-bare-repository`) and the list says "this repository has no
+  commits yet" or "bare repository, no commits yet"; `sf git --print` writes it to stderr (exit 1). A commit on
+  any branch (options after -- left every one out, a new empty branch) claims nothing; outside a repository
+  git's own message stays.
 - Options after `--` go to the starting tab's engine only (fd in Files and Folders, ugrep in Content, git log
   in Git): fd and git get them last, ugrep before `--exclude-dir=.git -e QUERY .`; Content's preview count and
   matches get them too, so the preview counts as the list does. They show in the input line (`-- -w -i`).

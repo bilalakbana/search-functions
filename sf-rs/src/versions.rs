@@ -377,6 +377,24 @@ fn git_output(git: &Path, root: &Path, args: &[&str]) -> Result<Vec<u8>, String>
     Ok(out.stdout)
 }
 
+/// Why the Git tab's list is empty although git said nothing: no branch has a commit yet (`git log
+/// --all` then prints nothing), bare or not. None when a commit exists (options after -- left every
+/// one out) or git fails (outside a repository its own message is already shown).
+pub fn why_empty(git: &Path, root: &Path) -> Option<&'static str> {
+    if !git_output(git, root, &["rev-list", "-n1", "--all"])
+        .ok()?
+        .is_empty()
+    {
+        return None;
+    }
+    let bare = git_output(git, root, &["rev-parse", "--is-bare-repository"]).ok()?;
+    Some(if bare.starts_with(b"true") {
+        "bare repository, no commits yet"
+    } else {
+        "this repository has no commits yet"
+    })
+}
+
 /// Reads `r` to the end in a thread of its own (a child's stderr, while its stdout is read).
 fn collect(mut r: impl Read + Send + 'static) -> thread::JoinHandle<String> {
     thread::spawn(move || {
@@ -754,6 +772,45 @@ mod tests {
             String::from_utf8_lossy(&out.stderr)
         );
         String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    #[test]
+    fn an_empty_git_list_is_explained() {
+        let git_path = Path::new("/usr/bin/git");
+        let none = temp_dir("why_empty_none");
+        git(&none, &["init", "-q", "."]);
+        assert_eq!(
+            why_empty(git_path, &none),
+            Some("this repository has no commits yet")
+        );
+        let bare = temp_dir("why_empty_bare");
+        git(&bare, &["init", "-q", "--bare", "."]);
+        assert_eq!(
+            why_empty(git_path, &bare),
+            Some("bare repository, no commits yet")
+        );
+        // the current branch is new and empty, another one has a commit: git log --all lists it
+        let orphan = temp_dir("why_empty_orphan");
+        git(&orphan, &["init", "-q", "."]);
+        git(&orphan, &["commit", "-q", "--allow-empty", "-m", "one"]);
+        git(&orphan, &["checkout", "-q", "--orphan", "empty"]);
+        assert_eq!(why_empty(git_path, &orphan), None, "it has a commit");
+        let bare_full = temp_dir("why_empty_bare_full");
+        git(
+            &bare_full,
+            &["clone", "-q", "--bare", &orphan.to_string_lossy(), "."],
+        );
+        assert_eq!(
+            why_empty(git_path, &bare_full),
+            None,
+            "a bare one with commits"
+        );
+        // (the test folders are inside sf's own repository)
+        assert_eq!(
+            why_empty(git_path, Path::new("/")),
+            None,
+            "outside a repository git says so itself"
+        );
     }
 
     #[test]

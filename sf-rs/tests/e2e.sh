@@ -283,6 +283,17 @@ keys "cd '$W/nogit' && '$SF' git" Enter
 expect 'git outside a repository says so'  'not a git repository'
 keys Escape
 expect 'esc again'                         '^READY>\s*$'
+# a repository without a commit, and a bare one: git log --all prints nothing there, sf says why
+git init -q "$W/nocommits" 2>/dev/null && git init -q --bare "$W/bare.git" 2>/dev/null
+keys "cd '$W/nocommits' && '$SF' git" Enter
+expect 'git: no commits yet, in the window' 'this repository has no commits yet'
+shot git_nocommits
+keys Escape
+expect 'git: quit'                         '^READY>\s*$'
+keys "clear; '$SF' git --print; echo rc-nocommits=\$?; cd '$W/bare.git' && '$SF' git --print" Enter
+expect 'git: --print says it on stderr'    '^sf: this repository has no commits yet'
+expect 'git: --print exits 1'              '^rc-nocommits=1'
+expect 'git: a bare one says so'           '^sf: bare repository, no commits yet'
 
 n_text=$(cd "$T" && ugrep -rlU --ignore-binary -s --exclude-dir=.git -e '' . | wc -l)
 keys "cd '$T' && env -u TMUX '$SF' content" Enter

@@ -56,6 +56,9 @@ pub enum Effect {
     View,
     /// Read the versions to choose from (`git log`) for `App::on_versions`.
     LoadVersions,
+    /// Git's list `.0` came out empty without a word from git: `versions::why_empty` for
+    /// `App::on_why_empty`.
+    WhyEmpty(u64),
     Quit,
 }
 
@@ -1089,6 +1092,14 @@ impl App {
                     };
                     self.notes.push(items::hint(hint));
                 }
+                // no commit (git log --all prints nothing then) or a bare repository: say which
+                if self.tab == Tab::Git
+                    && self.versions.is_none()
+                    && self.filter.total() == 0
+                    && self.notes.is_empty()
+                {
+                    return vec![Effect::WhyEmpty(g)];
+                }
             }
             _ => {}
         }
@@ -1407,6 +1418,13 @@ impl App {
     }
 
     /// The versions to choose from, newest first.
+    /// Why Git's list `generation` is empty, in place of its rows.
+    pub fn on_why_empty(&mut self, generation: u64, why: &str) {
+        if generation == self.list_gen {
+            self.notes.push(items::hint(why));
+        }
+    }
+
     pub fn on_versions(&mut self, list: Vec<VersionRow>) {
         if let Some(v) = &mut self.versions {
             v.list = list;
@@ -4018,6 +4036,26 @@ pub(crate) mod tests {
         assert_eq!(a.handle_mouse(click(Rect::new(0, 29, 1, 1)), now), []);
         assert_eq!(a.popup, None);
         assert_eq!(a.tab, Tab::Content);
+    }
+
+    #[test]
+    fn an_empty_git_list_asks_why() {
+        let (mut a, now) = app(Tab::Git);
+        let g = a.list_gen;
+        assert_eq!(a.on_list(ListMsg::Done(g)), [Effect::WhyEmpty(g)]);
+        a.on_why_empty(g, "this repository has no commits yet");
+        assert_eq!(a.notes.len(), 1);
+        assert_eq!(a.notes[0].text(), "this repository has no commits yet");
+        a.handle_key(ctrl('r'), now);
+        a.on_why_empty(g, "late, for the old list");
+        assert!(a.notes.is_empty());
+        // git said why itself (outside a repository), or the list has rows: nothing to ask
+        let g = a.list_gen;
+        a.on_list(ListMsg::Error(g, "fatal: not a git repository".into()));
+        assert_eq!(a.on_list(ListMsg::Done(g)), []);
+        a.handle_key(ctrl('r'), now);
+        feed(&mut a, &["* abc1234 T first"]);
+        assert_eq!(a.on_list(ListMsg::Done(a.list_gen)), []);
     }
 
     #[test]
