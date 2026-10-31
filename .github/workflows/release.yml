@@ -39,6 +39,7 @@ jobs:
         run: |
           cargo test --locked --manifest-path sf-rs/Cargo.toml
           python3 -I packaging/test_build.py
+          python3 -I packaging/test_release_notes.py
 
       - name: Build the package
         run: python3 -I packaging/build.py "$RUNNER_TEMP/out"
@@ -56,6 +57,12 @@ jobs:
             echo "::endgroup::"
           done
 
+      - name: Release notes from CHANGELOG.md
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' sf-rs/Cargo.toml | head -n 1)
+          python3 -I packaging/release_notes.py "$version" CHANGELOG.md > "$RUNNER_TEMP/out/notes.md"
+
       - name: Publish
         if: startsWith(github.ref, 'refs/tags/v')
         env:
@@ -65,6 +72,7 @@ jobs:
           digest=$(cut -d ' ' -f 1 sf-linux-x86_64.tar.gz.sha256)
           url="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/sf-linux-x86_64.tar.gz"
           {
+            echo
             echo "Install on Linux or WSL (x86_64), into ~/.local:"
             echo
             echo "    mkdir -p ~/.local && curl -fsSL $url | tar -xz -C ~/.local"
@@ -72,7 +80,7 @@ jobs:
             echo "Then \`sf doctor\` shows what it found. sha256 of the package: \`$digest\`"
             echo "(also in sf-linux-x86_64.tar.gz.sha256). What it contains and the licenses:"
             echo "\`~/.local/share/doc/sf/\`."
-          } > notes.md
+          } >> notes.md # below the changelog section
           gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
             --title "sf $GITHUB_REF_NAME" --notes-file notes.md \
             sf-linux-x86_64.tar.gz sf-linux-x86_64.tar.gz.sha256
