@@ -351,9 +351,11 @@ between the two instead of an option in the popup):
 
 After v0.5.0 (2026-10-17):
 
-- Files starts without its preview (Bilal: the list is what Files is for; Ctrl-L shows it). Each tab keeps its
-  own (`App::previews_hidden`), so hiding Content's leaves Deep's; without a preview the list's border names the
-  root, which was in the preview's border only.
+- Files started without its preview (Bilal: the list is what Files is for; Ctrl-L shows it). Changed
+  2026-10-31 (card t_7c990be7): every tab starts with its preview, Files shows the file at once. Each tab keeps
+  its own (`App::previews_hidden`), so hiding Content's leaves Deep's; without a preview the list's border names
+  the root, which was in the preview's border only. A preview asked for before the frame that lays it out is
+  asked for again at the real width (`App::preview_resized`).
 - Fixed after Bilal saw Deep's preview fail on binaries: (1) ansi-to-tui breaks a line at every carriage
   return, so a binary's match ending in `\r\r\n` became empty "Match #2, #3…" blocks; `items::ansi_text` now
   leaves `\r` out (the fzf previews ran `tr -d '\r'`), which also helps a CRLF file anywhere. (2) A file sf calls

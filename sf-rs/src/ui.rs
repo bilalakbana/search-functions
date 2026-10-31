@@ -2076,7 +2076,8 @@ mod tests {
 
     #[test]
     fn without_a_preview_the_list_border_names_the_root() {
-        let (mut a, _) = app(Tab::Files); // Files starts without its preview
+        let (mut a, now) = app(Tab::Files);
+        a.handle_key(ctrl('l'), now);
         feed(&mut a, &["a"]);
         let buf = render(&mut a, 80, 24);
         assert!(row(&buf, 1).contains("/r/p"), "{:?}", row(&buf, 1));

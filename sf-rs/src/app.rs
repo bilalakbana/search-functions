@@ -293,7 +293,7 @@ pub struct App {
     /// Content's and Deep's pattern with its count in the previewed file (the preview's top right).
     pub preview_found: Option<Found>,
     pub preview_scroll: u16,
-    /// The tabs whose preview Ctrl-L has hidden; Files starts without one (Bilal).
+    /// The tabs whose preview Ctrl-L has hidden; every tab starts with one.
     previews_hidden: Vec<Tab>,
     /// The current row's preview, while it is wanted and not here yet.
     preview_wait: Option<PreviewWait>,
@@ -314,6 +314,8 @@ pub struct App {
     pub save_allowed: bool,
     /// The row the newest preview request is for.
     previewed: Option<(OsString, Option<u32>)>,
+    /// The preview's width the newest request was planned for (bat lays the text out to it).
+    planned_width: u16,
     /// The last left click on a list row, for the double click.
     last_click: Option<(usize, Instant)>,
 }
@@ -361,7 +363,7 @@ impl App {
             preview: Text::default(),
             preview_found: None,
             preview_scroll: 0,
-            previews_hidden: vec![Tab::Files],
+            previews_hidden: Vec::new(),
             preview_wait: None,
             types_off: Vec::new(),
             types_seen: RefCell::new(None),
@@ -373,6 +375,7 @@ impl App {
             search_due: None,
             layout: ScreenLayout::default(),
             previewed: None,
+            planned_width: 0,
             last_click: None,
         }
     }
@@ -577,7 +580,8 @@ impl App {
         }
     }
 
-    pub fn preview_plan(&self) -> PreviewPlan {
+    pub fn preview_plan(&mut self) -> PreviewPlan {
+        self.planned_width = self.layout.preview.width;
         // in a file (Ctrl-T) the rows are always lines: bat at the line, whatever the options say
         let mut options = self.options.clone();
         if self.scope.is_some() {
@@ -1228,6 +1232,17 @@ impl App {
         self.preview_if_changed()
     }
 
+    /// After a frame: the preview's width is another than its request's (a resize, or a request made
+    /// before the frame that laid the preview out), so bat needs the new width.
+    pub fn preview_resized(&mut self) -> Vec<Effect> {
+        let width = self.layout.preview.width;
+        if width == self.planned_width || width == 0 {
+            return Vec::new();
+        }
+        self.planned_width = width;
+        self.refresh_preview()
+    }
+
     /// Whether the current tab shows its preview.
     pub fn preview_visible(&self) -> bool {
         !self.previews_hidden.contains(&self.tab)
@@ -1874,7 +1889,7 @@ pub(crate) mod tests {
         (a, now)
     }
 
-    /// An app whose tab shows its preview whatever the tab's default (Files starts without one).
+    /// An app whose tab shows its preview whatever the tab's default.
     pub fn app_with_preview(tab: Tab) -> (App, Instant) {
         let (mut a, now) = app(tab);
         a.previews_hidden.clear();
@@ -2219,7 +2234,8 @@ pub(crate) mod tests {
 
     #[test]
     fn ctrl_f_without_a_preview_says_so() {
-        let (mut a, now) = app(Tab::Files); // Files starts without its preview
+        let (mut a, now) = app(Tab::Files);
+        a.handle_key(ctrl('l'), now);
         a.handle_key(ctrl('f'), now);
         assert!(a.preview_find.is_none());
         assert!(
@@ -3390,19 +3406,38 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn files_starts_without_a_preview_the_others_with_one() {
+    fn every_tab_starts_with_its_preview() {
         let (mut a, now) = app(Tab::Files);
-        assert!(!a.preview_visible());
+        assert!(a.preview_visible(), "Files shows the file at once");
         a.handle_key(key(KeyCode::Tab), now);
         assert_eq!(a.tab, Tab::Content);
         assert!(a.preview_visible());
         a.handle_key(ctrl('l'), now);
         assert!(!a.preview_visible(), "Ctrl-L hides Content's");
         a.handle_key(key(KeyCode::BackTab), now);
+        assert!(a.preview_visible(), "each tab keeps its own");
         a.handle_key(ctrl('l'), now);
-        assert!(a.preview_visible(), "Ctrl-L shows Files'");
-        a.handle_key(key(KeyCode::Tab), now);
-        assert!(!a.preview_visible(), "each tab keeps its own");
+        assert!(!a.preview_visible(), "Ctrl-L hides Files'");
+    }
+
+    #[test]
+    fn the_preview_is_requested_again_when_its_width_grows() {
+        // Ctrl-L asks for the preview before the frame that lays it out: bat got 20 columns
+        let bat_width = |a: &mut App| match a.preview_plan() {
+            PreviewPlan::Sniff { text: Some(t), .. } => t.args[3].clone(),
+            plan => panic!("{plan:?}"),
+        };
+        let (mut a, now) = app(Tab::Files);
+        a.handle_key(ctrl('l'), now);
+        feed(&mut a, &["a"]);
+        assert_eq!(a.handle_key(ctrl('l'), now), [Effect::Preview]);
+        assert_eq!(bat_width(&mut a), "--terminal-width=20");
+        a.layout.preview = Rect::new(1, 2, 80, 10);
+        assert_eq!(a.preview_resized(), [Effect::Preview]);
+        assert_eq!(bat_width(&mut a), "--terminal-width=80");
+        assert_eq!(a.preview_resized(), [], "the same width: no new request");
+        a.layout.preview = Rect::default();
+        assert_eq!(a.preview_resized(), [], "hidden: nothing to lay out");
     }
 
     #[test]

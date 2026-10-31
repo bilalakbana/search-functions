@@ -382,7 +382,6 @@ fn event_loop(
     // the views' text comes from a worker of its own, so a preview never cancels a view
     let viewer = Previewer::new(view_tx);
     let mut pending: VecDeque<Effect> = app.start().into();
-    let mut preview_width = 0;
     loop {
         while let Some(effect) = pending.pop_front() {
             let now = Instant::now();
@@ -396,10 +395,7 @@ fn event_loop(
                         app.show_hint(&hint);
                     }
                 },
-                Effect::Preview => {
-                    preview_width = app.layout.preview.width;
-                    previewer.request(app.preview_gen, app.preview_plan());
-                }
+                Effect::Preview => previewer.request(app.preview_gen, app.preview_plan()),
                 Effect::LoadVersions => match load_versions(&app) {
                     Ok(list) => app.on_versions(list),
                     Err(e) => app.set_status(&e, true, now),
@@ -452,13 +448,7 @@ fn event_loop(
         terminal
             .draw(|f| ui::draw(f, &mut app))
             .context("drawing")?;
-        if preview_width != 0
-            && app.layout.preview.width != preview_width
-            && app.layout.preview.width != 0
-        {
-            preview_width = app.layout.preview.width; // resized: bat's line band needs the new width
-            pending.extend(app.refresh_preview());
-        }
+        pending.extend(app.preview_resized());
         if let Some(v) = &app.view
             && app.layout.view.width != 0
             && app.layout.view.width != v.width

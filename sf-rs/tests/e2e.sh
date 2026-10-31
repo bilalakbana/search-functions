@@ -91,9 +91,11 @@ n_files=$(cd "$T" && fd --type f --no-ignore --exclude .git . | wc -l)
 keys "'$SF'" Enter
 expect 'start: tab bar with Config'        'Files +Content +Deep +Folders +Git .*⚙ Config'
 expect "start: $n_files files listed"      "$n_files/$n_files"
-expect_not 'start: Files without a preview' '│ *1 needle ignored'
+expect 'start: Files shows bat with numbers, no Ctrl-L' '│ *1 needle ignored'
 keys C-l
-expect 'files: Ctrl-L shows bat with numbers' '│ *1 needle ignored'
+expect_not 'files: Ctrl-L hides the preview' '│ *1 needle ignored'
+keys C-l
+expect 'files: Ctrl-L shows it again'      '│ *1 needle ignored'
 expect 'start: footer'                     'Enter open · \^S options · \^O nvim'
 [[ $(tm display-message -p -t e2e '#W') == search ]] && ok 'tmux: window named search' || bad 'tmux: window not renamed'
 shot files

@@ -66,7 +66,7 @@ character. The exit status is 0 when something was listed, 1 when nothing, 2 on 
 As in fzf, the list fills from the bottom: the first row sits right above the input line, `Up` goes to the next
 one, `Home` to the top. Click a tab or use `Tab` / `Shift-Tab`; click **⚙ Config** (or `Ctrl-S`) for the tab's options, `Space` or a click
 toggles one. A double click is `Enter`, the wheel scrolls the list or the preview. `Alt-Up` / `Alt-Down` scroll the
-preview, `Ctrl-L` hides or shows it (each tab keeps its own; Files starts without one), `Ctrl-R` runs the list
+preview, `Ctrl-L` hides or shows it (each tab keeps its own), `Ctrl-R` runs the list
 again, `Esc` quits. The keys for the selected item are those under
 [Keyboard Shortcuts](#-keyboard-shortcuts) and are shown in the middle of the tab bar. A bar on the right of the list and
 the preview shows where you are in them. Filtering is case-insensitive and
