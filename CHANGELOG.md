@@ -3,7 +3,10 @@
 sf searches file names, file contents (also PDF, Office files and archives) and git history in one terminal window.
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the newest release comes first.
 
-## [0.13.0] - 2026-10-31
+## [0.13.1] - 2026-10-31
+
+First release of this line: the 0.13.0 tag was built but never published (the package step stopped on an
+outdated constant in `packaging/bundle.toml`), so everything below ships as 0.13.1.
 
 ### Added
 - `sf --version` prints `sf <version>` (the crate version at build time) and exits 0. After `--` it stays
@@ -35,6 +38,8 @@ This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the 
 - An empty file's preview says "empty file" (it said "No text preview: binary file"). Without `file`
   installed, a binary file's preview tells you to install it.
 - With tmux 3.2a extended keys, a control character with modifiers is read as Ctrl and its letter.
+- The release package builds again: the Alpine image ships brotli 1.2.1, and `packaging/bundle.toml` now names
+  that version (the license file is unchanged, same sha256).
 
 ### Tests
 - The end-to-end suite (`sf-rs/tests/e2e.sh`) runs without `delta`, `file` or `zip`. The check of a missing
@@ -46,12 +51,13 @@ This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the 
   file with its byte order mark. A run without `file` and `delta` gives 238 pass, 0 fail and 2 skips.
 - The release workflow and `packaging/test_package.sh` run the suite with `SF_STRICT_SKIPS=1`, so an
   unexpected skip fails the release.
-- `tests/speed_ratio.sh` measures the TUI's first row against `sf files --print` on 100,000 files (5 paired
-  release runs; it fails when the median of their ratios is above 1.5).
+- `tests/speed_ratio.sh` measures the TUI's own overhead on 100,000 files: the median time to the first row
+  minus the median `sf files --print` time over 5 paired release runs, failing above 150 ms. The ratio of the
+  two is printed for information; it sat at 1.5 and flapped there on an unchanged tree.
 
 ## Earlier releases
 
 Releases up to 0.12.1 came out before this changelog. Their notes are on the
 [GitHub releases page](https://github.com/bilalakbana/search-functions/releases).
 
-[0.13.0]: https://github.com/bilalakbana/search-functions/compare/v0.12.1...v0.13.0
+[0.13.1]: https://github.com/bilalakbana/search-functions/compare/v0.12.1...v0.13.1

@@ -124,11 +124,11 @@ license_urls = [
 [[library]]
 name = "brotli"
 apk = "brotli-libs"
-version = "1.2.0"
+version = "1.2.1"
 license = "MIT"
 source = "https://github.com/google/brotli"
 license_urls = [
-    { url = "https://raw.githubusercontent.com/google/brotli/v1.2.0/LICENSE", sha256 = "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94" },
+    { url = "https://raw.githubusercontent.com/google/brotli/v1.2.1/LICENSE", sha256 = "3d180008e36922a4e8daec11c34c7af264fed5962d07924aea928c38e8663c94" },
 ]
 
 [[library]]
