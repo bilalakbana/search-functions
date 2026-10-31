@@ -398,6 +398,18 @@ keys Escape
 expect 'perms: quit'                       '^READY>\s*$'
 chmod 700 "$W/perms/u.txt" "$W/perms/locked"
 keys "cd '$T'" Enter
+# UTF-16 with its byte order mark: ugrep reads it as text, so Content, Deep and the preview find the words
+mkdir "$W/utf16" && { printf '\xff\xfe'; printf 'hello needle\n' | iconv -f UTF-8 -t UTF-16LE; } > "$W/utf16/le.txt"
+keys "clear; cd '$W/utf16'; '$SF' content needle | cat; '$SF' deep needle | sed 's/^/deep:/'" Enter
+expect 'utf-16: Content lists it'          '^le\.txt\s*$'
+expect 'utf-16: Deep lists it'             '^deep:le\.txt\s*$'
+keys "clear; '$SF' content needle" Enter
+expect 'utf-16: the preview shows the line' '1:hello needle'
+keys Escape
+expect 'utf-16: Esc back to the pattern'   'Content › needle .* 1/1'
+keys Escape
+expect 'utf-16: quit'                      '^READY>\s*$'
+keys "cd '$T'" Enter
 keys "clear; '$SF' deep needle | grep -F 'arch.zip{'" Enter
 expect "piped: deep prints ugrep's members" '^docs/arch\.zip\{inzip\.txt\}\s*$'
 keys "clear; '$SF' files -- -l; echo rc-refused=\$?" Enter
