@@ -1,15 +1,18 @@
-//! Drawing. Top to bottom: the tab bar (the keys for the selected item in its middle), the preview,
-//! the list (filled from the bottom, as fzf) and the input line; the
-//! Config popup over them. Records where everything went in `app.layout` for the mouse.
+//! Drawing, as fzf's `--style full --border top` (Bilal's `f()` in find_files): the top border with
+//! the root as its label, the tab bar (the keys for the selected item at its right), the list (filled
+//! from the bottom, as fzf) on the left half beside the preview on the right half, and the prompt box
+//! under both, across the whole width; the Config popup over them. Records where everything went in
+//! `app.layout` for the mouse.
 
 use std::ops::Range;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
-use ratatui::style::{Modifier, Style};
+use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span, Text};
 use ratatui::widgets::{
-    Block, BorderType, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState, Wrap,
+    Block, BorderType, Borders, Clear, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState,
+    Wrap,
 };
 
 use crate::app::{App, Find, PopupRow, ScreenLayout};
@@ -28,42 +31,67 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         };
         return;
     }
-    let area = frame.area();
-    let body = area.height.saturating_sub(2);
-    let preview_h = if app.preview_visible() {
-        body * 60 / 100
+    let [top, bar, body] = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Min(0),
+    ])
+    .areas(frame.area());
+    // the list on the left half, the preview on the right; the prompt box under both, full width
+    let [boxes, input] = Layout::vertical([Constraint::Min(0), Constraint::Length(3)]).areas(body);
+    let preview_w = if app.preview_visible() && app.tab != Tab::Help {
+        boxes.width - boxes.width / 2
     } else {
         0
     };
-    let [bar, preview, list, input] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(preview_h),
-        Constraint::Length(body - preview_h),
-        Constraint::Length(1),
-    ])
-    .areas(area);
+    let list = Rect::new(boxes.x, boxes.y, boxes.width - preview_w, boxes.height);
+    let preview = Rect::new(list.right(), boxes.y, preview_w, boxes.height);
     let mut layout = ScreenLayout::default();
+    // the root in the middle of the top border; cut at the right when wider (a Block's title would
+    // be left out)
+    let label = root_title(app);
+    let label_w = (label.width() as u16).min(top.width);
+    frame.render_widget(
+        Block::new()
+            .borders(Borders::TOP)
+            .border_style(style(theme::border())),
+        top,
+    );
+    frame.render_widget(
+        label,
+        Rect::new(
+            top.x + (top.width - label_w) / 2,
+            top.y,
+            label_w,
+            top.height,
+        ),
+    );
     draw_tab_bar(frame, app, bar, &mut layout);
     if app.tab == Tab::Help {
-        let body = Rect::new(area.x, preview.y, area.width, preview.height + list.height);
-        layout.help = draw_help(frame, app, body);
+        layout.help = draw_help(frame, app, list);
         draw_input(frame, app, input);
-        app.layout = layout;
-        return;
+    } else {
+        let status = status_line(app);
+        if preview_w > 0 {
+            (layout.preview, layout.preview_bar) =
+                draw_preview(frame, app, preview, status.clone());
+        }
+        (layout.list, layout.list_bar) =
+            draw_list(frame, app, list, if preview_w > 0 { None } else { status });
+        draw_input(frame, app, input);
+        if let Some(cursor) = app.popup {
+            draw_popup(frame, app, cursor, &mut layout);
+        }
     }
-    let status = status_line(app);
-    if app.preview_visible() {
-        (layout.preview, layout.preview_bar) = draw_preview(frame, app, preview, status.clone());
-    }
-    (layout.list, layout.list_bar) = draw_list(
-        frame,
-        app,
-        list,
-        if app.preview_visible() { None } else { status },
-    );
-    draw_input(frame, app, input);
-    if let Some(cursor) = app.popup {
-        draw_popup(frame, app, cursor, &mut layout);
+    // the screen's own colours wherever nothing set one: under and between the boxes, and where an
+    // engine's output reset its colours (fzf does the same); a colour that is set stays (delta's)
+    for cell in &mut frame.buffer_mut().content {
+        if cell.fg == Color::Reset {
+            cell.fg = theme::fg();
+        }
+        if cell.bg == Color::Reset {
+            cell.bg = theme::bg();
+        }
     }
     app.layout = layout;
 }
@@ -82,17 +110,18 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect, layout: &mut ScreenLay
     );
     let config_style = if app.popup.is_some() {
         Style::new()
-            .fg(theme::BASE)
-            .bg(theme::MAUVE)
+            .fg(theme::bg())
+            .bg(theme::prompt())
             .add_modifier(Modifier::BOLD)
     } else {
-        style(theme::SUB)
+        style(theme::info())
     };
     frame.render_widget(
         Paragraph::new(Span::styled(CONFIG, config_style)),
         layout.config,
     );
 
+    // quiet, as fzf's lines: no block, the selected tab bold in the prompt's colour
     let room = area.width.saturating_sub(config_w + 1);
     let mut x = area.x;
     for tab in Tab::ALL {
@@ -102,17 +131,14 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect, layout: &mut ScreenLay
             break;
         }
         let st = if tab == app.tab {
-            Style::new()
-                .fg(theme::BASE)
-                .bg(theme::MAUVE)
-                .add_modifier(Modifier::BOLD)
+            style(theme::prompt()).add_modifier(Modifier::BOLD)
         } else {
-            style(theme::DIM)
+            style(theme::info())
         };
         let rect = Rect::new(x, area.y, w, 1);
         frame.render_widget(Paragraph::new(Span::styled(label, st)), rect);
         layout.tabs.push((tab, rect));
-        x += w + 1;
+        x += w;
     }
     // the keys for the selected item, between the tabs and Config
     let from = layout.tabs.last().map_or(area.x, |(_, r)| r.right()) + 2;
@@ -139,9 +165,9 @@ fn draw_scrollbar(
         .begin_symbol(None)
         .end_symbol(None)
         .track_symbol(Some("│"))
-        .track_style(style(theme::FAINT))
+        .track_style(style(theme::border()))
         .thumb_symbol("█")
-        .thumb_style(style(theme::MAUVE));
+        .thumb_style(style(theme::prompt()));
     let mut state = ScrollbarState::new(total - visible + 1)
         .position(position)
         .viewport_content_length(visible);
@@ -153,9 +179,9 @@ fn draw_scrollbar(
 fn status_line(app: &App) -> Option<Line<'static>> {
     let (text, error, _) = app.status.as_ref()?;
     let st = if *error {
-        style(theme::RED).add_modifier(Modifier::BOLD)
+        style(theme::error()).add_modifier(Modifier::BOLD)
     } else {
-        style(theme::GREEN)
+        style(theme::marker())
     };
     Some(Line::from(Span::styled(
         format!(" {} ", crate::items::printable(text)),
@@ -166,7 +192,7 @@ fn status_line(app: &App) -> Option<Line<'static>> {
 fn bordered() -> Block<'static> {
     Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(style(theme::FAINT))
+        .border_style(style(theme::border()))
 }
 
 /// The root, `~` for the home folder, coloured as every path (`items::path_spans`).
@@ -197,7 +223,7 @@ fn draw_view(frame: &mut Frame, app: &App) -> Rect {
         Layout::vertical([Constraint::Min(3), Constraint::Length(1)]).areas(frame.area());
     let title = Line::from(vec![
         Span::raw(" "),
-        Span::styled(crate::items::printable(&v.kind.title()), style(theme::TEXT)),
+        Span::styled(crate::items::printable(&v.kind.title()), style(theme::fg())),
         Span::raw(" "),
     ]);
     let block = bordered().title_top(title);
@@ -211,7 +237,7 @@ fn draw_view(frame: &mut Frame, app: &App) -> Rect {
         .cloned()
         .collect();
     if v.loading && shown.is_empty() {
-        shown.push(Line::styled("…", style(theme::DIM)));
+        shown.push(Line::styled("…", style(theme::info())));
     }
     if let Some(i) = v
         .found
@@ -220,26 +246,26 @@ fn draw_view(frame: &mut Frame, app: &App) -> Rect {
     {
         shown[i] = shown[i]
             .clone()
-            .patch_style(Style::new().bg(theme::SURFACE));
+            .patch_style(Style::new().bg(theme::bg_sel()));
     }
     frame.render_widget(Paragraph::new(Text::from(shown)), inner);
     draw_scrollbar(frame, body, total, from, inner.height as usize);
 
     let left = if v.searching {
         Line::from(vec![
-            Span::styled("/ ", style(theme::MAUVE)),
-            Span::styled(crate::items::printable(&v.search), style(theme::TEXT)),
-            Span::styled("▏", style(theme::SUB)),
+            Span::styled("/ ", style(theme::prompt())),
+            Span::styled(crate::items::printable(&v.search), style(theme::fg())),
+            Span::styled("▏", style(theme::info())),
         ])
     } else if !v.search.is_empty() && v.found.is_none() {
         Line::styled(
             format!("not found: {}", crate::items::printable(&v.search)),
-            style(theme::RED),
+            style(theme::error()),
         )
     } else {
         Line::styled(
             "Esc back · ↑↓ PgUp PgDn Home End · / search · n N next",
-            style(theme::DIM),
+            style(theme::info()),
         )
     };
     let position = if total == 0 {
@@ -254,7 +280,7 @@ fn draw_view(frame: &mut Frame, app: &App) -> Rect {
     .areas(footer);
     frame.render_widget(Paragraph::new(left), left_area);
     frame.render_widget(
-        Paragraph::new(Span::styled(position, style(theme::DIM))),
+        Paragraph::new(Span::styled(position, style(theme::info()))),
         right_area,
     );
     inner
@@ -263,7 +289,7 @@ fn draw_view(frame: &mut Frame, app: &App) -> Rect {
 /// The Help tab's manual in `area`, scrolled, the found line in a band; returns its text area.
 fn draw_help(frame: &mut Frame, app: &App, area: Rect) -> Rect {
     let h = &app.help;
-    let block = bordered().title_top(Span::styled(" Manual ", style(theme::TEXT)));
+    let block = bordered().title_top(Span::styled(" Manual ", style(theme::fg())));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let total = h.text.lines.len();
@@ -280,7 +306,7 @@ fn draw_help(frame: &mut Frame, app: &App, area: Rect) -> Rect {
     {
         shown[i] = shown[i]
             .clone()
-            .patch_style(Style::new().bg(theme::SURFACE));
+            .patch_style(Style::new().bg(theme::bg_sel()));
     }
     let text_area = Rect::new(
         inner.x + 1,
@@ -300,7 +326,7 @@ fn draw_preview(
     area: Rect,
     status: Option<Line<'static>>,
 ) -> (Rect, Rect) {
-    let mut block = bordered().title_top(root_title(app));
+    let mut block = bordered();
     // at the top right, so they stay while the text scrolls: Content's and Deep's pattern with its count,
     // then Ctrl-F's (the right titles line up from the right, the last one rightmost)
     if let Some(found) = app.preview_found.as_ref().filter(|_| app.tab.searches()) {
@@ -311,7 +337,6 @@ fn draw_preview(
         .as_ref()
         .and_then(|f| find_title(f, area.width / 2))
     {
-        // drawn after the root, over its end when the border is short: it stays whole
         block = block.title_top(found.right_aligned());
     }
     if let Some(status) = status {
@@ -367,10 +392,10 @@ fn find_title(f: &Find, max: u16) -> Option<Line<'static>> {
         return None;
     }
     let (said, said_style) = match f.current {
-        _ if f.bad => ("bad regex".to_string(), style(theme::RED)),
-        _ if f.slow => ("too slow".to_string(), style(theme::RED)),
-        None => ("not found".to_string(), style(theme::RED)),
-        Some(c) => (format!("{}/{}", c + 1, f.hits.len()), style(theme::SUB)),
+        _ if f.bad => ("bad regex".to_string(), style(theme::error())),
+        _ if f.slow => ("too slow".to_string(), style(theme::error())),
+        None => ("not found".to_string(), style(theme::error())),
+        Some(c) => (format!("{}/{}", c + 1, f.hits.len()), style(theme::info())),
     };
     Some(titled(&f.text, said, said_style, max))
 }
@@ -382,10 +407,10 @@ fn found_title(f: &Found, max: u16) -> Line<'static> {
         Some(n) => format!("{n} matches"),
         None => "? matches".to_string(),
     };
-    titled(&f.pattern, count, style(theme::PEACH), max)
+    titled(&f.pattern, count, style(theme::header()), max)
 }
 
-/// ` TEXT · SAID ` for a border: the text as typed (printable, red), cut with "…" to fit `max` columns.
+/// ` TEXT · SAID ` for a border: the text as typed (printable, in hl), cut with "…" to fit `max` columns.
 fn titled(text: &str, said: String, said_style: Style, max: u16) -> Line<'static> {
     let mut text = crate::items::printable(text);
     let room = usize::from(max).saturating_sub(said.chars().count() + 5);
@@ -398,20 +423,20 @@ fn titled(text: &str, said: String, said_style: Style, max: u16) -> Line<'static
     }
     Line::from(vec![
         Span::raw(" "),
-        Span::styled(text, style(theme::RED)),
-        Span::styled(" · ", style(theme::FAINT)),
+        Span::styled(text, style(theme::hl())),
+        Span::styled(" · ", style(theme::border())),
         Span::styled(said, said_style),
         Span::raw(" "),
     ])
 }
 
 /// Ctrl-F's matches coloured in `line`, given as the bytes of its text and whether it is the current
-/// one: every one red as in the list, the current one bold and underlined; no background, so the
+/// one: every one in hl as in the list, the current one bold and underlined; no background, so the
 /// line keeps its own (delta's diff colours). A part a match crosses is split there.
 fn mark_matches(line: Line<'static>, marks: &[(Range<usize>, bool)]) -> Line<'static> {
-    let other = Style::new().fg(theme::RED);
+    let other = Style::new().fg(theme::hl());
     let current = Style::new()
-        .fg(theme::RED)
+        .fg(theme::hl())
         .add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
     let mut spans = Vec::with_capacity(line.spans.len() + 2 * marks.len());
     let mut start = 0; // of the part in the line's text
@@ -455,9 +480,6 @@ fn draw_list(
     status: Option<Line<'static>>,
 ) -> (Rect, Rect) {
     let mut block = bordered();
-    if !app.preview_visible() {
-        block = block.title_top(root_title(app)); // else in the preview's border
-    }
     if let Some(status) = status {
         block = block.title_bottom(status);
     }
@@ -483,7 +505,7 @@ fn draw_list(
         );
         frame.render_widget(Paragraph::new(line), Rect::new(inner.x, y, inner.width, 1));
     }
-    // the filter's words, drawn red in the rows (Search's query is a pattern for the contents)
+    // the filter's words, drawn in hl in the rows (Search's query is a pattern for the contents)
     let match_case = app.options.get(app.tab, Opt::MatchCase);
     let typed = match &app.result_filter {
         Some(words) => words.as_str(),
@@ -492,7 +514,7 @@ fn draw_list(
     };
     let query = Query::parse(typed, match_case);
     let terms: Vec<Term> = query.shown_terms().cloned().collect();
-    // a list of matches: the words found in a row's path red there too (ugrep marks the line's)
+    // a list of matches: the words found in a row's path in hl there too (ugrep marks the line's)
     let keeper = app.row_words().map(|w| w.keeper());
     // searching versions: each version's name (its tag, else its date) beside its hash
     let version_names: std::collections::HashMap<&str, &str> = app
@@ -518,7 +540,7 @@ fn draw_list(
         let rect = Rect::new(inner.x, y, inner.width, 1);
         let selected = i == app.selected;
         let marker = if selected {
-            Span::styled("▌", style(theme::MAUVE))
+            Span::styled("▌", style(theme::pointer()))
         } else {
             Span::raw(" ")
         };
@@ -542,12 +564,17 @@ fn draw_list(
             )
             .collect();
         if selected {
-            // the band under every span: coloured engine output carries its own (reset) background
+            // the band under every span: coloured engine output carries its own (reset) colours
             frame
                 .buffer_mut()
-                .set_style(rect, Style::new().bg(theme::SURFACE));
+                .set_style(rect, Style::new().fg(theme::fg_sel()).bg(theme::bg_sel()));
             for span in &mut spans {
-                span.style = span.style.bg(theme::SURFACE);
+                let fg = match span.style.fg {
+                    None | Some(Color::Reset) => theme::fg_sel(),
+                    Some(c) if c == theme::hl() => theme::hl_sel(),
+                    Some(c) => c,
+                };
+                span.style = span.style.fg(fg).bg(theme::bg_sel());
             }
         }
         let line = Line::from(spans);
@@ -569,13 +596,15 @@ fn named(
 ) -> Line<'static> {
     if let Some(name) = item.version().and_then(|(rev, _)| names.get(rev)) {
         let at = 1.min(line.spans.len());
-        line.spans
-            .insert(at, Span::styled(format!(" {name}"), style(theme::YELLOW)));
+        line.spans.insert(
+            at,
+            Span::styled(format!(" {name}"), style(theme::path_slash())),
+        );
     }
     line
 }
 
-/// A versions row with what `finder` finds in its text red (not in its version, path or number).
+/// A versions row with what `finder` finds in its text in hl (not in its version, path or number).
 fn in_version(
     line: Line<'static>,
     item: &crate::items::Item,
@@ -593,7 +622,7 @@ fn in_version(
     mark_matches(line, &marks)
 }
 
-/// `item`'s row with `keeper`'s words red where they are in its path (a matching line's row starts with it).
+/// `item`'s row with `keeper`'s words in hl where they are in its path (a matching line's row starts with it).
 fn in_path(item: &crate::items::Item, keeper: Option<&crate::find::Keeper>) -> Line<'static> {
     let line = item.display();
     match (keeper, item.match_parts()) {
@@ -606,7 +635,7 @@ fn in_path(item: &crate::items::Item, keeper: Option<&crate::find::Keeper>) -> L
     }
 }
 
-/// `line` with the filter's terms red and bold where they are found (every occurrence, or at the start
+/// `line` with the filter's terms in hl and bold where they are found (every occurrence, or at the start
 /// or end for an anchored one): in any case (the terms in lower case), or (`match_case`) as typed.
 fn highlight(line: Line<'static>, terms: &[Term], match_case: bool) -> Line<'static> {
     if terms.is_empty() {
@@ -684,7 +713,7 @@ fn highlight(line: Line<'static>, terms: &[Term], match_case: bool) -> Line<'sta
 fn hit_span(line: &Line<'static>, run: &mut (usize, bool, String)) -> Span<'static> {
     let mut style = line.spans[run.0].style;
     if run.1 {
-        style = style.fg(theme::RED).add_modifier(Modifier::BOLD);
+        style = style.fg(theme::hl()).add_modifier(Modifier::BOLD);
     }
     Span::styled(std::mem::take(&mut run.2), style)
 }
@@ -745,7 +774,15 @@ fn placeholder(app: &App) -> &'static str {
     }
 }
 
+/// The prompt box: the input line in a frame, as fzf's `--style full`.
 fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
+    let block = bordered();
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let area = inner;
+    if area.height == 0 {
+        return;
+    }
     let options = match app.scope {
         _ if app.preview_find.is_some() => app.options.find_list(),
         _ if app.versions.is_some() => app.options.versions_list(),
@@ -783,28 +820,34 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
         active.push(crate::items::printable(&format!("-- {}", words.join(" "))));
     }
     let mut count = format!("{}/{}", app.filter.len(), app.filter.total());
-    if app.loading {
-        count.push_str(" …");
-    }
-    let mut count_style = style(theme::DIM);
+    let mut loading = if app.loading { " …" } else { "" };
+    let mut count_style = style(theme::info());
     if app.preview_find.is_some() {
-        count.clear(); // Ctrl-F's count is at the preview's top right (`find_title`)
+        // Ctrl-F's count is at the preview's top right (`find_title`)
+        (count, loading) = (String::new(), "");
     } else if app.tab == Tab::Help {
         // the manual: where it is, or that the search is nowhere in it
         let h = &app.help;
+        loading = "";
         if !h.search.is_empty() && h.found.is_none() {
-            (count, count_style) = ("not found".into(), style(theme::RED));
+            (count, count_style) = ("not found".into(), style(theme::error()));
         } else {
             count = format!("{}/{}", h.scroll + 1, h.text.lines.len());
         }
     }
     let gap = if count.is_empty() { "" } else { "   " };
-    let right = Line::from(vec![
-        Span::styled(active.join(" · "), style(theme::SUB)),
+    let mut right = Line::from(vec![
         Span::raw(gap),
         Span::styled(count, count_style),
+        Span::styled(loading, style(theme::spinner())),
         Span::raw(" "),
     ]);
+    // a narrow box cuts the options, not the counter after them
+    let room = usize::from(area.width / 2).saturating_sub(right.width());
+    right.spans.insert(
+        0,
+        Span::styled(fit(&active.join(" · "), room), style(theme::info())),
+    );
     let right_w = (right.width() as u16).min(area.width / 2);
     let [left_area, right_area] =
         Layout::horizontal([Constraint::Min(0), Constraint::Length(right_w)]).areas(area);
@@ -835,31 +878,37 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
     let query = crate::items::printable(typed);
     let mut left = vec![
         Span::raw(" "),
-        Span::styled(
-            title.clone(),
-            style(theme::MAUVE).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(" › ", style(theme::FAINT)),
+        Span::styled(">", style(theme::prompt())),
+        Span::raw(" "),
+        Span::styled(title, style(theme::prompt()).add_modifier(Modifier::BOLD)),
+        Span::styled(" › ", style(theme::border())),
     ];
-    let cursor_x = left_area.x
-        + 1
-        + title.chars().count() as u16
-        + 3
-        + Line::raw(query.as_str()).width() as u16;
-    let hint =
-        |text: &'static str| Span::styled(text, style(theme::DIM).add_modifier(Modifier::ITALIC));
-    match (query.is_empty(), filtering) {
-        (true, Some(_)) => left.push(hint("type words · the rows with all of them")),
-        (true, None) => left.push(hint(placeholder(app))),
-        (false, _) => left.push(Span::styled(query, style(theme::TEXT))),
-    }
+    let before = Line::from(left.clone()).width();
+    let cursor_x = left_area.x + (before + Line::raw(query.as_str()).width()) as u16;
+    let mut pattern = Vec::new();
     if filtering.is_some() && !app.query.is_empty() {
-        left.push(Span::styled(" · pattern: ", style(theme::FAINT)));
-        left.push(Span::styled(
+        pattern.push(Span::styled(" · pattern: ", style(theme::border())));
+        pattern.push(Span::styled(
             crate::items::printable(&app.query),
-            style(theme::SUB),
+            style(theme::info()),
         ));
     }
+    if query.is_empty() {
+        let hint = match filtering {
+            Some(_) => "type words · the rows with all of them",
+            None => placeholder(app),
+        };
+        // a narrow box cuts the hint, not the pattern after it; a space before the options
+        let room = usize::from(left_area.width)
+            .saturating_sub(before + Line::from(pattern.clone()).width() + 1);
+        left.push(Span::styled(
+            fit(hint, room),
+            style(theme::info()).add_modifier(Modifier::ITALIC),
+        ));
+    } else {
+        left.push(Span::styled(query, style(theme::fg())));
+    }
+    left.extend(pattern);
     frame.render_widget(Paragraph::new(Line::from(left)), left_area);
     frame.render_widget(
         Paragraph::new(right).alignment(ratatui::layout::Alignment::Right),
@@ -870,6 +919,15 @@ fn draw_input(frame: &mut Frame, app: &App, area: Rect) {
             cursor_x.min(left_area.right().saturating_sub(1)),
             area.y,
         ));
+    }
+}
+
+/// `text` cut with "…" to `room` columns.
+fn fit(text: &str, room: usize) -> String {
+    match text.chars().count() {
+        n if n <= room => text.to_string(),
+        _ if room == 0 => String::new(),
+        _ => text.chars().take(room - 1).collect::<String>() + "…",
     }
 }
 
@@ -925,8 +983,8 @@ fn footer_items(tab: Tab, editor: &str) -> Vec<String> {
         .collect()
 }
 
-/// The keys for the selected item, centred in `area`; when narrow, items before "Esc quit" are left
-/// out, never cut.
+/// The keys for the selected item, at the right of `area`; when narrow, items before "Esc quit" are
+/// left out, never cut.
 fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
     let width = |items: &[String]| {
         items.iter().map(|i| i.chars().count()).sum::<usize>() + 3 * items.len().saturating_sub(1)
@@ -961,15 +1019,13 @@ fn draw_keys(frame: &mut Frame, app: &App, area: Rect) {
     if w > area.width {
         return;
     }
-    let area = Rect::new(area.x + (area.width - w) / 2, area.y, w, 1);
+    let area = Rect::new(area.right() - w, area.y, w, 1);
     let mut spans = Vec::new();
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
-            spans.push(Span::styled(" · ", style(theme::FAINT)));
+            spans.push(Span::styled(" · ", style(theme::border())));
         }
-        let (key, what) = item.split_once(' ').unwrap_or((item, ""));
-        spans.push(Span::styled(key.to_string(), style(theme::SUB)));
-        spans.push(Span::styled(format!(" {what}"), style(theme::DIM)));
+        spans.push(Span::styled(item.clone(), style(theme::info())));
     }
     frame.render_widget(Paragraph::new(Line::from(spans)), area);
 }
@@ -1000,27 +1056,29 @@ fn version_line(app: &App, hash: &str, check: Span<'static>) -> Line<'static> {
     let mut spans = vec![
         check,
         Span::raw(" "),
-        Span::styled(short, style(theme::BLUE).add_modifier(Modifier::BOLD)),
+        Span::styled(short, style(theme::path_dir()).add_modifier(Modifier::BOLD)),
     ];
     if let Some(r) = row {
         let subject: String = r.subject.chars().take(50).collect();
         spans.extend([
-            Span::styled(format!("  {}", r.date), style(theme::DIM)),
-            Span::styled(format!("  {}", r.author), style(theme::SUB)),
-            Span::styled(format!("  {}", r.branch), style(theme::YELLOW)),
-            Span::styled(format!("  {subject}"), style(theme::TEXT)),
+            Span::styled(format!("  {}", r.date), style(theme::info())),
+            Span::styled(format!("  {}", r.author), style(theme::info())),
+            Span::styled(format!("  {}", r.branch), style(theme::path_slash())),
+            Span::styled(format!("  {subject}"), style(theme::fg())),
         ]);
     }
     Line::from(spans)
 }
 
-/// The popup hangs under ⚙ Config at the right edge, between the tab bar and the input line. Lines
+/// The popup hangs under ⚙ Config at the right edge, between the tab bar and the prompt box. Lines
 /// (`widths`: one per line) that one column cannot hold go on in more columns, balanced, the popup
 /// growing to the left (the first column leftmost); as many columns as the screen's width holds, and
 /// what does not fit even so scrolls so that the cursor's line (`at`) shows. It never spills over.
 fn popup_geometry(screen: Rect, widths: &[u16], header_width: u16, at: usize) -> PopupGeometry {
-    // the frame (2), a blank line and the help line (2); the tab bar and the input line stay free
-    let room = (screen.height.saturating_sub(2 + 4) as usize).max(1);
+    // the top border, the tab bar (2 rows above) and the prompt box (3 below) stay free
+    const FREE: u16 = 2 + 3;
+    // the frame (2), a blank line and the help line (2)
+    let room = (screen.height.saturating_sub(FREE + 4) as usize).max(1);
     let lines = widths.len();
     let mut columns = lines.div_ceil(room).max(1);
     loop {
@@ -1041,9 +1099,9 @@ fn popup_geometry(screen: Rect, widths: &[u16], header_width: u16, at: usize) ->
         let w = content.max(header_width) + 4;
         if w <= screen.width || columns == 1 {
             let w = w.min(screen.width);
-            let h = (per_column as u16 + 4).min(screen.height.saturating_sub(2));
+            let h = (per_column as u16 + 4).min(screen.height.saturating_sub(FREE));
             return PopupGeometry {
-                area: Rect::new(screen.right() - w, screen.y + 1, w, h),
+                area: Rect::new(screen.right() - w, screen.y + 2, w, h),
                 widths: column_widths,
                 per_column,
                 first,
@@ -1058,7 +1116,7 @@ fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLa
     let check = |on: bool| {
         Span::styled(
             if on { "[x]" } else { "[ ]" },
-            style(if on { theme::MAUVE } else { theme::DIM }),
+            style(if on { theme::prompt() } else { theme::info() }),
         )
     };
     let type_name = |ty: &Option<String>| match ty {
@@ -1079,38 +1137,38 @@ fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLa
         let line = match row {
             PopupRow::Opt(opt, on) => Line::from(vec![
                 check(*on),
-                Span::styled(format!(" {}", opt.label(app.tab)), style(theme::TEXT)),
-                Span::styled(format!("   {}", opt.hint()), style(theme::DIM)),
+                Span::styled(format!(" {}", opt.label(app.tab)), style(theme::fg())),
+                Span::styled(format!("   {}", opt.hint()), style(theme::info())),
             ]),
             PopupRow::AllTypes(on) => {
                 lines.push((
                     None,
-                    Line::from(Span::styled("── File types ──", style(theme::FAINT))),
+                    Line::from(Span::styled("── File types ──", style(theme::header()))),
                 ));
                 Line::from(vec![
                     check(*on),
-                    Span::styled(" All types", style(theme::TEXT)),
+                    Span::styled(" All types", style(theme::fg())),
                 ])
             }
             PopupRow::Type(ty, n, on) => Line::from(vec![
                 check(*on),
-                Span::styled(format!(" {:<name_w$}", type_name(ty)), style(theme::TEXT)),
-                Span::styled(format!("  {n:>6}"), style(theme::DIM)),
+                Span::styled(format!(" {:<name_w$}", type_name(ty)), style(theme::fg())),
+                Span::styled(format!("  {n:>6}"), style(theme::info())),
             ]),
             PopupRow::AllVersions(on) => {
                 lines.push((
                     None,
-                    Line::from(Span::styled("── Versions ──", style(theme::FAINT))),
+                    Line::from(Span::styled("── Versions ──", style(theme::header()))),
                 ));
                 Line::from(vec![
                     check(*on),
-                    Span::styled(" All versions", style(theme::TEXT)),
+                    Span::styled(" All versions", style(theme::fg())),
                 ])
             }
             PopupRow::Version(hash, on) => version_line(app, hash, check(*on)),
             PopupRow::AllFiles(on) => Line::from(vec![
                 check(*on),
-                Span::styled(" All files", style(theme::TEXT)),
+                Span::styled(" All files", style(theme::fg())),
             ]),
             PopupRow::File(path, on) => {
                 let mut spans = vec![check(*on), Span::raw(" ")];
@@ -1152,10 +1210,10 @@ fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLa
     frame.render_widget(Clear, popup);
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
-        .border_style(style(theme::MAUVE))
+        .border_style(style(theme::prompt()))
         .title_top(Span::styled(
             title,
-            style(theme::MAUVE).add_modifier(Modifier::BOLD),
+            style(theme::prompt()).add_modifier(Modifier::BOLD),
         ));
     let inner = block.inner(popup);
     frame.render_widget(block, popup);
@@ -1177,7 +1235,7 @@ fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLa
         if index == Some(cursor) {
             frame
                 .buffer_mut()
-                .set_style(band, Style::new().bg(theme::SURFACE));
+                .set_style(band, Style::new().bg(theme::bg_sel()));
         }
         frame.render_widget(Paragraph::new(line), cell);
         if let Some(i) = index {
@@ -1192,7 +1250,7 @@ fn draw_popup(frame: &mut Frame, app: &App, cursor: usize, layout: &mut ScreenLa
             1,
         );
         frame.render_widget(
-            Paragraph::new(Span::styled(help, style(theme::FAINT)))
+            Paragraph::new(Span::styled(help, style(theme::border())))
                 .alignment(ratatui::layout::Alignment::Right),
             help_area,
         );
@@ -1220,6 +1278,18 @@ mod tests {
         (0..buf.area.width).map(|x| buf[(x, y)].symbol()).collect()
     }
 
+    /// The tab bar's row, under the top border.
+    const BAR: u16 = 1;
+    /// The first row of the boxes: the list's and the preview's top borders, the preview's titles.
+    const BOXES: u16 = 2;
+
+    /// What is inside the prompt box's input row (the last but one), its borders left out.
+    fn input_row(buf: &Buffer) -> String {
+        let r = row(buf, buf.area.height - 2);
+        let inside = r.strip_prefix('│').unwrap_or(&r);
+        inside.split('│').next().unwrap_or_default().to_string()
+    }
+
     fn find(buf: &Buffer, text: &str) -> Option<(u16, u16)> {
         (0..buf.area.height).find_map(|y| {
             let r = row(buf, y);
@@ -1232,24 +1302,39 @@ mod tests {
         for w in [80, 160] {
             let (mut a, _) = app(Tab::Files);
             let buf = render(&mut a, w, 24);
-            let top = row(&buf, 0);
+            let top = row(&buf, BAR);
             for t in ["Files", "Content", "Folders", "Git"] {
                 assert!(top.contains(t), "{w}: {top:?}");
             }
             assert!(top.trim_end().ends_with("⚙ Config"), "{w}: {top:?}");
-            assert_eq!(buf[(w - 1, 0)].symbol(), "g");
-            assert!(!row(&buf, 1).contains("Content"));
+            assert_eq!(buf[(w - 1, BAR)].symbol(), "g");
+            assert!(!row(&buf, BOXES).contains("Content"));
         }
     }
 
     #[test]
-    fn current_tab_is_a_mauve_block() {
-        let (mut a, _) = app(Tab::Content);
+    fn the_tab_bar_is_quiet_the_current_tab_bold_in_the_prompt_colour() {
+        let (mut a, now) = app(Tab::Content);
         let buf = render(&mut a, 80, 24);
-        let (x, _) = find(&buf, "Content").unwrap();
-        assert_eq!(buf[(x, 0)].bg, theme::MAUVE);
+        let (x, y) = find(&buf, "Content").unwrap();
+        assert_eq!(y, BAR);
+        let c = &buf[(x, BAR)];
+        assert_eq!((c.fg, c.bg), (theme::prompt(), theme::bg()), "no block");
+        assert!(c.modifier.contains(Modifier::BOLD));
         let (x, _) = find(&buf, "Files").unwrap();
-        assert_ne!(buf[(x, 0)].bg, theme::MAUVE);
+        assert_eq!(
+            (buf[(x, BAR)].fg, buf[(x, BAR)].bg),
+            (theme::info(), theme::bg())
+        );
+        assert!(
+            (0..80).all(|x| !"│╭╮╰╯─".contains(buf[(x, BAR)].symbol())),
+            "no border glyphs: {:?}",
+            row(&buf, BAR)
+        );
+        a.handle_key(ctrl('s'), now);
+        let buf = render(&mut a, 80, 24);
+        let (x, _) = find(&buf, "⚙ Config").unwrap();
+        assert_eq!(buf[(x, BAR)].bg, theme::prompt(), "open: the accent block");
     }
 
     #[test]
@@ -1257,7 +1342,7 @@ mod tests {
         let (mut a, _) = app(Tab::Files);
         feed(&mut a, &["a"]);
         let buf = render(&mut a, 60, 20);
-        let top = row(&buf, 0);
+        let top = row(&buf, BAR);
         assert!(top.trim_end().ends_with("⚙ Config"), "{top:?}");
         assert!(top.contains("Help"), "{top:?}");
         let keys = top[top.find("Help").unwrap() + 4..top.find("⚙").unwrap()]
@@ -1321,7 +1406,7 @@ mod tests {
         a.handle_key(key(KeyCode::Char(' ')), now);
         a.handle_key(key(KeyCode::Esc), now);
         a.loading = false;
-        let input = row(&render(&mut a, 100, 24), 23);
+        let input = input_row(&render(&mut a, 100, 24));
         assert!(
             input.trim_end().ends_with("ignored · 1 type off   2/3"),
             "{input:?}"
@@ -1329,7 +1414,7 @@ mod tests {
         a.handle_key(ctrl('s'), now);
         a.popup = Some(5);
         a.handle_key(key(KeyCode::Char(' ')), now);
-        let input = row(&render(&mut a, 100, 24), 23);
+        let input = input_row(&render(&mut a, 100, 24));
         assert!(input.contains("2 types off"), "{input:?}");
     }
 
@@ -1338,7 +1423,7 @@ mod tests {
         let g = popup_geometry(Rect::new(0, 0, 120, 30), &[40; 5], 20, 0);
         assert_eq!(
             (g.area.right(), g.area.y),
-            (120, 1),
+            (120, BOXES),
             "under the tab bar, at the right edge"
         );
         assert_eq!(
@@ -1354,7 +1439,7 @@ mod tests {
 
     #[test]
     fn a_list_too_long_for_one_column_grows_to_the_left() {
-        // 30 high: 24 rows fit a column between the tab bar, the input line and the frame
+        // 30 high: 21 rows fit a column between the tab bar, the prompt box and the frame
         let g = popup_geometry(Rect::new(0, 0, 120, 30), &[30; 40], 20, 0);
         assert_eq!(
             (g.widths.as_slice(), g.per_column, g.first),
@@ -1362,7 +1447,7 @@ mod tests {
         );
         assert_eq!(g.area.right(), 120, "still at the right edge");
         assert_eq!(g.area.width, 2 * 30 + COLUMN_GAP + 4);
-        assert!(g.area.bottom() <= 29, "the input line stays free");
+        assert!(g.area.bottom() <= 30 - 3, "the prompt box stays free");
     }
 
     #[test]
@@ -1377,13 +1462,13 @@ mod tests {
 
     #[test]
     fn what_no_number_of_columns_holds_scrolls_and_nothing_spills() {
-        // 80 x 24: 18 rows a column, two 30-wide columns fit, three do not
+        // 80 x 24: 15 rows a column, two 30-wide columns fit, three do not
         let screen = Rect::new(0, 0, 80, 24);
         let g = popup_geometry(screen, &[30; 60], 20, 59);
-        assert_eq!((g.widths.len(), g.per_column), (2, 18));
-        assert_eq!(g.first, 60 - 36, "the shown lines end at the cursor's");
+        assert_eq!((g.widths.len(), g.per_column), (2, 15));
+        assert_eq!(g.first, 60 - 30, "the shown lines end at the cursor's");
         assert!(g.area.x >= screen.x && g.area.right() <= screen.right());
-        assert!(g.area.bottom() <= 23);
+        assert!(g.area.y >= BOXES && g.area.bottom() <= 24 - 3);
         let g = popup_geometry(Rect::new(0, 0, 30, 10), &[50; 8], 20, 0);
         assert!(
             g.area.width <= 30 && g.area.bottom() <= 9,
@@ -1402,15 +1487,15 @@ mod tests {
         a.handle_key(ctrl('s'), now);
         let buf = render(&mut a, 160, 30);
         let p = a.layout.popup;
-        assert_eq!((p.right(), p.y), (160, 1), "under ⚙ Config");
+        assert_eq!((p.right(), p.y), (160, BOXES), "under ⚙ Config");
         let (hx, hy) = find(&buf, "Hidden files").unwrap();
         let (tx, _) = find(&buf, "[x] .t39").unwrap();
-        assert_eq!(hy, 2, "the first row right under the frame");
+        assert_eq!(hy, BOXES + 1, "the first row right under the frame");
         assert!(
             tx > hx,
             "the list goes on in a column to the right of the first"
         );
-        assert!(row(&buf, 29).contains("Files ›"), "the input line stays");
+        assert!(input_row(&buf).contains("Files ›"), "the input line stays");
         assert_eq!(
             a.layout.popup_rows.len(),
             a.popup_rows().len(),
@@ -1501,14 +1586,14 @@ mod tests {
     fn placeholder_when_query_empty() {
         let (mut a, now) = app(Tab::Content);
         let buf = render(&mut a, 100, 24);
-        let input = row(&buf, 23);
+        let input = input_row(&buf);
         assert!(
             input.contains("Content › type a pattern · lists the files that contain it"),
             "{input:?}"
         );
         a.handle_key(key(KeyCode::Char('n')), now);
         let buf = render(&mut a, 100, 24);
-        let input = row(&buf, 23);
+        let input = input_row(&buf);
         assert!(input.contains("Content › n"), "{input:?}");
         assert!(!input.contains("type a pattern"));
     }
@@ -1518,7 +1603,7 @@ mod tests {
         let (mut a, _) = app(Tab::Content);
         a.options.content.each_match = true;
         let buf = render(&mut a, 120, 24);
-        let input = row(&buf, 23);
+        let input = input_row(&buf);
         assert!(
             input.contains("type words · every match · each on its line or path"),
             "{input:?}"
@@ -1528,7 +1613,7 @@ mod tests {
     #[test]
     fn deep_says_what_it_searches() {
         let (mut a, _) = app(Tab::Deep);
-        let input = row(&render(&mut a, 120, 24), 23);
+        let input = input_row(&render(&mut a, 120, 24));
         assert!(
             input.contains(
                 "Deep › type a pattern · the files that contain it, binaries and archives too"
@@ -1537,7 +1622,7 @@ mod tests {
         );
         a.options.deep.each_match = true;
         a.options.deep.documents = true;
-        let input = row(&render(&mut a, 120, 24), 23);
+        let input = input_row(&render(&mut a, 120, 24));
         assert!(
             input.contains("type words · every match, binaries too · each on its line or path"),
             "{input:?}"
@@ -1546,7 +1631,7 @@ mod tests {
             input.contains("each match · documents · ignored"),
             "{input:?}"
         );
-        let top = row(&render(&mut a, 160, 24), 0);
+        let top = row(&render(&mut a, 160, 24), BAR);
         assert!(
             top.contains("Deep") && top.contains("^T in file") && top.contains("^U/^G diff"),
             "{top:?}"
@@ -1558,7 +1643,7 @@ mod tests {
         let (mut a, now) = app(Tab::Content);
         a.start_query("needle".into());
         feed(&mut a, &["src/main.c", "docs/b.md"]);
-        let input = row(&render(&mut a, 120, 24), 23);
+        let input = input_row(&render(&mut a, 120, 24));
         assert!(
             input.contains(
                 "Content filter › type words · the rows with all of them · pattern: needle"
@@ -1570,13 +1655,13 @@ mod tests {
         }
         let buf = render(&mut a, 120, 24);
         assert!(
-            row(&buf, 23).contains("Content filter › main · pattern: needle"),
+            input_row(&buf).contains("Content filter › main · pattern: needle"),
             "{:?}",
-            row(&buf, 23)
+            input_row(&buf)
         );
         assert_eq!(
             fg_at(&buf, "src/main.c", 4),
-            theme::RED,
+            theme::hl(),
             "the filter's words are red"
         );
     }
@@ -1584,13 +1669,13 @@ mod tests {
     #[test]
     fn the_keys_name_options_and_the_filter() {
         let (mut a, _) = app(Tab::Content);
-        let top = row(&render(&mut a, 200, 24), 0);
+        let top = row(&render(&mut a, 200, 24), BAR);
         assert!(
             top.contains("Enter open · ^S options · ^Alt-F filter · ^P files · ^O nvim"),
             "{top:?}"
         );
         let (mut a, _) = app(Tab::Folders);
-        let top = row(&render(&mut a, 200, 24), 0);
+        let top = row(&render(&mut a, 200, 24), BAR);
         assert!(top.contains("^S options") && !top.contains("^F"), "{top:?}");
     }
 
@@ -1598,30 +1683,30 @@ mod tests {
     fn esc_is_named_back_where_it_goes_back() {
         let (mut a, now) = app(Tab::Content);
         a.start_query("needle".into());
-        let top = row(&render(&mut a, 200, 24), 0);
+        let top = row(&render(&mut a, 200, 24), BAR);
         assert!(
             top.contains("Esc back") && !top.contains("Esc quit"),
             "{top:?}"
         );
         a.handle_key(key(KeyCode::Esc), now);
-        let top = row(&render(&mut a, 200, 24), 0);
+        let top = row(&render(&mut a, 200, 24), BAR);
         assert!(top.contains("Esc quit"), "{top:?}");
         feed(&mut a, &["src/a.c"]);
         a.handle_key(ctrl('t'), now);
-        let top = row(&render(&mut a, 200, 24), 0);
+        let top = row(&render(&mut a, 200, 24), BAR);
         assert!(top.contains("Esc back"), "inside a file: {top:?}");
     }
 
     #[test]
     fn the_input_line_names_plain_text_not_the_default_regex() {
         let (mut a, _) = app(Tab::Content);
-        let input = row(&render(&mut a, 120, 24), 23);
+        let input = input_row(&render(&mut a, 120, 24));
         assert!(
             !input.contains("regex"),
             "the default goes unsaid: {input:?}"
         );
         a.options.toggle(Tab::Content, Opt::Regex);
-        let input = row(&render(&mut a, 120, 24), 23);
+        let input = input_row(&render(&mut a, 120, 24));
         assert!(input.contains("ignored · plain text"), "{input:?}");
     }
 
@@ -1632,7 +1717,7 @@ mod tests {
         feed(&mut a, &["a", "b"]);
         a.loading = false;
         let buf = render(&mut a, 100, 24);
-        let input = row(&buf, 23);
+        let input = input_row(&buf);
         assert!(
             input
                 .trim_end()
@@ -1648,7 +1733,7 @@ mod tests {
         feed(&mut a, &["a.rs"]);
         a.loading = false;
         let buf = render(&mut a, 100, 24);
-        let input = row(&buf, 23);
+        let input = input_row(&buf);
         assert!(
             input.trim_end().ends_with("ignored · -- -e rs   1/1"),
             "{input:?}"
@@ -1656,7 +1741,7 @@ mod tests {
     }
 
     #[test]
-    fn keys_sit_in_the_middle_of_the_tab_bar() {
+    fn keys_sit_at_the_right_of_the_tab_bar() {
         let cases = [
             (
                 Tab::Files,
@@ -1674,17 +1759,16 @@ mod tests {
         for (tab, want) in cases {
             let (mut a, _) = app(tab);
             let buf = render(&mut a, 200, 24);
-            let top: Vec<String> = (0..200).map(|x| buf[(x, 0)].symbol().to_string()).collect();
-            let text = top.concat();
+            let text = row(&buf, BAR);
             let at = text
                 .find(want)
                 .unwrap_or_else(|| panic!("{tab:?}: {text:?}"));
-            let start = text[..at].chars().count() as u16;
-            let end = start + want.chars().count() as u16;
-            let left = start - a.layout.tabs.last().unwrap().1.right();
-            let right = a.layout.config.x - end;
-            assert!(left.abs_diff(right) <= 1, "{tab:?}: {left} vs {right}");
-            assert!(!row(&buf, 23).contains("Esc quit"), "no footer any more");
+            let end = (text[..at].chars().count() + want.chars().count()) as u16;
+            assert_eq!(a.layout.config.x - end, 2, "{tab:?}: {text:?}");
+            assert!(
+                !row(&buf, 24 - 2).contains("Esc quit"),
+                "no footer any more"
+            );
         }
     }
 
@@ -1750,9 +1834,9 @@ mod tests {
         feed(&mut a, &["src/a.c"]);
         a.handle_key(ctrl('t'), now);
         let buf = render(&mut a, 100, 24);
-        let input = row(&buf, 23);
+        let input = input_row(&buf);
         assert!(
-            input.trim_start().starts_with("In a.c › type words"),
+            input.trim_start().starts_with("> In a.c › type words"),
             "{input:?}"
         );
         assert!(
@@ -1766,7 +1850,7 @@ mod tests {
         let (mut a, _) = app(Tab::Files);
         a.editor = "nano".into();
         let buf = render(&mut a, 200, 24);
-        assert!(row(&buf, 0).contains("^O nano"), "{:?}", row(&buf, 0));
+        assert!(row(&buf, BAR).contains("^O nano"), "{:?}", row(&buf, BAR));
     }
 
     /// The cells of column `x` between rows `from` and `to`.
@@ -1823,11 +1907,14 @@ mod tests {
         a.handle_key(key(KeyCode::Up), now);
         let buf = render(&mut a, 80, 24);
         let (x, y) = find(&buf, "src/b.rs").unwrap();
-        assert_eq!(buf[(x, y)].bg, theme::SURFACE);
-        assert_eq!(buf[(x - 1, y)].symbol(), "▌");
-        assert_eq!(buf[(78, y)].bg, theme::SURFACE, "the band spans the row");
+        assert_eq!(buf[(x, y)].bg, theme::bg_sel());
+        assert_eq!((x - 1, buf[(x - 1, y)].symbol()), (1, "▌"), "in column 1");
+        assert_eq!(buf[(x - 1, y)].fg, theme::pointer());
+        let end = a.layout.list.right() - 1;
+        assert_eq!(buf[(end, y)].bg, theme::bg_sel(), "the band spans the row");
+        assert_eq!(buf[(x, y)].fg, theme::path_dir(), "s of src: a folder");
         let (x, y) = find(&buf, "src/a.rs").unwrap();
-        assert_ne!(buf[(x, y)].bg, theme::SURFACE);
+        assert_eq!(buf[(x, y)].bg, theme::bg());
     }
 
     #[test]
@@ -1840,8 +1927,8 @@ mod tests {
         a.on_list(crate::runner::ListMsg::Items(a.list_gen, rows));
         let buf = render(&mut a, 80, 24);
         let (x, y) = find(&buf, "abc1234").unwrap();
-        assert_eq!(buf[(x, y)].bg, theme::SURFACE);
-        assert_eq!(buf[(x + 8, y)].bg, theme::SURFACE, "after the reset");
+        assert_eq!(buf[(x, y)].bg, theme::bg_sel());
+        assert_eq!(buf[(x + 8, y)].bg, theme::bg_sel(), "after the reset");
     }
 
     fn fg_at(buf: &Buffer, text: &str, offset: u16) -> ratatui::style::Color {
@@ -1866,12 +1953,12 @@ mod tests {
         ));
         let buf = render(&mut a, 120, 30);
         let row = "docs/CODE.md:7:the interest";
-        assert_eq!(fg_at(&buf, row, 5), theme::RED, "C of CODE, in the path");
-        assert_eq!(fg_at(&buf, row, 8), theme::RED, "E of CODE");
-        assert_ne!(fg_at(&buf, row, 0), theme::RED, "d of docs");
+        assert_eq!(fg_at(&buf, row, 5), theme::hl(), "C of CODE, in the path");
+        assert_eq!(fg_at(&buf, row, 8), theme::hl(), "E of CODE");
+        assert_ne!(fg_at(&buf, row, 0), theme::hl(), "d of docs");
         assert_eq!(
             fg_at(&buf, row, 19),
-            theme::RED,
+            theme::hl(),
             "i of interest, ugrep's mark"
         );
     }
@@ -1884,19 +1971,19 @@ mod tests {
             a.handle_key(key(KeyCode::Char(c)), now);
         }
         let buf = render(&mut a, 80, 24);
-        assert_eq!(fg_at(&buf, "src/Main.rs", 4), theme::RED, "M of Main");
-        assert_eq!(fg_at(&buf, "src/Main.rs", 7), theme::RED, "n of Main");
-        assert_eq!(fg_at(&buf, "src/Main.rs", 0), theme::RED, "s of src");
+        assert_eq!(fg_at(&buf, "src/Main.rs", 4), theme::hl(), "M of Main");
+        assert_eq!(fg_at(&buf, "src/Main.rs", 7), theme::hl(), "n of Main");
+        assert_eq!(fg_at(&buf, "src/Main.rs", 0), theme::hl(), "s of src");
         assert_eq!(
             fg_at(&buf, "src/Main.rs", 1),
-            theme::BLUE,
+            theme::path_dir(),
             "r of src keeps the folder colour"
         );
-        assert_eq!(fg_at(&buf, "src/Main.rs", 10), theme::RED, "s of .rs");
+        assert_eq!(fg_at(&buf, "src/Main.rs", 10), theme::hl(), "s of .rs");
         let (x, y) = find(&buf, "src/Main.rs").unwrap();
         assert_eq!(
             buf[(x + 4, y)].bg,
-            theme::SURFACE,
+            theme::bg_sel(),
             "the band stays under a highlight"
         );
     }
@@ -1912,15 +1999,19 @@ mod tests {
         assert!(find(&buf, "src/app.rs").is_none(), "left out");
         assert_eq!(
             fg_at(&buf, "src/src.rs", 0),
-            theme::RED,
+            theme::hl(),
             "^src: at the start"
         );
         assert_ne!(
             fg_at(&buf, "src/src.rs", 4),
-            theme::RED,
+            theme::hl(),
             "not the src after it"
         );
-        assert_eq!(fg_at(&buf, "src/src.rs", 7), theme::RED, ".rs$: at the end");
+        assert_eq!(
+            fg_at(&buf, "src/src.rs", 7),
+            theme::hl(),
+            ".rs$: at the end"
+        );
         for c in "\x08\x08\x08\x08 | a | !b".chars() {
             let code = if c == '\x08' {
                 KeyCode::Backspace
@@ -1931,8 +2022,8 @@ mod tests {
         }
         // "^src .rs$ | a | !b": the bar and the left-out word are not marked
         let buf = render(&mut a, 80, 24);
-        assert_eq!(fg_at(&buf, "src/app.rs", 4), theme::RED, "a of app");
-        assert_ne!(fg_at(&buf, "src/app.rs", 3), theme::RED, "/ is no word");
+        assert_eq!(fg_at(&buf, "src/app.rs", 4), theme::hl(), "a of app");
+        assert_ne!(fg_at(&buf, "src/app.rs", 3), theme::hl(), "/ is no word");
     }
 
     #[test]
@@ -1945,7 +2036,7 @@ mod tests {
             a.handle_key(key(KeyCode::Char(c)), now);
         }
         let buf = render(&mut a, 80, 24);
-        assert_eq!(fg_at(&buf, "src/Main.rs", 4), theme::RED);
+        assert_eq!(fg_at(&buf, "src/Main.rs", 4), theme::hl());
         assert!(
             find(&buf, "src/MAIN.md").is_none(),
             "filtered out by its case"
@@ -1957,7 +2048,7 @@ mod tests {
         let (mut a, now) = app(Tab::Content);
         feed(&mut a, &["src/a.c"]);
         a.handle_key(ctrl('t'), now);
-        let input = row(&render(&mut a, 100, 24), 23);
+        let input = input_row(&render(&mut a, 100, 24));
         assert!(input.contains("words on a line"), "{input:?}");
         a.handle_key(ctrl('s'), now);
         let buf = render(&mut a, 100, 24);
@@ -1970,7 +2061,7 @@ mod tests {
         let (mut a, now) = app(Tab::Content);
         feed(&mut a, &["src/a.c"]);
         a.handle_key(ctrl('t'), now);
-        let says = |a: &mut App| row(&render(a, 120, 24), 23);
+        let says = |a: &mut App| input_row(&render(a, 120, 24));
         assert!(says(&mut a).contains("type words · the lines with all of them"));
         a.options.toggle_in_file(Opt::WordsInTheFile);
         assert!(says(&mut a).contains("type words · all of them in the file, the lines with any"));
@@ -1986,7 +2077,7 @@ mod tests {
             a.tick(now + std::time::Duration::from_secs(1));
             feed(&mut a, &["main.c"]);
             let buf = render(&mut a, 80, 24);
-            assert_ne!(fg_at(&buf, "main.c", 0), theme::RED, "{tab:?}");
+            assert_ne!(fg_at(&buf, "main.c", 0), theme::hl(), "{tab:?}");
         }
     }
 
@@ -2050,37 +2141,211 @@ mod tests {
     }
 
     #[test]
-    fn preview_border_has_root_and_status() {
-        let (mut a, now) = app_with_preview(Tab::Files);
+    fn the_top_border_names_the_root_in_its_middle() {
+        let (mut a, _) = app_with_preview(Tab::Files);
         a.root = "/r/project".into();
+        let buf = render(&mut a, 80, 24);
+        let top = row(&buf, 0);
+        let (left, right) = top.split_once(" /r/project ").expect(&top);
+        assert!(left.chars().all(|c| c == '─'), "{top:?}");
+        assert!(right.chars().all(|c| c == '─'), "{top:?}");
+        let (l, r) = (left.chars().count(), right.chars().count());
+        assert!(l.abs_diff(r) <= 1, "centred: {l} vs {r}");
+        assert_eq!(buf[(0, 0)].fg, theme::border());
+        let x = l as u16 + 1;
+        assert_eq!(buf[(x, 0)].fg, theme::path_slash(), "the slashes yellow");
+        assert_eq!(buf[(x + 1, 0)].fg, theme::path_dir(), "the folders blue");
+        assert_eq!(buf[(x + 3, 0)].fg, theme::path_name(), "the name green");
+        assert!(
+            !(BAR..24).any(|y| row(&buf, y).contains("/r/project")),
+            "said once, not on the preview's border too"
+        );
+        // wider than the screen: cut, no panic
+        a.root = format!("/{}", "long/".repeat(30)).into();
+        let top = row(&render(&mut a, 40, 10), 0);
+        assert!(top.starts_with(" /long/long/"), "{top:?}");
+    }
+
+    #[test]
+    fn the_status_is_on_the_previews_bottom_border() {
+        let (mut a, now) = app_with_preview(Tab::Files);
         a.set_status("Copied to the clipboard", false, now);
         let buf = render(&mut a, 80, 24);
-        let (x, y) = find(&buf, "/r/project").unwrap();
-        assert_eq!(y, 1);
-        assert_eq!(buf[(x, y)].fg, theme::YELLOW, "the slashes yellow");
-        assert_eq!(buf[(x + 1, y)].fg, theme::BLUE, "the folders blue");
-        assert_eq!(buf[(x + 3, y)].fg, theme::GREEN, "the name green");
         let (x, y) = find(&buf, "Copied to the clipboard").unwrap();
-        assert_eq!(buf[(x, y)].fg, theme::GREEN);
-        assert_eq!(y, a.layout.preview.y + a.layout.preview.height);
+        assert_eq!(buf[(x, y)].fg, theme::marker());
+        assert_eq!(y, a.layout.preview.bottom());
+        assert!(x >= 40, "in the right half: {x}");
+        a.set_status("boom", true, now);
+        let buf = render(&mut a, 80, 24);
+        assert_eq!(fg_at(&buf, "boom", 0), theme::error());
     }
 
     #[test]
     fn hidden_preview_gives_the_list_the_room() {
         let (mut a, now) = app_with_preview(Tab::Files);
         a.handle_key(ctrl('l'), now);
-        render(&mut a, 80, 24);
+        a.set_status("Copied to the clipboard", false, now);
+        let buf = render(&mut a, 80, 24);
         assert_eq!(a.layout.preview, Rect::default());
-        assert_eq!(a.layout.list.height, 24 - 1 - 1 - 2);
+        assert_eq!(a.layout.list, Rect::new(1, BOXES + 1, 78, 24 - 2 - 3 - 2));
+        let (_, y) = find(&buf, "Copied to the clipboard").unwrap();
+        assert_eq!(y, a.layout.list.bottom(), "on the list's bottom border");
+        assert!(row(&buf, 24 - 3).starts_with('╭') && row(&buf, 24 - 3).ends_with('╮'));
+        assert!(
+            input_row(&buf).starts_with(" > Files › "),
+            "the prompt box stays"
+        );
+        assert!(row(&buf, 23).starts_with('╰') && row(&buf, 23).ends_with('╯'));
+        assert!(
+            !row(&buf, BOXES).contains("╮╭"),
+            "one box: {:?}",
+            row(&buf, BOXES)
+        );
+    }
+
+    /// Files with `n` rows and its preview, the first row selected, on a `w` x `h` screen.
+    fn files_screen(n: usize, w: u16, h: u16) -> (App, Buffer) {
+        let (mut a, _) = app_with_preview(Tab::Files);
+        let names: Vec<String> = (0..n).map(|i| format!("src/f{i:03}.rs")).collect();
+        feed(
+            &mut a,
+            &names.iter().map(String::as_str).collect::<Vec<_>>(),
+        );
+        a.loading = false;
+        a.on_preview(crate::preview::PreviewMsg {
+            found: None,
+            generation: a.preview_gen,
+            text: Text::raw("1  needle in main\n2  second line"),
+        });
+        let buf = render(&mut a, w, h);
+        (a, buf)
     }
 
     #[test]
-    fn without_a_preview_the_list_border_names_the_root() {
-        let (mut a, now) = app(Tab::Files);
-        a.handle_key(ctrl('l'), now);
-        feed(&mut a, &["a"]);
-        let buf = render(&mut a, 80, 24);
-        assert!(row(&buf, 1).contains("/r/p"), "{:?}", row(&buf, 1));
+    fn the_screen_is_fzfs_full_style() {
+        for (w, h) in [(150, 42), (90, 24)] {
+            let (a, buf) = files_screen(40, w, h);
+            let at = |s: &str| format!("{w}x{h}: {s}");
+            // the boxes side by side: the list's right edge touches the preview's left one at w/2
+            let first = row(&buf, BOXES);
+            let split = first.find("╮╭").map(|i| first[..i].chars().count() as u16);
+            assert_eq!(split, Some(w / 2 - 1), "{}", at(&first));
+            let p = a.layout.preview;
+            assert_eq!((p.x, p.y), (w / 2 + 1, BOXES + 1), "{}", at("preview"));
+            assert_eq!(p.right(), w - 1, "{}", at("preview to the right edge"));
+            assert_eq!(p.bottom(), h - 4, "{}", at("its bottom border at h-4"));
+            let (x, _) = find(&buf, "needle in main").unwrap();
+            assert!(x > w / 2, "{}", at("the preview's text in the right half"));
+            // both boxes end at h-4, side by side
+            let last = row(&buf, h - 4);
+            let split = last.find("╯╰").map(|i| last[..i].chars().count() as u16);
+            assert_eq!(split, Some(w / 2 - 1), "{}", at(&last));
+            // the prompt box: the last three rows, across the whole width
+            for (y, ends) in [(h - 3, ('╭', '╮')), (h - 1, ('╰', '╯'))] {
+                let r = row(&buf, y);
+                assert!(
+                    r.starts_with(ends.0) && r.ends_with(ends.1) && !r.contains("╮╭"),
+                    "{}",
+                    at(&r)
+                );
+            }
+            let input = input_row(&buf);
+            assert_eq!(input.chars().count(), w as usize - 2, "{}", at(&input));
+            assert!(input.starts_with(" > Files › "), "{}", at(&input));
+            assert!(input.trim_end().ends_with("40/40"), "{}", at(&input));
+            assert_eq!(buf[(2, h - 2)].fg, theme::prompt(), "{}", at("the > sign"));
+            let (cx, _) = find(&buf, "40/40").unwrap();
+            assert_eq!(buf[(cx, h - 2)].fg, theme::info(), "{}", at("the counter"));
+            assert_eq!(
+                cx + 5 + 1,
+                w - 1,
+                "{}",
+                at("the counter by the right border")
+            );
+            let sel = h - 5;
+            assert_eq!(
+                buf[(1, sel)].symbol(),
+                "▌",
+                "{}",
+                at("the pointer in column 1")
+            );
+            assert_eq!(buf[(1, sel)].fg, theme::pointer());
+            assert_eq!(
+                buf[(3, sel)].bg,
+                Color::Indexed(235),
+                "{}",
+                at("the selected row")
+            );
+            assert_eq!(
+                buf[(3, sel - 1)].bg,
+                Color::Indexed(234),
+                "{}",
+                at("the others")
+            );
+            // the screen's background everywhere sf draws, the borders in theirs
+            assert!(
+                buf.content.iter().all(|c| c.bg != Color::Reset),
+                "{}",
+                at("bg")
+            );
+            assert_eq!(buf[(0, BOXES)].fg, Color::Indexed(240), "{}", at("border"));
+        }
+    }
+
+    #[test]
+    fn a_narrow_prompt_box_cuts_the_hint_and_the_options_not_the_pattern_or_the_counter() {
+        let (mut a, _) = app_with_preview(Tab::Content);
+        a.start_query("needle".into());
+        feed(&mut a, &["src/main.c", "docs/b.md"]);
+        a.loading = false;
+        let input = input_row(&render(&mut a, 90, 24));
+        assert!(
+            input.starts_with(" > Content filter › type words"),
+            "{input:?}"
+        );
+        assert!(
+            input.contains("… · pattern: needle "),
+            "hint cut: {input:?}"
+        );
+        (a.options.content.archives, a.options.content.hidden) = (true, true);
+        let input = input_row(&render(&mut a, 90, 24));
+        assert!(
+            input.trim_end().ends_with("…   2/2"),
+            "options cut: {input:?}"
+        );
+        assert_eq!(fit("abcdef", 6), "abcdef");
+        assert_eq!(fit("abcdef", 4), "abc…");
+        assert_eq!(fit("abcdef", 0), "");
+    }
+
+    #[test]
+    fn at_90x24_the_popup_stays_clear_of_the_tab_bar_and_the_prompt_box() {
+        // the options and one file type: every row shows; forty types: the rest scrolls, still clear
+        for types in [1, 40] {
+            for tab in [Tab::Files, Tab::Content, Tab::Deep, Tab::Git] {
+                let (mut a, now) = app_with_preview(tab);
+                let names: Vec<String> = (0..types).map(|i| format!("f.t{i:02}")).collect();
+                feed(
+                    &mut a,
+                    &names.iter().map(String::as_str).collect::<Vec<_>>(),
+                );
+                a.handle_key(ctrl('s'), now);
+                let buf = render(&mut a, 90, 24);
+                let p = a.layout.popup;
+                assert!(p.y >= BOXES && p.bottom() <= 24 - 3, "{tab:?}: {p:?}");
+                assert_eq!(p.right(), 90, "{tab:?}");
+                if types == 1 {
+                    assert_eq!(
+                        a.layout.popup_rows.len(),
+                        a.popup_rows().len(),
+                        "{tab:?}: every row on screen, none cut"
+                    );
+                }
+                assert!(row(&buf, BAR).contains("⚙ Config"), "{tab:?}");
+                assert!(input_row(&buf).contains(" › "), "{tab:?}");
+                assert!(row(&buf, 23).starts_with('╰'), "{tab:?}");
+            }
+        }
     }
 
     #[test]
@@ -2089,9 +2354,9 @@ mod tests {
         let buf = render(&mut a, 120, 30);
         assert!(find(&buf, "sf — the search functions in one window").is_some());
         assert!(
-            row(&buf, 29).contains("Help › type to find in the manual"),
+            input_row(&buf).contains("Help › type to find in the manual"),
             "{:?}",
-            row(&buf, 29)
+            input_row(&buf)
         );
         assert!(a.layout.help.height > 0);
         for c in "ctrl-f".chars() {
@@ -2099,17 +2364,21 @@ mod tests {
         }
         let buf = render(&mut a, 120, 30);
         assert!(
-            row(&buf, 29).contains("Help › ctrl-f"),
+            input_row(&buf).contains("Help › ctrl-f"),
             "{:?}",
-            row(&buf, 29)
+            input_row(&buf)
         );
         let (x, y) = find(&buf, "Ctrl-F").unwrap();
-        assert_eq!(buf[(x, y)].bg, theme::SURFACE, "the found line in a band");
+        assert_eq!(buf[(x, y)].bg, theme::bg_sel(), "the found line in a band");
         for c in "zzz".chars() {
             a.handle_key(key(KeyCode::Char(c)), now);
         }
         let buf = render(&mut a, 120, 30);
-        assert!(row(&buf, 29).contains("not found"), "{:?}", row(&buf, 29));
+        assert!(
+            input_row(&buf).contains("not found"),
+            "{:?}",
+            input_row(&buf)
+        );
     }
 
     #[test]
@@ -2134,31 +2403,31 @@ mod tests {
         a.handle_key(ctrl('f'), now);
         let buf = render(&mut a, 120, 30);
         assert!(
-            row(&buf, 29).contains("Find in preview › type"),
+            input_row(&buf).contains("Find in preview › type"),
             "{:?}",
-            row(&buf, 29)
+            input_row(&buf)
         );
-        assert!(row(&buf, 0).contains("Esc back"), "{:?}", row(&buf, 0));
+        assert!(row(&buf, BAR).contains("Esc back"), "{:?}", row(&buf, BAR));
         for c in "needle".chars() {
             a.handle_key(key(KeyCode::Char(c)), now);
         }
         let buf = render(&mut a, 120, 30);
         assert!(
-            row(&buf, 29).contains("Find in preview › needle"),
+            input_row(&buf).contains("Find in preview › needle"),
             "{:?}",
-            row(&buf, 29)
+            input_row(&buf)
         );
         let (x, y) = find(&buf, "a Needle here").unwrap();
         assert_ne!(
             buf[(x, y)].bg,
-            theme::SURFACE,
+            theme::bg_sel(),
             "no band: the word is coloured"
         );
-        assert_eq!(buf[(x + 2, y)].fg, theme::RED);
+        assert_eq!(buf[(x + 2, y)].fg, theme::hl());
         for c in "zzz".chars() {
             a.handle_key(key(KeyCode::Char(c)), now);
         }
-        assert!(row(&render(&mut a, 120, 30), 1).contains("needlezzz · not found"));
+        assert!(row(&render(&mut a, 120, 30), BOXES).contains("needlezzz · not found"));
     }
 
     #[test]
@@ -2187,7 +2456,7 @@ mod tests {
         let word = &buf[(x + 10, y)];
         assert_eq!(
             (word.fg, word.bg),
-            (theme::RED, green),
+            (theme::hl(), green),
             "red on delta's colour"
         );
     }
@@ -2216,15 +2485,18 @@ mod tests {
         let (mut a, now) = versions_found("needle");
         let buf = render(&mut a, 120, 30);
         assert!(
-            row(&buf, 29).contains("Search in versions › needle"),
+            input_row(&buf).contains("Search in versions › needle"),
             "{:?}",
-            row(&buf, 29)
+            input_row(&buf)
         );
-        assert!(!row(&buf, 29).contains("regex"), "the default goes unsaid");
+        assert!(
+            !input_row(&buf).contains("regex"),
+            "the default goes unsaid"
+        );
         let r = "0123456 src/a.c:9:the Needle here";
-        assert_eq!(fg_at(&buf, r, 22), theme::RED, "N of Needle, case aside");
-        assert_ne!(fg_at(&buf, r, 18), theme::RED, "t of the");
-        assert!(row(&buf, 0).contains("Esc back"), "{:?}", row(&buf, 0));
+        assert_eq!(fg_at(&buf, r, 22), theme::hl(), "N of Needle, case aside");
+        assert_ne!(fg_at(&buf, r, 18), theme::hl(), "t of the");
+        assert!(row(&buf, BAR).contains("Esc back"), "{:?}", row(&buf, BAR));
         a.on_versions(vec![crate::versions::VersionRow {
             hash: "0123456789abcdef0123456789abcdef01234567".into(),
             date: "2026-10-17".into(),
@@ -2250,7 +2522,7 @@ mod tests {
             "hash, date, author, branch, subject"
         );
         let (mut b, now) = versions_found("");
-        let input = row(&render(&mut b, 120, 30), 29);
+        let input = input_row(&render(&mut b, 120, 30));
         assert!(
             input.contains("Search in versions › type a pattern"),
             "{input:?}"
@@ -2261,7 +2533,7 @@ mod tests {
     #[test]
     fn ctrl_p_shows_the_files_and_says_how_many_are_chosen() {
         let (mut a, now) = app_with_preview(Tab::Content);
-        let top = row(&render(&mut a, 200, 30), 0);
+        let top = row(&render(&mut a, 200, 30), BAR);
         assert!(top.contains("^P files"), "{top:?}");
         feed(&mut a, &["src/a.c", "docs/b.md"]);
         a.handle_key(ctrl('p'), now);
@@ -2273,7 +2545,7 @@ mod tests {
         a.popup = Some(2);
         a.handle_key(key(KeyCode::Char(' ')), now);
         a.handle_key(key(KeyCode::Esc), now);
-        let input = row(&render(&mut a, 120, 30), 29);
+        let input = input_row(&render(&mut a, 120, 30));
         assert!(input.contains("1 file chosen"), "{input:?}");
     }
 
@@ -2297,7 +2569,7 @@ mod tests {
                 .map(|y| &buf[(bar.x, y)])
                 .find(|c| c.symbol() == "█")
                 .expect("a full block for the thumb");
-            assert_eq!(thumb.fg, theme::MAUVE, "the accent, not a dim line");
+            assert_eq!(thumb.fg, theme::prompt(), "the accent, not a dim line");
         }
     }
 
@@ -2315,22 +2587,30 @@ mod tests {
         let buf = render(&mut a, 120, 30);
         let r = "0123456 v7.8.5~3 src/a.c:9:the Needle here";
         let (x, y) = find(&buf, r).expect(r);
-        assert_eq!(buf[(x + 8, y)].fg, theme::YELLOW, "the name, as a tag");
-        assert_eq!(buf[(x + 31, y)].fg, theme::RED, "N of Needle, still marked");
-        assert_ne!(buf[(x + 27, y)].fg, theme::RED, "t of the");
+        assert_eq!(
+            buf[(x + 8, y)].fg,
+            theme::path_slash(),
+            "the name, as a tag"
+        );
+        assert_eq!(
+            buf[(x + 31, y)].fg,
+            theme::hl(),
+            "N of Needle, still marked"
+        );
+        assert_ne!(buf[(x + 27, y)].fg, theme::hl(), "t of the");
     }
 
     #[test]
     fn git_names_ctrl_alt_f_for_versions() {
         let (mut a, _) = app(Tab::Git);
-        let top = row(&render(&mut a, 200, 24), 0);
+        let top = row(&render(&mut a, 200, 24), BAR);
         assert!(top.contains("^Shift-Alt-F search in versions"), "{top:?}");
     }
 
     #[test]
     fn git_names_ctrl_f() {
         let (mut a, _) = app(Tab::Git);
-        let top = row(&render(&mut a, 200, 24), 0);
+        let top = row(&render(&mut a, 200, 24), BAR);
         assert!(top.contains("^F find"), "{top:?}");
     }
 
@@ -2360,28 +2640,28 @@ mod tests {
         let (x1, y1) = find(&buf, "two x X").unwrap();
         let underlined = |c: &ratatui::buffer::Cell| c.modifier.contains(Modifier::UNDERLINED);
         let current = &buf[(x0, y0)];
-        assert_eq!(current.fg, theme::RED, "the current one red");
+        assert_eq!(current.fg, theme::hl(), "the current one red");
         assert!(underlined(current) && current.modifier.contains(Modifier::BOLD));
         for x in [x1 + 4, x1 + 6] {
             let c = &buf[(x, y1)];
-            assert_eq!(c.fg, theme::RED, "every other one red, case aside");
+            assert_eq!(c.fg, theme::hl(), "every other one red, case aside");
             assert!(!underlined(c));
         }
         for c in [&buf[(x0, y0)], &buf[(x0 + 2, y0)], &buf[(x1 + 4, y1)]] {
             assert!(
-                c.bg != theme::RED && c.bg != theme::SURFACE,
+                c.bg != theme::hl() && c.bg != theme::bg_sel(),
                 "no zone, no band"
             );
         }
         assert_ne!(
             buf[(x1, y1)].fg,
-            theme::RED,
+            theme::hl(),
             "the rest of the line as it was"
         );
         a.handle_key(key(KeyCode::Enter), now);
         let buf = render(&mut a, 120, 30);
         assert!(underlined(&buf[(x1 + 4, y1)]), "Enter: the next is current");
-        assert!(!underlined(&buf[(x0, y0)]) && buf[(x0, y0)].fg == theme::RED);
+        assert!(!underlined(&buf[(x0, y0)]) && buf[(x0, y0)].fg == theme::hl());
     }
 
     #[test]
@@ -2389,7 +2669,7 @@ mod tests {
         let green = Style::new().bg(ratatui::style::Color::Rgb(0, 80, 0));
         let line = Line::from(vec![
             Span::styled("+ ne", green),
-            Span::styled("edle b", green.fg(theme::YELLOW)),
+            Span::styled("edle b", green.fg(theme::path_slash())),
         ]);
         let (mut a, _) = finding_in(vec![Line::raw("ctx"), line], "needle");
         let buf = render(&mut a, 120, 30);
@@ -2397,13 +2677,13 @@ mod tests {
         let green = ratatui::style::Color::Rgb(0, 80, 0);
         for dx in 2..8 {
             let c = &buf[(x + dx, y)];
-            assert_eq!((c.fg, c.bg), (theme::RED, green), "column {dx}");
+            assert_eq!((c.fg, c.bg), (theme::hl(), green), "column {dx}");
             assert!(c.modifier.contains(Modifier::UNDERLINED), "column {dx}");
         }
         assert_eq!(buf[(x, y)].bg, green, "no band before it");
         assert_eq!(
             (buf[(x + 9, y)].bg, buf[(x + 9, y)].fg),
-            (green, theme::YELLOW),
+            (green, theme::path_slash()),
             "after it, the part's own colours"
         );
     }
@@ -2412,14 +2692,14 @@ mod tests {
     fn the_preview_names_what_is_found_and_how_often_at_its_top_right() {
         let lines = vec![Line::raw("a b a"), Line::raw("a")];
         let (mut a, now) = finding_in(lines, "a");
-        let top = |a: &mut App| row(&render(a, 120, 30), 1);
+        let top = |a: &mut App| row(&render(a, 120, 30), BOXES);
         assert!(
             top(&mut a).trim_end().ends_with("a · 1/3 ╮"),
             "{:?}",
             top(&mut a)
         );
         assert!(
-            !row(&render(&mut a, 120, 30), 29).contains("1/3"),
+            !input_row(&render(&mut a, 120, 30)).contains("1/3"),
             "the count is not on the input line too"
         );
         a.handle_key(key(KeyCode::Enter), now);
@@ -2435,8 +2715,9 @@ mod tests {
         a.handle_key(key(KeyCode::Char('(')), now);
         let buf = render(&mut a, 120, 30);
         let (x, y) = find(&buf, "a( · bad regex").expect("bad regex");
-        assert_eq!(y, 1, "on the preview's border");
-        assert_eq!(buf[(x + 5, y)].fg, theme::RED);
+        assert_eq!(y, BOXES, "on the preview's border");
+        assert_eq!(buf[(x, y)].fg, theme::hl(), "what is looked for");
+        assert_eq!(buf[(x + 5, y)].fg, theme::error(), "that it is wrong");
     }
 
     /// Content with a row and its preview, which found `count` matches of "interest".
@@ -2457,7 +2738,7 @@ mod tests {
 
     #[test]
     fn content_names_the_pattern_and_its_count_at_the_top_right() {
-        let top = |a: &mut App| row(&render(a, 120, 30), 1).trim_end().to_string();
+        let top = |a: &mut App| row(&render(a, 120, 30), BOXES).trim_end().to_string();
         let (mut a, now) = content_found(Some(12));
         assert!(
             top(&mut a).ends_with(" interest · 12 matches ╮"),
@@ -2487,7 +2768,7 @@ mod tests {
         );
         let buf = render(&mut a, 120, 30);
         let (x, y) = find(&buf, "12 matches").unwrap();
-        assert_eq!(buf[(x, y)].fg, theme::PEACH);
+        assert_eq!(buf[(x, y)].fg, theme::header());
     }
 
     #[test]
@@ -2495,7 +2776,7 @@ mod tests {
         let (mut a, _) = finding_in(vec![Line::raw("a")], "a");
         let f = a.preview_find.as_mut().unwrap();
         (f.hits, f.current, f.slow) = (Vec::new(), None, true);
-        let top = row(&render(&mut a, 120, 30), 1);
+        let top = row(&render(&mut a, 120, 30), BOXES);
         assert!(top.contains(" a · too slow "), "{top:?}");
     }
 
@@ -2509,12 +2790,12 @@ mod tests {
         for _ in 0..5 {
             a.handle_key(alt(KeyCode::Down), now);
         }
-        let top = row(&render(&mut a, 120, 30), 1);
+        let top = row(&render(&mut a, 120, 30), BOXES);
         assert!(a.preview_scroll > 20, "scrolled: {}", a.preview_scroll);
         assert!(top.contains(&format!(" {pattern} · ")), "as typed: {top:?}");
         let (mut a, _) = finding_in(vec![Line::raw("a")], "");
         assert!(
-            !row(&render(&mut a, 120, 30), 1).contains(" · "),
+            !row(&render(&mut a, 120, 30), BOXES).contains(" · "),
             "nothing typed, nothing said"
         );
     }
@@ -2525,7 +2806,7 @@ mod tests {
         a.root = std::path::PathBuf::from(
             "/a/very/long/folder/name/that/fills/the/whole/border/and/more",
         );
-        let top = row(&render(&mut a, 60, 30), 1);
+        let top = row(&render(&mut a, 60, 30), BOXES);
         assert!(top.contains("needle · 1/1"), "{top:?}");
     }
 
@@ -2533,11 +2814,15 @@ mod tests {
     fn ctrl_s_while_finding_shows_finds_options() {
         let (mut a, now) = finding_in(vec![Line::raw("a")], "");
         let buf = render(&mut a, 120, 30);
-        assert!(row(&buf, 29).contains("^S options"), "{:?}", row(&buf, 29));
         assert!(
-            !row(&buf, 29).contains("all branches"),
+            input_row(&buf).contains("^S options"),
+            "{:?}",
+            input_row(&buf)
+        );
+        assert!(
+            !input_row(&buf).contains("all branches"),
             "the Git tab's options are not Find's: {:?}",
-            row(&buf, 29)
+            input_row(&buf)
         );
         a.handle_key(ctrl('s'), now);
         let buf = render(&mut a, 120, 30);
@@ -2545,7 +2830,7 @@ mod tests {
         assert!(find(&buf, "Regular expression").is_some());
         a.handle_key(key(KeyCode::Char(' ')), now);
         a.handle_key(key(KeyCode::Esc), now);
-        let input = row(&render(&mut a, 120, 30), 29);
+        let input = input_row(&render(&mut a, 120, 30));
         assert!(input.contains("whole word"), "{input:?}");
     }
 
@@ -2557,13 +2842,13 @@ mod tests {
         a.result_filter = Some("words".into());
         a.handle_key(ctrl('f'), now);
         assert!(a.preview_find.is_some());
-        let input = row(&render(&mut a, 120, 30), 29);
+        let input = input_row(&render(&mut a, 120, 30));
         assert!(
             input.contains("Find in preview › type to find") && !input.contains("filter"),
             "{input:?}"
         );
         a.handle_key(key(KeyCode::Esc), now);
-        let input = row(&render(&mut a, 120, 30), 29);
+        let input = input_row(&render(&mut a, 120, 30));
         assert!(
             input.contains("Content filter › words · pattern: needle"),
             "back: {input:?}"
@@ -2572,7 +2857,7 @@ mod tests {
 
     #[test]
     fn marks_split_the_parts_they_cross() {
-        let red = Style::new().fg(theme::RED);
+        let red = Style::new().fg(theme::hl());
         let line = Line::from(vec![Span::raw("ab"), Span::styled("cd", red)]);
         let marked = mark_matches(line, &[(1..3, false)]);
         let parts: Vec<(&str, Style)> = marked
@@ -2580,7 +2865,7 @@ mod tests {
             .iter()
             .map(|s| (s.content.as_ref(), s.style))
             .collect();
-        let other = Style::new().fg(theme::RED);
+        let other = Style::new().fg(theme::hl());
         assert_eq!(
             parts,
             [
@@ -2599,17 +2884,20 @@ mod tests {
         let l = &a.layout;
         assert_eq!(l.tabs.len(), 6);
         for (tab, r) in &l.tabs {
-            assert_eq!(r.y, 0);
-            let text: String = (r.x..r.x + r.width).map(|x| buf[(x, 0)].symbol()).collect();
+            assert_eq!(r.y, BAR);
+            let text: String = (r.x..r.x + r.width)
+                .map(|x| buf[(x, BAR)].symbol())
+                .collect();
             assert_eq!(text.trim(), tab.title());
         }
-        assert_eq!(l.config.x + l.config.width, 120);
+        assert_eq!((l.config.right(), l.config.y), (120, BAR));
         assert!(l.preview.height > 0 && l.list.height > 0);
         assert!(
-            l.preview.y + l.preview.height < l.list.y,
-            "preview above the list, borders between"
+            l.list.right() < l.preview.x && l.preview.x >= 60,
+            "the preview right of the list, borders between"
         );
-        assert_eq!(l.list.x, 1);
+        assert_eq!((l.list.x, l.list.y), (1, BOXES + 1));
+        assert_eq!(l.list.bottom() + 1, 30 - 3, "the prompt box under the list");
         assert_eq!(l.popup, Rect::default());
         assert!(l.popup_rows.is_empty());
     }
@@ -2633,7 +2921,8 @@ mod tests {
         a.handle_key(crate::app::tests::ctrl_alt('f'), now);
         let mut t = Terminal::new(TestBackend::new(120, 24)).unwrap();
         t.draw(|f| draw(f, &mut a)).unwrap();
-        let input = row(t.backend().buffer(), 23);
+        // the whole row: the cursor counts from the screen's edge
+        let input = row(t.backend().buffer(), 24 - 2);
         assert!(input.contains("Content filter › type words"), "{input:?}");
         assert!(
             !input.contains("type a pattern"),
@@ -2650,7 +2939,7 @@ mod tests {
             a.handle_key(key(KeyCode::Char(c)), now);
         }
         t.draw(|f| draw(f, &mut a)).unwrap();
-        let input = row(t.backend().buffer(), 23);
+        let input = row(t.backend().buffer(), 24 - 2);
         assert!(
             input.contains("Content filter › src · pattern: needle"),
             "{input:?}"
@@ -2670,8 +2959,8 @@ mod tests {
         let mut t = Terminal::new(TestBackend::new(80, 24)).unwrap();
         t.draw(|f| draw(f, &mut a)).unwrap();
         let pos = t.get_cursor_position().unwrap();
-        let input = row(t.backend().buffer(), 23);
-        assert_eq!(pos.y, 23);
+        let input = row(t.backend().buffer(), 24 - 2);
+        assert_eq!(pos.y, 24 - 2, "in the prompt box");
         assert_eq!(input.chars().nth(pos.x as usize - 1), Some('a'));
         let _ = Instant::now();
     }

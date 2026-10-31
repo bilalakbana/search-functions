@@ -258,17 +258,19 @@ pub fn text() -> Text<'static> {
     let mut lines = vec![
         Line::from(Span::styled(
             "sf — the search functions in one window",
-            Style::new().fg(theme::MAUVE).add_modifier(Modifier::BOLD),
+            Style::new()
+                .fg(theme::prompt())
+                .add_modifier(Modifier::BOLD),
         )),
         Line::default(),
     ];
     heading(&mut lines, "Tabs", "Tab / Shift-Tab or a click");
     for &(tab, lists, engine, typing) in TABS {
         lines.push(Line::from(vec![
-            Span::styled(format!("  {tab:<9}"), style(theme::SUB)),
-            Span::styled(format!("{lists:<45}"), style(theme::TEXT)),
-            Span::styled(format!("{engine:<12}"), style(theme::GREEN)),
-            Span::styled(format!("typing {typing}"), style(theme::DIM)),
+            Span::styled(format!("  {tab:<9}"), style(theme::info())),
+            Span::styled(format!("{lists:<45}"), style(theme::fg())),
+            Span::styled(format!("{engine:<12}"), style(theme::path_name())),
+            Span::styled(format!("typing {typing}"), style(theme::info())),
         ]));
     }
     table(
@@ -277,7 +279,7 @@ pub fn text() -> Text<'static> {
         "for the selected row",
         KEYS,
         17,
-        theme::SUB,
+        theme::info(),
     );
     table(
         &mut lines,
@@ -285,7 +287,7 @@ pub fn text() -> Text<'static> {
         "Ctrl-S; Space or a click, ←→ across its columns",
         OPTIONS,
         24,
-        theme::SUB,
+        theme::info(),
     );
     table(
         &mut lines,
@@ -293,7 +295,7 @@ pub fn text() -> Text<'static> {
         "Content, Deep: ugrep, smart case",
         PATTERNS,
         22,
-        theme::PEACH,
+        theme::header(),
     );
     table(
         &mut lines,
@@ -301,7 +303,7 @@ pub fn text() -> Text<'static> {
         "with All words on a line / in the file",
         WORDS,
         22,
-        theme::PEACH,
+        theme::header(),
     );
     table(
         &mut lines,
@@ -309,7 +311,7 @@ pub fn text() -> Text<'static> {
         "Files, Folders, Git, Ctrl-Alt-F: as fzf -e",
         FILTERS,
         22,
-        theme::PEACH,
+        theme::header(),
     );
     table(
         &mut lines,
@@ -317,11 +319,11 @@ pub fn text() -> Text<'static> {
         "sf --help for the rest",
         EXAMPLES,
         46,
-        theme::GREEN,
+        theme::path_name(),
     );
     lines.push(Line::from(Span::styled(
         "  Options that change what an engine prints (-l, -c, --color, --json, …) are refused.",
-        style(theme::DIM),
+        style(theme::info()),
     )));
     table(
         &mut lines,
@@ -329,7 +331,7 @@ pub fn text() -> Text<'static> {
         "sf doctor: which ones, where",
         ENGINES,
         12,
-        theme::GREEN,
+        theme::path_name(),
     );
     Text::from(lines)
 }
@@ -343,9 +345,11 @@ fn heading(lines: &mut Vec<Line<'static>>, title: &str, note: &str) {
     lines.push(Line::from(vec![
         Span::styled(
             title.to_string(),
-            Style::new().fg(theme::MAUVE).add_modifier(Modifier::BOLD),
+            Style::new()
+                .fg(theme::header())
+                .add_modifier(Modifier::BOLD),
         ),
-        Span::styled(format!("   {note}"), style(theme::DIM)),
+        Span::styled(format!("   {note}"), style(theme::info())),
     ]));
 }
 
@@ -361,7 +365,7 @@ fn table(
     for &(what, does) in rows {
         lines.push(Line::from(vec![
             Span::styled(format!("  {what:<width$} "), style(left)),
-            Span::styled(does.to_string(), style(theme::TEXT)),
+            Span::styled(does.to_string(), style(theme::fg())),
         ]));
     }
 }

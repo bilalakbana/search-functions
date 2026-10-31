@@ -61,8 +61,8 @@ The search functions in one window: Files, Content (search inside text files), D
 binaries, archives, with Documents PDF and Office files), Folders, Git and Help (the manual, with
 examples). Tab / Shift-Tab or a click switch the tab; ⚙ Config (or Ctrl-S) holds the tab's options and,
 in Files, Content and Deep, the file types of the list to turn off and on; Esc quits. The keys for the
-selected item are named in the middle of the tab bar. Options are kept in $XDG_CONFIG_HOME/sf/config.toml
-(~/.config/sf/config.toml).
+selected item are named at the right of the tab bar. Options are kept in $XDG_CONFIG_HOME/sf/config.toml
+(~/.config/sf/config.toml); its [theme] table sets the colours (256-colour indexes: fg, bg, hl, border, …).
 
 QUERY starts the tab with it: what filters the list in Files, Folders and Git, the pattern in Content and
 Deep, where typing then filters the files found by their names (Ctrl-Alt-F; Esc edits the pattern, as
@@ -308,6 +308,7 @@ fn run(tab: Tab, query: String, extra: Vec<OsString>, start: Start) -> anyhow::R
     let engines = engines::discover(&env.platform.path);
     let config_path = config::default_path();
     let (options, config_error) = load_options();
+    theme::init(options.theme);
     let mut app = App::new(root, tab, options, engines, config_error, Instant::now());
     app.tmux = env.platform.tmux;
     // a window of its own (Ctrl-T, the git keys in tmux) keeps its name: "infile", "diff", ...

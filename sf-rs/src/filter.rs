@@ -138,7 +138,7 @@ impl Query {
             .all(|set| set.iter().any(|t| t.found(hay) != t.left_out))
     }
 
-    /// The terms an item shows (the red marks): none left out.
+    /// The terms an item shows (the hl marks): none left out.
     pub fn shown_terms(&self) -> impl Iterator<Item = &Term> {
         self.sets.iter().flatten().filter(|t| !t.left_out)
     }

@@ -63,8 +63,52 @@ expect_log() { local i; for i in $(seq 50); do grep -qF -- "$2" "$LOG" && { ok "
 keys() { tm send-keys -t e2e "$@"; }
 type_() { tm send-keys -t e2e -l "$1"; }
 shot() { tm capture-pane -e -p -t e2e > "$SHOTS/$1.ansi"; }
-# red_on TEXT: TEXT is drawn in Catppuccin red somewhere on the screen (a highlighted match)
-red_on() { local i; for i in $(seq 30); do tm capture-pane -e -p -t e2e | grep -qF -- "237;135;150m$1" && return 0; sleep 0.1; done; return 1; }
+# red_on TEXT: TEXT is drawn in the theme's hl colour (256-colour 5 by default) somewhere on the screen
+# (a highlighted match); tmux writes each colour as its own sequence, so the text follows it
+red_on() { local i; for i in $(seq 30); do tm capture-pane -e -p -t e2e | grep -qF -- "38;5;5m$1" && return 0; sleep 0.1; done; return 1; }
+# border_in N: a border glyph is drawn in the 256-colour N (other sequences may come between)
+ESC=$'\e'
+border_in() { local i; for i in $(seq 30); do tm capture-pane -e -p -t e2e | grep -qE -- "38;5;$1m($ESC\[[0-9;]*m)*(─|╭|╮|╰|╯|│)" && return 0; sleep 0.1; done; return 1; }
+# root_of DIR: the folder as sf's top border names it, ~ for the home folder
+root_of() { if [[ $1 == "$HOME" ]]; then echo '~'; elif [[ $1 == "$HOME"/* ]]; then echo "~/${1#"$HOME"/}"; else echo "$1"; fi; }
+# layout_ok ROOT PREVIEW [TEXT]: the screen is fzf's --style full (lines from 0, widths in characters):
+# the top border only ─ with " ROOT " in its middle (±1; cut at the right when wider than the pane);
+# PREVIEW=yes: the list and the preview side by side from line 2 to h-4, the preview's left edge at
+# width/2 and TEXT right of it; PREVIEW=no: the list alone across the width; then the prompt box, the
+# last three lines across the width, its input line with > and N/M. Says what is wrong in $why.
+layout_ok() {
+    local LC_ALL=C.UTF-8 root=$1 preview=$2 text=${3:-} w h half want box bottom before l found=
+    w=$(tm display-message -p -t e2e '#{pane_width}') h=$(tm display-message -p -t e2e '#{pane_height}')
+    half=$((w / 2)) why="${w}x$h: "
+    mapfile -t L < <(pane)
+    want=" $root "
+    if (( ${#want} >= w )); then
+        [[ ${L[0]} == "${want:0:w}" ]] || { why+="top border not the cut root: ${L[0]}"; return 1; }
+    else
+        [[ ${L[0]} =~ ^(─+)"$want"(─+)$ ]] || { why+="top border: ${L[0]}"; return 1; }
+        (( ${#BASH_REMATCH[1]} - ${#BASH_REMATCH[2]} <= 1 && ${#BASH_REMATCH[2]} - ${#BASH_REMATCH[1]} <= 1 )) \
+            || { why+="root not in the middle: ${#BASH_REMATCH[1]} vs ${#BASH_REMATCH[2]}"; return 1; }
+    fi
+    box=${L[2]} bottom=${L[h-4]}
+    if [[ $preview == yes ]]; then
+        before=${box%%╮╭*}
+        [[ $box == *╮╭* && ${#before} -eq $((half - 1)) ]] || { why+="no ╮╭ at column $((half - 1)): $box"; return 1; }
+        before=${bottom%%╯╰*}
+        [[ $bottom == *╯╰* && ${#before} -eq $((half - 1)) ]] || { why+="the boxes do not end at line h-4: $bottom"; return 1; }
+        if [[ -n $text ]]; then
+            for l in "${L[@]:3:h-7}"; do [[ $l == *"$text"* ]] && { found=$l; break; }; done
+            before=${found%%"$text"*}
+            [[ -n $found ]] && (( ${#before} > half )) || { why+="'$text' not right of the preview's left edge"; return 1; }
+        fi
+    else
+        [[ $box == ╭*╮ && $box != *╮╭* && ${#box} -eq $w ]] || { why+="the list not alone across the width: $box"; return 1; }
+        [[ $bottom == ╰*╯ && $bottom != *╯╰* ]] || { why+="the list does not end at line h-4: $bottom"; return 1; }
+    fi
+    [[ ${L[h-3]} =~ ^╭─+╮$ && ${#L[h-3]} -eq $w ]] || { why+="prompt box top: ${L[h-3]}"; return 1; }
+    [[ ${L[h-2]} =~ ^"│ > ".*\ [0-9]+/[0-9]+(\ …)?\ │$ && ${#L[h-2]} -eq $w ]] || { why+="input line: ${L[h-2]}"; return 1; }
+    [[ ${L[h-1]} =~ ^╰─+╯$ && ${#L[h-1]} -eq $w ]] || { why+="prompt box bottom: ${L[h-1]}"; return 1; }
+}
+layout() { local name=$1 i; shift; for i in $(seq 30); do layout_ok "$@" && { ok "$name"; return; }; sleep 0.1; done; bad "$name ($why)"; }
 clear_query() { keys C-M-h; }
 # back_to_sf: a terminal action opened a tmux window (it has the focus); wait until its stub ends
 back_to_sf() {
@@ -92,13 +136,23 @@ keys "'$SF'" Enter
 expect 'start: tab bar with Config'        'Files +Content +Deep +Folders +Git .*⚙ Config'
 expect "start: $n_files files listed"      "$n_files/$n_files"
 expect 'start: Files shows bat with numbers, no Ctrl-L' '│ *1 needle ignored'
+root=$(root_of "$T")
+layout 'look: top border, list and preview side by side, prompt box' "$root" yes '1 needle ignored'
+border_in 240 && ok 'theme: the default border is 38;5;240' || bad 'theme: no border in 38;5;240'
 keys C-l
 expect_not 'files: Ctrl-L hides the preview' '│ *1 needle ignored'
+layout 'look: no preview, the list across the width, the prompt box stays' "$root" no
 keys C-l
 expect 'files: Ctrl-L shows it again'      '│ *1 needle ignored'
+layout 'look: the preview back on the right half' "$root" yes '1 needle ignored'
 expect 'start: footer'                     'Enter open · \^S options · \^O nvim'
 [[ $(tm display-message -p -t e2e '#W') == search ]] && ok 'tmux: window named search' || bad 'tmux: window not renamed'
 shot files
+tm resize-window -t e2e -x 90 -y 24
+layout 'narrow: the look at 90x24' "$root" yes '1 needle ignored'
+shot narrow
+tm resize-window -t e2e -x 160 -y 40
+layout 'narrow: back at 160x40' "$root" yes
 keys C-s
 expect 'types: under the options'          '── File types ──'
 keys Down Down Down Down Down Space
@@ -448,7 +502,8 @@ printf 'changed by e2e\n' >> "$T/empty.txt"
 keys "clear; '$SF' files empty" Enter
 expect 'views: sf starts'                  'Files › empty .* 1/'
 keys C-g
-expect 'views: Ctrl-G shows the change'    'changed by e2e'
+# delta's numbered line: only the loaded view has it (Files' preview shows the line too, as bat's)
+expect 'views: Ctrl-G shows the change'    '│changed by e2e'
 shot view_diff
 keys /
 type_ 'changed'
@@ -508,6 +563,17 @@ keys Escape
 expect 'views: back in Git'                'Git › '
 keys Escape
 expect 'views: done'                       '^READY>\s*$'
+
+# the palette from a config of its own: [theme] border = 99 draws every border in 256-colour 99
+mkdir -p "$W/xdg-theme/sf" && printf '[theme]\nborder = 99\n' > "$W/xdg-theme/sf/config.toml"
+keys "clear; cd '$T' && XDG_CONFIG_HOME='$W/xdg-theme' '$SF'" Enter
+expect 'theme: sf starts with that config' 'Files › type to filter'
+border_in 99 && ok 'theme: [theme] border = 99 gives 38;5;99' || bad 'theme: no border in 38;5;99'
+tm capture-pane -e -p -t e2e | grep -qF '38;5;240m' && bad 'theme: the default 240 still drawn' || ok 'theme: no 240 left'
+shot theme
+keys Escape
+expect 'theme: quit'                       '^READY>\s*$'
+[[ $(cat "$W/xdg-theme/sf/config.toml") == $'[theme]\nborder = 99' ]] && ok 'theme: its config untouched' || bad 'theme: its config changed'
 
 echo "pass=$PASS fail=$FAIL (screens in $SHOTS)"
 tm kill-server

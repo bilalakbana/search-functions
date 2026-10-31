@@ -527,7 +527,9 @@ fn read_file(path: &Path) -> io::Result<Vec<u8>> {
 }
 
 fn dim(s: &str) -> Text<'static> {
-    let style = Style::new().fg(theme::DIM).add_modifier(Modifier::ITALIC);
+    let style = Style::new()
+        .fg(theme::info())
+        .add_modifier(Modifier::ITALIC);
     Text::from(
         s.lines()
             .map(|l| Line::from(Span::styled(printable(l), style)))
@@ -536,7 +538,7 @@ fn dim(s: &str) -> Text<'static> {
 }
 
 fn red_lines(s: &str) -> Text<'static> {
-    let style = Style::new().fg(theme::RED);
+    let style = Style::new().fg(theme::error());
     Text::from(
         s.lines()
             .map(str::trim)
@@ -607,12 +609,14 @@ fn numbered_blocks(stdout: &[u8], file: &[u8]) -> Vec<Line<'static>> {
         number += count;
         lines.push(Line::from(Span::styled(
             label,
-            Style::new().fg(theme::GREEN).add_modifier(Modifier::BOLD),
+            Style::new()
+                .fg(theme::header())
+                .add_modifier(Modifier::BOLD),
         )));
         let numbered = |n: usize, mark: &'static str| {
             vec![
-                Span::styled(format!("{n:>width$}"), Style::new().fg(theme::DIM)),
-                Span::styled(mark, Style::new().fg(theme::FAINT)),
+                Span::styled(format!("{n:>width$}"), Style::new().fg(theme::info())),
+                Span::styled(mark, Style::new().fg(theme::border())),
             ]
         };
         for n in line.saturating_sub(AROUND).max(1)..line {
@@ -647,7 +651,9 @@ fn numbered_lines(text: Text<'static>) -> Vec<Line<'static>> {
         }
         lines.push(Line::from(Span::styled(
             format!("Match #{}", i + 1),
-            Style::new().fg(theme::GREEN).add_modifier(Modifier::BOLD),
+            Style::new()
+                .fg(theme::header())
+                .add_modifier(Modifier::BOLD),
         )));
         lines.push(line);
     }
@@ -662,11 +668,17 @@ const MAX_BLOCKS: usize = 300;
 const MAX_LINE: usize = 1000;
 
 fn rule() -> Line<'static> {
-    Line::from(Span::styled("─".repeat(40), Style::new().fg(theme::FAINT)))
+    Line::from(Span::styled(
+        "─".repeat(40),
+        Style::new().fg(theme::border()),
+    ))
 }
 
 fn dim_line(text: &str) -> Line<'static> {
-    Line::from(Span::styled(text.to_string(), Style::new().fg(theme::DIM)))
+    Line::from(Span::styled(
+        text.to_string(),
+        Style::new().fg(theme::info()),
+    ))
 }
 
 /// A line of the file as text: tabs as spaces, no carriage return at its end, other control
@@ -680,7 +692,7 @@ fn shown_line(bytes: &[u8]) -> String {
     }
 }
 
-/// A matching line's text with its matches (between MATCH_START and MATCH_END) red.
+/// A matching line's text with its matches (between MATCH_START and MATCH_END) in hl.
 fn marked_spans(text: &[u8]) -> Vec<Span<'static>> {
     let mut spans = Vec::new();
     let (mut in_match, mut piece) = (false, Vec::new());
@@ -689,9 +701,9 @@ fn marked_spans(text: &[u8]) -> Vec<Span<'static>> {
             return;
         }
         let style = if in_match {
-            Style::new().fg(theme::RED).add_modifier(Modifier::BOLD)
+            Style::new().fg(theme::hl()).add_modifier(Modifier::BOLD)
         } else {
-            Style::new().fg(theme::TEXT)
+            Style::new().fg(theme::fg())
         };
         spans.push(Span::styled(shown_line(piece), style));
         piece.clear();
@@ -776,7 +788,7 @@ mod tests {
             .spans
             .iter()
             .chain(&lines[9].spans)
-            .filter(|s| s.content == "needle" && s.style.fg == Some(theme::RED))
+            .filter(|s| s.content == "needle" && s.style.fg == Some(theme::hl()))
             .count();
         assert_eq!(red, 2, "both matches of line 5 are red, nothing else");
     }
@@ -898,7 +910,7 @@ mod tests {
     fn failing_command_shows_its_message() {
         let t = one(PreviewPlan::Run(sh("echo out; echo bad >&2; exit 1")));
         assert_eq!(plain(&t), "out\nbad");
-        assert_eq!(t.lines[1].spans[0].style.fg, Some(theme::RED));
+        assert_eq!(t.lines[1].spans[0].style.fg, Some(theme::error()));
     }
 
     #[test]

@@ -339,6 +339,9 @@ pub struct Options {
     pub versions: VersionsOpts,
     pub folders: FoldersOpts,
     pub git: GitOpts,
+    /// `[theme]`: the palette; written only when it is not the default
+    #[serde(skip_serializing_if = "crate::theme::Theme::is_default")]
+    pub theme: crate::theme::Theme,
 }
 
 impl Options {

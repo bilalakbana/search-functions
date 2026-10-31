@@ -1062,8 +1062,10 @@ impl App {
         if !wait.noted && waited >= PREVIEW_NOTE {
             wait.noted = true;
             if let Some(note) = note {
-                self.preview =
-                    Text::from(Line::from(Span::styled(note, Style::new().fg(theme::DIM))));
+                self.preview = Text::from(Line::from(Span::styled(
+                    note,
+                    Style::new().fg(theme::info()),
+                )));
                 self.preview_scroll = 0;
             }
         }
@@ -1482,7 +1484,7 @@ impl App {
         v.text = if msg.text.lines.is_empty() {
             Text::styled(
                 v.kind.empty_note(),
-                ratatui::style::Style::new().fg(crate::theme::DIM),
+                ratatui::style::Style::new().fg(crate::theme::info()),
             )
         } else {
             msg.text

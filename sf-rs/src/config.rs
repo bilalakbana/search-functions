@@ -100,6 +100,42 @@ mod tests {
     }
 
     #[test]
+    fn a_partial_theme_keeps_the_other_defaults() {
+        let path = temp_dir("config_theme_partial").join("config.toml");
+        fs::write(&path, "[theme]\nborder = 99\nhl = 9\n").unwrap();
+        let theme = load(&path).unwrap().theme;
+        let want = crate::theme::Theme {
+            border: 99,
+            hl: 9,
+            ..Default::default()
+        };
+        assert_eq!(theme, want);
+    }
+
+    #[test]
+    fn a_theme_value_that_is_no_colour_is_an_error() {
+        for bad in ["border = 256", "border = -1", "border = \"red\""] {
+            let path = temp_dir("config_theme_invalid").join("config.toml");
+            fs::write(&path, format!("[theme]\n{bad}\n")).unwrap();
+            let err = load(&path).unwrap_err();
+            assert!(err.contains("(line 2)"), "{bad}: {err}");
+        }
+    }
+
+    #[test]
+    fn saving_keeps_a_custom_theme_and_leaves_out_the_default() {
+        let path = temp_dir("config_theme_round_trip").join("config.toml");
+        save(&path, &Options::default()).unwrap();
+        assert!(!fs::read_to_string(&path).unwrap().contains("[theme]"));
+        let mut o = Options::default();
+        o.theme.border = 99;
+        o.toggle(Tab::Files, Opt::Hidden);
+        save(&path, &o).unwrap();
+        assert!(fs::read_to_string(&path).unwrap().contains("[theme]"));
+        assert_eq!(load(&path).unwrap(), o);
+    }
+
+    #[test]
     fn partial_file_fills_defaults() {
         let path = temp_dir("config_partial").join("config.toml");
         fs::write(&path, "[search]\nmatching_lines = true\n").unwrap();

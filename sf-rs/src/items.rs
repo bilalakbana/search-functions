@@ -97,7 +97,7 @@ impl Item {
                 self.key.as_bytes(),
             )))),
             Look::Match { member, text, cut } => {
-                let faint = Style::new().fg(theme::FAINT);
+                let faint = Style::new().fg(theme::border());
                 let mut path = printable(&String::from_utf8_lossy(self.key.as_bytes()));
                 path.push_str(member);
                 let mut spans = path_spans(&path);
@@ -105,23 +105,25 @@ impl Item {
                     Span::styled(":", faint),
                     Span::styled(
                         self.line.unwrap_or(0).to_string(),
-                        Style::new().fg(theme::DIM),
+                        Style::new().fg(theme::info()),
                     ),
                     Span::styled(":", faint),
                 ]);
                 spans.extend(match_spans(text));
                 if *cut {
-                    spans.push(Span::styled("…", Style::new().fg(theme::DIM)));
+                    spans.push(Span::styled("…", Style::new().fg(theme::info())));
                 }
                 Line::from(spans)
             }
             Look::Version { text, cut } => {
                 let (rev, path) = self.version().unwrap_or(("", ""));
-                let faint = Style::new().fg(theme::FAINT);
+                let faint = Style::new().fg(theme::border());
                 let mut spans = vec![
                     Span::styled(
                         rev.chars().take(7).collect::<String>(),
-                        Style::new().fg(theme::BLUE).add_modifier(Modifier::BOLD),
+                        Style::new()
+                            .fg(theme::path_dir())
+                            .add_modifier(Modifier::BOLD),
                     ),
                     Span::raw(" "),
                 ];
@@ -132,14 +134,14 @@ impl Item {
                         Span::styled(":", faint),
                         Span::styled(
                             self.line.unwrap_or(0).to_string(),
-                            Style::new().fg(theme::DIM),
+                            Style::new().fg(theme::info()),
                         ),
                         Span::styled(":", faint),
                         Span::raw(text.to_string()),
                     ]);
                 }
                 if *cut {
-                    spans.push(Span::styled("…", Style::new().fg(theme::DIM)));
+                    spans.push(Span::styled("…", Style::new().fg(theme::info())));
                 }
                 Line::from(spans)
             }
@@ -212,7 +214,9 @@ impl Item {
 
 /// A dim line that selects nothing ("type a pattern", "No match").
 pub fn hint(text: &str) -> Item {
-    let style = Style::new().fg(theme::DIM).add_modifier(Modifier::ITALIC);
+    let style = Style::new()
+        .fg(theme::info())
+        .add_modifier(Modifier::ITALIC);
     Item::styled(
         OsString::new(),
         Line::from(Span::styled(printable(text), style)),
@@ -224,7 +228,10 @@ pub fn hint(text: &str) -> Item {
 pub fn error(text: &str) -> Item {
     Item::styled(
         OsString::new(),
-        Line::from(Span::styled(printable(text), Style::new().fg(theme::RED))),
+        Line::from(Span::styled(
+            printable(text),
+            Style::new().fg(theme::error()),
+        )),
         false,
     )
 }
@@ -232,10 +239,12 @@ pub fn error(text: &str) -> Item {
 /// The `..` row at the top of Folders.
 pub fn parent() -> Item {
     let line = Line::from(vec![
-        Span::styled("..", Style::new().fg(theme::GREEN)),
+        Span::styled("..", Style::new().fg(theme::path_name())),
         Span::styled(
             "  parent folder",
-            Style::new().fg(theme::DIM).add_modifier(Modifier::ITALIC),
+            Style::new()
+                .fg(theme::info())
+                .add_modifier(Modifier::ITALIC),
         ),
     ]);
     Item::styled("..".into(), line, true)
@@ -309,14 +318,14 @@ pub fn path_spans(text: &str) -> Vec<Span<'static>> {
     let mut first = true;
     while let Some(part) = parts.next() {
         if !first {
-            spans.push(Span::styled("/", Style::new().fg(theme::YELLOW)));
+            spans.push(Span::styled("/", Style::new().fg(theme::path_slash())));
         }
         first = false;
         if !part.is_empty() {
             let colour = if parts.peek().is_some() {
-                theme::BLUE
+                theme::path_dir()
             } else {
-                theme::GREEN
+                theme::path_name()
             };
             spans.push(Span::styled(part.to_string(), Style::new().fg(colour)));
         }
@@ -413,11 +422,11 @@ fn match_text(text: &str) -> (Box<str>, bool) {
     (out.into_boxed_str(), false)
 }
 
-/// Kept text → spans: plain text bright, matches red.
+/// Kept text → spans: plain text bright, matches in hl.
 fn match_spans(text: &str) -> Vec<Span<'static>> {
     let (start, end) = (char::from(MATCH_START), char::from(MATCH_END));
-    let plain = Style::new().fg(theme::TEXT);
-    let hit = Style::new().fg(theme::RED).add_modifier(Modifier::BOLD);
+    let plain = Style::new().fg(theme::fg());
+    let hit = Style::new().fg(theme::hl()).add_modifier(Modifier::BOLD);
     let mut spans = Vec::new();
     let mut in_match = false;
     for part in text.split_inclusive([start, end]) {
@@ -451,7 +460,7 @@ fn git_line(raw: &[u8], number: u32) -> Item {
         .ok()
         .filter(|h| is_hash(h));
     let mut spans = vec![
-        Span::styled(number.to_string(), Style::new().fg(theme::DIM)),
+        Span::styled(number.to_string(), Style::new().fg(theme::info())),
         Span::raw(" "),
     ];
     spans.extend(first_line(&raw[..sep]).spans);
@@ -563,7 +572,11 @@ mod tests {
         // folders blue, slashes yellow, the name green
         let it = files(b"./src/deep dir/a b&c.txt");
         assert_eq!(it.key, "src/deep dir/a b&c.txt");
-        let (b, y, g) = (Some(theme::BLUE), Some(theme::YELLOW), Some(theme::GREEN));
+        let (b, y, g) = (
+            Some(theme::path_dir()),
+            Some(theme::path_slash()),
+            Some(theme::path_name()),
+        );
         let want = [
             ("src", b),
             ("/", y),
@@ -584,7 +597,11 @@ mod tests {
 
     #[test]
     fn path_spans_for_an_absolute_path() {
-        let (b, y, g) = (Some(theme::BLUE), Some(theme::YELLOW), Some(theme::GREEN));
+        let (b, y, g) = (
+            Some(theme::path_dir()),
+            Some(theme::path_slash()),
+            Some(theme::path_name()),
+        );
         let line = Line::from(path_spans("/home/x"));
         let want = [("/", y), ("home", b), ("/", y), ("x", g)];
         assert_eq!(colours(&line), want.map(|(t, c)| (t.to_string(), c)));
@@ -619,7 +636,7 @@ mod tests {
         assert_eq!(text_of(&it.display()), "src/deep dir");
         assert_eq!(
             it.display().spans.last().unwrap().style.fg,
-            Some(theme::GREEN)
+            Some(theme::path_name())
         );
     }
 
@@ -645,7 +662,7 @@ mod tests {
         );
         assert_eq!(
             it.display().spans[0].style.fg,
-            Some(theme::BLUE),
+            Some(theme::path_dir()),
             "the version"
         );
         assert_eq!(it.version(), Some((rev, "src/odd:name.txt")));
@@ -701,13 +718,13 @@ mod tests {
         let red: Vec<&str> = shown
             .spans
             .iter()
-            .filter(|s| s.style.fg == Some(theme::RED))
+            .filter(|s| s.style.fg == Some(theme::hl()))
             .map(|s| s.content.as_ref())
             .collect();
         assert_eq!(red, ["ee", "e"]);
         assert_eq!(
             it.display().spans[0].style.fg,
-            Some(theme::GREEN),
+            Some(theme::path_name()),
             "a.c: no folder, so the name"
         );
     }
@@ -751,9 +768,9 @@ mod tests {
         assert_eq!(
             colours(&shown)[..3],
             [
-                ("docs".to_string(), Some(theme::BLUE)),
-                ("/".to_string(), Some(theme::YELLOW)),
-                ("arch.zip{inzip.txt}".to_string(), Some(theme::GREEN)),
+                ("docs".to_string(), Some(theme::path_dir())),
+                ("/".to_string(), Some(theme::path_slash())),
+                ("arch.zip{inzip.txt}".to_string(), Some(theme::path_name())),
             ]
         );
     }
@@ -810,7 +827,7 @@ mod tests {
         assert_eq!(it.key, hash);
         assert!(it.selectable);
         assert_eq!(text_of(&it.display()), "7 * 374425a T sub\u{fffd}ject");
-        assert_eq!(it.display().spans[0].style.fg, Some(theme::DIM));
+        assert_eq!(it.display().spans[0].style.fg, Some(theme::info()));
     }
 
     #[test]
