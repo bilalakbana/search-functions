@@ -253,9 +253,19 @@ fn sniffed(
             }
             None => file_text(path),
         },
+        // is_text calls an empty file no text; a first byte read tells it from a binary
+        Ok(false)
+            if File::open(path)
+                .and_then(|mut f| f.read(&mut [0; 1]))
+                .is_ok_and(|n| n == 0) =>
+        {
+            dim("empty file")
+        }
         Ok(false) => match binary {
             Binary::Show(cmd) => shown(run(&[cmd], shared)),
-            Binary::Describe(None) => dim("No text preview: binary file"),
+            Binary::Describe(None) => {
+                dim("No text preview: binary file (install `file` for its type)")
+            }
             Binary::Describe(Some(cmd)) => match run(&[cmd], shared) {
                 Ok(out) => {
                     let what = String::from_utf8_lossy(&out.stdout).trim().to_string();
@@ -947,7 +957,28 @@ mod tests {
             binary: Binary::Describe(None),
             header: None,
         });
-        assert_eq!(plain(&t), "No text preview: binary file");
+        assert_eq!(
+            plain(&t),
+            "No text preview: binary file (install `file` for its type)"
+        );
+    }
+
+    #[test]
+    fn sniff_says_an_empty_file_is_empty() {
+        for binary in [
+            Binary::Describe(None),
+            Binary::Describe(Some(printf("data\\n"))),
+            Binary::Show(printf("BIN")),
+        ] {
+            let t = one(PreviewPlan::Sniff {
+                path: file("zero.txt", b""),
+                text: Some(printf("TEXT")),
+                binary,
+                header: None,
+            });
+            assert_eq!(plain(&t), "empty file");
+            assert_eq!(t.lines[0].spans[0].style.fg, Some(theme::info()), "dim");
+        }
     }
 
     fn printf(s: &str) -> Cmd {

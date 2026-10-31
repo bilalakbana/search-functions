@@ -591,7 +591,8 @@ pub struct Matches {
 /// What a binary file's preview shows.
 #[derive(Debug, PartialEq)]
 pub enum Binary {
-    /// "No text preview: " and the command's output (`file -b`); `None`: "binary file".
+    /// "No text preview: " and the command's output (`file -b`); `None`: "binary file (install `file`
+    /// for its type)". An empty file says "empty file" with either variant.
     Describe(Option<Cmd>),
     /// The command's output as it is (matches inside it, a document's text).
     Show(Cmd),
