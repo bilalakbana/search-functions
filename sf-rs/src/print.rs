@@ -145,10 +145,12 @@ fn rows(
         }
     }
     // as the window says it: a repository without a commit, bare or not
-    if tab == Tab::Git && !failed && filter.total() == 0 {
-        if let Some(why) = crate::versions::why_empty(&program, root) {
-            let _ = writeln!(err, "sf: {why}");
-        }
+    if tab == Tab::Git
+        && !failed
+        && filter.total() == 0
+        && let Some(why) = crate::versions::why_empty(&program, root)
+    {
+        let _ = writeln!(err, "sf: {why}");
     }
     let mut listed = false;
     let parent = crate::items::parent();
