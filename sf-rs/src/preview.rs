@@ -20,6 +20,10 @@ use crate::theme;
 
 /// A preview's output is read up to this size.
 const MAX_OUTPUT: usize = 4 << 20;
+/// A text file's first screen goes out once this many lines are read (more than a preview shows) ...
+const FIRST_LINES: usize = 200;
+/// ... or this many bytes, whichever comes first; the whole text follows when it is read.
+const FIRST_BYTES: usize = 64 << 10;
 /// is_text looks at this many bytes ...
 const SNIFF: usize = 8192;
 /// ... and calls the file text when this share of them is printable, space or ≥ 0x80.
@@ -94,7 +98,9 @@ fn work(shared: &Shared, tx: &Sender<PreviewMsg>) {
                 st = shared.wake.wait(st).unwrap_or_else(|e| e.into_inner());
             }
         };
-        let (text, found) = produce(plan, shared);
+        // a long text's first screen goes out before the rest; the whole one replaces it
+        let first = |text| send_first_screen(shared, tx, generation, text);
+        let (text, found) = produce(plan, shared, &first);
         let st = lock(&shared.state);
         if st.closed {
             return;
@@ -116,8 +122,32 @@ fn work(shared: &Shared, tx: &Sender<PreviewMsg>) {
     }
 }
 
-/// The preview, and with a pattern how often it occurs.
-fn produce(plan: PreviewPlan, shared: &Shared) -> (Text<'static>, Option<Found>) {
+/// Sends a long text's first screen, unless a newer request overtook it.
+fn send_first_screen(
+    shared: &Shared,
+    tx: &Sender<PreviewMsg>,
+    generation: u64,
+    text: Text<'static>,
+) {
+    let st = lock(&shared.state);
+    if st.closed || st.pending.is_some() {
+        return;
+    }
+    drop(st);
+    let _ = tx.send(PreviewMsg {
+        generation,
+        text,
+        found: None,
+    });
+}
+
+/// The preview, and with a pattern how often it occurs; a text file's first screen to `first` while
+/// the rest is read.
+fn produce(
+    plan: PreviewPlan,
+    shared: &Shared,
+    first: &dyn Fn(Text<'static>),
+) -> (Text<'static>, Option<Found>) {
     match plan {
         PreviewPlan::Sniff {
             path,
@@ -126,8 +156,12 @@ fn produce(plan: PreviewPlan, shared: &Shared) -> (Text<'static>, Option<Found>)
             header,
         } => {
             let is_text = is_text(&path);
+            // with a count to wait for it comes whole: a first screen without it would make the
+            // header flicker
+            let counted = header.as_ref().is_some_and(|h| h.matches.is_some());
+            let first: &dyn Fn(Text<'static>) = if counted { &|_| {} } else { first };
             with_header(header, matches!(is_text, Ok(true)), shared, || {
-                sniffed(&path, &is_text, text, binary, shared).lines
+                sniffed(&path, &is_text, text, binary, shared, first).lines
             })
         }
         PreviewPlan::Numbered {
@@ -203,11 +237,20 @@ fn sniffed(
     text: Option<Cmd>,
     binary: Binary,
     shared: &Shared,
+    first: &dyn Fn(Text<'static>),
 ) -> Text<'static> {
     match is_text {
         Err(e) => red_lines(&format!("{}: {e}", path.display())),
         Ok(true) => match text {
-            Some(cmd) => shown(run(&[cmd], shared)),
+            Some(cmd) => {
+                // whole lines only: a cut one could end inside a colour's escape sequence
+                let screen = |out: &[u8]| {
+                    if let Some(end) = out.iter().rposition(|&b| b == b'\n') {
+                        first(ansi_text(&out[..end]));
+                    }
+                };
+                shown(run_limited(&[cmd], shared, None, Some(&screen)))
+            }
             None => file_text(path),
         },
         Ok(false) => match binary {
@@ -258,7 +301,7 @@ fn numbered(
             shown.extend(notes(&out));
             shown
         }
-        Ok(false) => match run_limited(&[binary], shared, Some(MAX_BLOCKS)) {
+        Ok(false) => match run_limited(&[binary], shared, Some(MAX_BLOCKS), None) {
             Ok(out) => {
                 let stdout = out.stdout.strip_suffix(b"\n").unwrap_or(&out.stdout);
                 let mut shown = if stdout.is_empty() {
@@ -291,11 +334,20 @@ enum Cut {
 
 /// Runs `cmds` as a pipeline in a process group of its own and collects the last one's output.
 fn run(cmds: &[Cmd], shared: &Shared) -> Result<Output, String> {
-    run_limited(cmds, shared, None)
+    run_limited(cmds, shared, None, None)
 }
 
-/// `run`, reading at most `max_lines` lines; the pipeline is ended when there is more.
-fn run_limited(cmds: &[Cmd], shared: &Shared, max_lines: Option<usize>) -> Result<Output, String> {
+/// What gets an output's first screen while the rest is read.
+type FirstScreen<'a> = &'a dyn Fn(&[u8]);
+
+/// `run`, reading at most `max_lines` lines (the pipeline is ended when there is more), and handing
+/// what is read to `first` once it holds a first screen (`read_capped`).
+fn run_limited(
+    cmds: &[Cmd],
+    shared: &Shared,
+    max_lines: Option<usize>,
+    first: Option<FirstScreen>,
+) -> Result<Output, String> {
     let mut children: Vec<Child> = Vec::new();
     let mut errors = Vec::new();
     let mut stdout: Option<ChildStdout> = None;
@@ -317,7 +369,7 @@ fn run_limited(cmds: &[Cmd], shared: &Shared, max_lines: Option<usize>) -> Resul
                 }
                 let mut err = child.stderr.take().expect("stderr is piped");
                 errors.push(thread::spawn(move || {
-                    read_capped(&mut err, 64 << 10, None).0
+                    read_capped(&mut err, 64 << 10, None, None).0
                 }));
                 stdout = child.stdout.take();
                 children.push(child);
@@ -343,6 +395,7 @@ fn run_limited(cmds: &[Cmd], shared: &Shared, max_lines: Option<usize>) -> Resul
         &mut stdout.expect("a pipeline has a last command"),
         MAX_OUTPUT,
         max_lines,
+        first,
     );
     if cut.is_some() {
         kill_group(Some(pgid));
@@ -362,10 +415,17 @@ fn run_limited(cmds: &[Cmd], shared: &Shared, max_lines: Option<usize>) -> Resul
     })
 }
 
-/// Reads up to `max` bytes and `max_lines` lines; says why when there was more.
-fn read_capped(r: &mut impl Read, max: usize, max_lines: Option<usize>) -> (Vec<u8>, Option<Cut>) {
+/// Reads up to `max` bytes and `max_lines` lines; says why when there was more. What is read goes to
+/// `first` once, as soon as it holds FIRST_LINES lines or FIRST_BYTES bytes.
+fn read_capped(
+    r: &mut impl Read,
+    max: usize,
+    max_lines: Option<usize>,
+    mut first: Option<FirstScreen>,
+) -> (Vec<u8>, Option<Cut>) {
     let mut out = Vec::new();
     let mut lines = 0;
+    let mut newlines = 0;
     let mut buf = [0u8; 64 << 10];
     loop {
         match r.read(&mut buf) {
@@ -396,6 +456,13 @@ fn read_capped(r: &mut impl Read, max: usize, max_lines: Option<usize>) -> (Vec<
                 }
                 if cut.is_some() {
                     return (out, cut);
+                }
+                if let Some(f) = first {
+                    newlines += chunk.iter().filter(|&&b| b == b'\n').count();
+                    if newlines >= FIRST_LINES || out.len() >= FIRST_BYTES {
+                        f(&out);
+                        first = None;
+                    }
                 }
             }
         }
@@ -1063,6 +1130,61 @@ mod tests {
         got
     }
 
+    /// A text file's preview whose command writes `script`; the header with a count when `counted`.
+    fn long_text(script: &str, counted: bool) -> PreviewPlan {
+        PreviewPlan::Sniff {
+            path: file("long.txt", b"text\n"),
+            text: Some(sh(script)),
+            binary: Binary::Describe(None),
+            header: if counted {
+                header(Some(printf("3\n")))
+            } else {
+                None
+            },
+        }
+    }
+
+    #[test]
+    fn a_long_text_shows_its_first_screen_then_the_rest() {
+        let (tx, rx) = channel();
+        let p = Previewer::new(tx);
+        p.request(1, long_text("seq 1 250; sleep 0.4; echo last", false));
+        let wait = Duration::from_secs(5);
+        let first = rx.recv_timeout(wait).expect("no first screen");
+        assert_eq!(first.generation, 1);
+        let shown = plain(&first.text);
+        assert!(
+            shown.starts_with("1\n2\n3\n") && shown.ends_with("\n250"),
+            "{shown}"
+        );
+        let rest = rx.recv_timeout(wait).expect("no rest");
+        assert_eq!(rest.generation, 1);
+        assert!(plain(&rest.text).ends_with("\n250\nlast"));
+    }
+
+    #[test]
+    fn a_counted_preview_comes_whole() {
+        // Content's header: a first screen without its count would make it flicker
+        let (tx, rx) = channel();
+        let p = Previewer::new(tx);
+        p.request(1, long_text("seq 1 250; sleep 0.4; echo last", true));
+        let got = rx.recv_timeout(Duration::from_secs(5)).expect("no preview");
+        assert_eq!(got.found, found(Some(3)));
+        assert!(plain(&got.text).ends_with("last"), "{}", plain(&got.text));
+        assert!(rx.recv_timeout(Duration::from_millis(300)).is_err());
+    }
+
+    #[test]
+    fn a_first_screen_a_newer_request_overtook_is_dropped() {
+        let (shared, (tx, rx)) = (Shared::default(), channel());
+        lock(&shared.state).pending = Some((2, PreviewPlan::Nothing));
+        send_first_screen(&shared, &tx, 1, Text::raw("old"));
+        assert!(rx.try_recv().is_err());
+        lock(&shared.state).pending = None;
+        send_first_screen(&shared, &tx, 1, Text::raw("current"));
+        assert_eq!(rx.try_recv().map(|m| m.generation), Ok(1));
+    }
+
     #[test]
     fn newest_request_wins() {
         let (tx, rx) = channel();
@@ -1095,12 +1217,12 @@ mod tests {
 
     #[test]
     fn a_line_limit_is_cut_only_when_there_is_more() {
-        let read = |bytes: &[u8]| read_capped(&mut &bytes[..], 100, Some(2));
+        let read = |bytes: &[u8]| read_capped(&mut &bytes[..], 100, Some(2), None);
         assert_eq!(read(b"a\nb\n"), (b"a\nb\n".to_vec(), None));
         assert_eq!(read(b"a\nb"), (b"a\nb".to_vec(), None));
         assert_eq!(read(b"a\nb\nc\n"), (b"a\nb\n".to_vec(), Some(Cut::Lines)));
         assert_eq!(
-            read_capped(&mut &b"abcdef"[..], 4, Some(2)),
+            read_capped(&mut &b"abcdef"[..], 4, Some(2), None),
             (b"abcd".to_vec(), Some(Cut::Bytes))
         );
     }

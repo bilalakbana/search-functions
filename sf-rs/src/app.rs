@@ -1123,6 +1123,8 @@ impl App {
         if msg.generation != self.preview_gen {
             return;
         }
+        // the whole text after a long file's first screen: where the preview was scrolled to stays
+        let rest = self.preview_wait.is_none();
         self.preview_wait = None;
         self.preview_found = msg.found;
         if self.preview_find.is_some() {
@@ -1132,6 +1134,9 @@ impl App {
             return;
         }
         self.preview = msg.text;
+        if rest {
+            return;
+        }
         // a matching line about a third down the preview, below the header
         let third = 1 + self.layout.preview.height as usize / 3;
         let at = self
@@ -4036,6 +4041,25 @@ pub(crate) mod tests {
         assert_eq!(a.handle_mouse(click(Rect::new(0, 29, 1, 1)), now), []);
         assert_eq!(a.popup, None);
         assert_eq!(a.tab, Tab::Content);
+    }
+
+    #[test]
+    fn the_rest_of_a_preview_keeps_the_scroll() {
+        // a long file's first screen, then all of it (same generation): Alt-Down in between stays
+        let (mut a, now) = app(Tab::Files);
+        feed(&mut a, &["huge.txt"]);
+        a.layout.preview = Rect::new(1, 2, 80, 10);
+        let msg = |a: &App, lines: usize| PreviewMsg {
+            found: None,
+            generation: a.preview_gen,
+            text: Text::raw("x\n".repeat(lines)),
+        };
+        a.on_preview(msg(&a, 200));
+        a.handle_key(alt(KeyCode::Down), now);
+        assert_eq!(a.preview_scroll, 10);
+        a.on_preview(msg(&a, 5000));
+        assert_eq!(a.preview.lines.len(), 5000);
+        assert_eq!(a.preview_scroll, 10);
     }
 
     #[test]
