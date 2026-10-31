@@ -461,9 +461,19 @@ cd ~/.SearchFunctions/sf-rs && cargo build --release && bash tests/speed_ratio.s
 - Files needs all rows first (sorted; `read_items` in `src/runner.rs`), so the TUI's first row is by design the
   list time plus the TUI's own start and first frame: a ratio above 1 is not a regression, and the card's
   "first row ≈170 ms" was a rough poll.
-- Measured 2026-10-31 on vpsbilal (2 vCPU), three script runs, load average 0.58–0.94: medians TUI 294, 271 and
-  265 ms, `--print` 207, 177 and 171 ms; median run ratios 1.41 (PASS), 1.54 (FAIL), 1.55 (FAIL). On this VPS
-  the ratio sits at the limit. The harness alone (Enter to a printed name, no sf) takes about 16 ms.
+- Measured 2026-10-31 22:50 on a quiet vpsbilal (2 vCPU), three script runs, each run's pairs as TUI / `--print`
+  in ms:
+
+  | Run (load average) | The five pairs | Median ratio |
+  |---|---|---|
+  | 1 (0.45) | 192/154, 193/157, 218/130, 251/161, 223/167 | 1.34 PASS |
+  | 2 (0.45) | 226/144, 220/305, 389/167, 252/148, 209/166 | 1.57 FAIL |
+  | 3 (0.82) | 227/126, 211/137, 213/138, 185/126, 214/125 | 1.54 FAIL |
+
+- On a quiet VPS too the ratio sits at the limit: two of the three runs fail at 1.5. Both times are lower than
+  under load (TUI 213–226 ms against 265–294 ms, `--print` 126–166 ms against 171–207 ms), the ratio is not.
+  Earlier the same day, with three stale debug sf processes using about 30 % of one CPU (load 0.58–0.94), the
+  median ratios were 1.41, 1.54 and 1.55. The harness alone (Enter to a printed name, no sf) takes about 16 ms.
 
 ### WSL
 
