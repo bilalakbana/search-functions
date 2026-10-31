@@ -15,7 +15,12 @@ printf 'needle hidden\n' > .hidden/secret.txt
 printf 'needle ignored\n' > build/out.txt
 printf 'build/\n' > .gitignore
 printf 'x\0y needle\0' > src/blob.bin
-printf 'needle inside zip\n' > inzip.txt && (cd . && zip -q docs/arch.zip inzip.txt) && mv inzip.txt src/inzip.txt.orig
+printf 'needle inside zip\n' > inzip.txt
+# python's zipfile gives the same member (inzip.txt) where zip is missing
+if command -v zip >/dev/null; then zip -q docs/arch.zip inzip.txt
+elif command -v python3 >/dev/null; then python3 -I -m zipfile -c docs/arch.zip inzip.txt
+else echo "make_fixture.sh: neither zip nor python3 found, docs/arch.zip needs one" >&2; exit 1; fi
+mv inzip.txt src/inzip.txt.orig
 printf 'harmless line\nevil\037!touch %s/PWNED\037tail\n' "$PWD" > src/evil.txt
 : > empty.txt
 git add -A >/dev/null
