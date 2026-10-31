@@ -25,8 +25,15 @@ const UGREP_ALL_MATCHES: (u32, u32, u32) = (5, 0, 0);
 
 const FILE_MANAGER: &str = "org.freedesktop.FileManager1";
 
-/// The report. `config` is the config file's path, None when there is no config folder.
-pub fn report(env: &Env, engines: &Engines, config: Option<&Path>, run: Run) -> String {
+/// The report. `config` is the config file's path, None when there is no config folder; `root` the
+/// search root (sf's current folder), None when it cannot be read.
+pub fn report(
+    env: &Env,
+    engines: &Engines,
+    config: Option<&Path>,
+    root: Option<&Path>,
+    run: Run,
+) -> String {
     let p = &env.platform;
     let mut out = format!("sf {}\n", env!("CARGO_PKG_VERSION"));
     let mut row = |label: &str, value: &str| {
@@ -54,6 +61,15 @@ pub fn report(env: &Env, engines: &Engines, config: Option<&Path>, run: Run) -> 
         platform.push("inside tmux".into());
     }
     row("Platform", &platform.join(", "));
+    if let Some(root) = root.filter(|r| r.starts_with("/mnt")) {
+        row(
+            "Search root",
+            &format!(
+                "{} ! a WSL drive mount, much slower: run sf from the Linux filesystem (~)",
+                root.display()
+            ),
+        );
+    }
 
     let program = |name: &str| find(&p.path, &[name]);
     if p.wsl.is_some() {
@@ -338,7 +354,7 @@ mod tests {
             &["xdg-open", "dbus-send", "wl-copy", "fd", "tmux"],
             wayland_tmux(),
         );
-        let r = report(&s.env, &s.engines, Some(&s.config), &answers);
+        let r = report(&s.env, &s.engines, Some(&s.config), None, &answers);
         let bin = s.bin.display();
         assert_eq!(
             line(&r, "Platform"),
@@ -356,14 +372,14 @@ mod tests {
             ..Platform::default()
         };
         let s = setup("doctor_tty", &[], tty);
-        let r = report(&s.env, &s.engines, Some(&s.config), &answers);
+        let r = report(&s.env, &s.engines, Some(&s.config), None, &answers);
         assert_eq!(line(&r, "Platform"), "Linux, session tty");
         let wayland = Platform {
             session_type: Some("wayland".into()),
             ..wayland_tmux()
         };
         let s = setup("doctor_session", &[], wayland);
-        let r = report(&s.env, &s.engines, Some(&s.config), &answers);
+        let r = report(&s.env, &s.engines, Some(&s.config), None, &answers);
         assert_eq!(
             line(&r, "Platform"),
             "Linux, Wayland (wayland-0), KDE, inside tmux"
@@ -374,7 +390,7 @@ mod tests {
     fn reveal_says_when_only_the_folder_opens() {
         let s = setup("doctor_no_fm", &["xdg-open", "dbus-send"], wayland_tmux());
         let none = |_: &Path, _: &[&str]| Some("   boolean false\n   array [\n   ]\n".to_string());
-        let r = report(&s.env, &s.engines, Some(&s.config), &none);
+        let r = report(&s.env, &s.engines, Some(&s.config), None, &none);
         assert!(
             line(&r, "Reveal").contains("xdg-open opens the folder"),
             "{r}"
@@ -387,27 +403,27 @@ mod tests {
                 _ => "   boolean false\n".to_string(),
             })
         };
-        let r = report(&s.env, &s.engines, Some(&s.config), &activatable);
+        let r = report(&s.env, &s.engines, Some(&s.config), None, &activatable);
         assert_eq!(
             line(&r, "Reveal"),
             "file manager over D-Bus (starts when asked)"
         );
         let s = setup("doctor_no_dbus", &["xdg-open"], wayland_tmux());
-        let r = report(&s.env, &s.engines, Some(&s.config), &answers);
+        let r = report(&s.env, &s.engines, Some(&s.config), None, &answers);
         assert!(line(&r, "Reveal").starts_with("dbus-send not found"), "{r}");
     }
 
     #[test]
     fn clipboard_without_a_program_says_osc52() {
         let s = setup("doctor_osc52_tmux", &["tmux"], Platform::default());
-        let r = report(&s.env, &s.engines, Some(&s.config), &answers);
+        let r = report(&s.env, &s.engines, Some(&s.config), None, &answers);
         assert!(line(&r, "Clipboard").starts_with("OSC 52"), "{r}");
     }
 
     #[test]
     fn engines_show_path_and_version_or_what_needs_them() {
         let s = setup("doctor_engines", &["fd", "ugrep"], wayland_tmux());
-        let r = report(&s.env, &s.engines, Some(&s.config), &answers);
+        let r = report(&s.env, &s.engines, Some(&s.config), None, &answers);
         assert_eq!(line(&r, "fd"), format!("{}/fd fd 10.3.0", s.bin.display()));
         assert_eq!(
             line(&r, "ugrep"),
@@ -437,7 +453,7 @@ mod tests {
             ("ugrep 5.0.0 x86_64-pc-linux-gnu +sse2; -P:pcre2jit", None),
         ] {
             let answer = |_: &Path, _: &[&str]| Some(format!("{version}\n"));
-            let r = report(&s.env, &s.engines, Some(&s.config), &answer);
+            let r = report(&s.env, &s.engines, Some(&s.config), None, &answer);
             let row = line(&r, "ugrep");
             match warning {
                 Some(w) => assert!(row.contains(w), "{version}: {row}"),
@@ -453,7 +469,7 @@ mod tests {
             ..Platform::default()
         };
         let s = setup("doctor_wsl", &["powershell.exe", "wslpath"], wsl.clone());
-        let r = report(&s.env, &s.engines, Some(&s.config), &answers);
+        let r = report(&s.env, &s.engines, Some(&s.config), None, &answers);
         let bin = s.bin.display();
         assert_eq!(line(&r, "Platform"), "WSL (Ubuntu-24.04)");
         assert_eq!(
@@ -463,25 +479,51 @@ mod tests {
         assert_eq!(line(&r, "Paths"), format!("wslpath {bin}/wslpath"));
         assert_eq!(line(&r, "Clipboard"), "Set-Clipboard (PowerShell)");
         let s = setup("doctor_wsl_no_interop", &[], wsl);
-        let r = report(&s.env, &s.engines, Some(&s.config), &answers);
+        let r = report(&s.env, &s.engines, Some(&s.config), None, &answers);
         assert!(line(&r, "Windows").contains("interop"), "{r}");
+    }
+
+    #[test]
+    fn a_search_root_under_mnt_is_warned_about() {
+        let s = setup("doctor_mnt", &[], wayland_tmux());
+        let at = |root: Option<&str>| {
+            report(
+                &s.env,
+                &s.engines,
+                Some(&s.config),
+                root.map(Path::new),
+                &answers,
+            )
+        };
+        for root in ["/mnt", "/mnt/c/Users/bilal/project"] {
+            assert_eq!(
+                line(&at(Some(root)), "Search root"),
+                format!(
+                    "{root} ! a WSL drive mount, much slower: run sf from the Linux filesystem (~)"
+                )
+            );
+        }
+        for root in [Some("/home/bilal/x"), Some("/mntx/c"), None] {
+            let r = at(root);
+            assert!(!r.contains("Search root"), "{root:?}: {r}");
+        }
     }
 
     #[test]
     fn config_is_there_absent_or_invalid() {
         let s = setup("doctor_config", &[], wayland_tmux());
-        let r = report(&s.env, &s.engines, Some(&s.config), &answers);
+        let r = report(&s.env, &s.engines, Some(&s.config), None, &answers);
         assert!(
             line(&r, "Config").ends_with("(not there yet: defaults)"),
             "{r}"
         );
         std::fs::write(&s.config, "[files]\nhidden = \"x\"\n").unwrap();
-        let r = report(&s.env, &s.engines, Some(&s.config), &answers);
+        let r = report(&s.env, &s.engines, Some(&s.config), None, &answers);
         assert!(line(&r, "invalid:").contains("line 2"), "{r}");
         std::fs::write(&s.config, "[files]\nhidden = true\n").unwrap();
-        let r = report(&s.env, &s.engines, Some(&s.config), &answers);
+        let r = report(&s.env, &s.engines, Some(&s.config), None, &answers);
         assert_eq!(line(&r, "Config"), s.config.display().to_string());
-        let r = report(&s.env, &s.engines, None, &answers);
+        let r = report(&s.env, &s.engines, None, None, &answers);
         assert!(line(&r, "Config").contains("HOME"), "{r}");
     }
 

@@ -81,7 +81,8 @@ every word must match (as `fzf -i -e`, with its syntax: `!test` leaves out, `^sr
 own), `Ctrl-e` shows the item selected in the file manager (Nautilus, Dolphin, Nemo, Caja, Thunar through D-Bus; on
 WSL Explorer), `Ctrl-c` copies (wl-copy, xclip or xsel; on WSL the Windows path to the Windows clipboard; without any
 of them OSC 52 through the terminal). `sf doctor` shows what it found and how each action works. `sf open|reveal|copy-path PATH`
-and `sf copy-text TEXT` do one action; the fzf functions below use them when `sf` is installed.
+and `sf copy-text TEXT` do one action; the fzf functions below use them when `sf` is installed. On WSL, run `sf`
+from the Linux filesystem (`~`): a search root under `/mnt/` (a Windows drive) is much slower, and `sf doctor` warns.
 
 The earlier fzf version (`~/.SearchFunctions/sf`, modes on F2–F8) still works until the app has replaced it.
 

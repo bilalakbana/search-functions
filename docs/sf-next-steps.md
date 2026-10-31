@@ -444,3 +444,10 @@ Open:
   (links made with `ln -sf`).
 - Still open from card t_7c990be7: Matching lines and Each match split ugrep's records at a newline in a path.
 
+## Release 0.13.0 (card t_018e8b5b, 2026-10-31)
+
+### WSL
+
+`sf doctor` warns when the search root (sf's current folder) is `/mnt` or under `/mnt/`, as WSL mounts Windows
+drives there; the numbers wait for Bilal's WSL machine.
+

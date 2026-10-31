@@ -275,9 +275,16 @@ fn doctor() -> ExitCode {
     let run = |program: &Path, args: &[&str]| {
         doctor::run_program(&env.platform.path, program, args, Duration::from_secs(3))
     };
+    let root = std::env::current_dir().ok();
     print!(
         "{}",
-        doctor::report(&env, &engines, config::default_path().as_deref(), &run)
+        doctor::report(
+            &env,
+            &engines,
+            config::default_path().as_deref(),
+            root.as_deref(),
+            &run
+        )
     );
     ExitCode::SUCCESS
 }
