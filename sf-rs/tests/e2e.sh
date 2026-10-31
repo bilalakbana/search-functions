@@ -1,8 +1,12 @@
 #!/bin/bash
 # End-to-end test of the sf binary in a private tmux server (socket "sfrs-e2e", never Bilal's own):
-# the fixture tree of tests/tools/make_fixture.sh, the real engines (fd, ugrep, ugrep+, bat, git, delta),
-# and stubs for everything that would reach the desktop (xdg-open, wl-copy, dbus-send, nvim, the
-# sub-functions, and WSL's powershell.exe and wslpath).
+# the fixture tree of tests/tools/make_fixture.sh, the real engines, and stubs for everything that would
+# reach the desktop (xdg-open, wl-copy, dbus-send, nvim, the sub-functions, and WSL's powershell.exe and
+# wslpath).
+# A run needs tmux, python3, git, fd (or Debian's fdfind), ugrep, ugrep+ and bat (or batcat). It can do
+# without delta and file (their cases print SKIP and check what sf shows instead) and without zip (the
+# fixture's archive comes from python3). The pane's PATH is the system's, then the caller's: give a run
+# delta or file through PATH.
 # The config lives in a fresh XDG_CONFIG_HOME. Screens are saved as ANSI captures for ansi2png.py.
 #
 # usage: tests/e2e.sh WORKDIR        (WORKDIR: a new, empty folder; nothing in it is ever deleted)
@@ -15,6 +19,8 @@ SF=$(realpath -- "$SF") || exit 1
 mkdir -p "$W" && W=$(realpath -- "$W")
 [[ -z $(ls -A "$W") ]] || { echo "e2e: $W is not empty" >&2; exit 2; }
 T=$W/tree LOG=$W/actions.log STUBS=$W/stubs XDG=$W/xdg SHOTS=$W/screens
+PANE_PATH=$STUBS:/usr/local/bin:/usr/bin:/bin:$PATH
+FD=$(command -v fd || command -v fdfind) || { echo "e2e: neither fd nor fdfind found" >&2; exit 2; }
 mkdir -p "$STUBS" "$XDG" "$SHOTS" "$W/nogit"
 bash "$here/tools/make_fixture.sh" "$T" >/dev/null || { echo "e2e: fixture failed" >&2; exit 2; }
 : > "$LOG"
@@ -53,8 +59,9 @@ winT="C:\\e2e${T//\//\\}"
 
 tm() { tmux -L sfrs-e2e -f /dev/null "$@"; }
 pane() { tm capture-pane -p -t e2e | sed -E 's/\x1b\[[0-9;]*m//g'; }
-PASS=0 FAIL=0
+PASS=0 FAIL=0 SKIP=0
 ok() { echo "PASS  $*"; PASS=$((PASS + 1)); }
+skip() { echo "SKIP  $*"; SKIP=$((SKIP + 1)); }
 bad() { echo "FAIL  $*"; FAIL=$((FAIL + 1)); pane | grep -v '^\s*$' | tail -15; }
 wait_pane() { local i; for i in $(seq 60); do pane | grep -qE -- "$1" && return 0; sleep 0.1; done; return 1; }
 expect() { if wait_pane "$2"; then ok "$1"; else bad "$1 (no /$2/ on screen)"; fi; }
@@ -117,9 +124,15 @@ back_to_sf() {
     tm select-window -t e2e:0
 }
 
+# the engines sf finds in the pane, from its doctor rows: a path, or "not" when one is not found
+engine() { env -i HOME="$HOME" PATH="$PANE_PATH" XDG_CONFIG_HOME="$XDG" "$SF" doctor | awk -v e="$1" '$1 == e { print $2 }'; }
+DELTA=$(engine delta) FILE=$(engine file)
+[[ $FILE == /* ]] && "$FILE" -b /dev/null >/dev/null 2>&1 || FILE=   # found, and it must run too
+
 tm kill-server 2>/dev/null
-# \$TMUX and \$TMUX_PANE are the private server's (expanded inside the pane), never the caller's own tmux
-tm new-session -d -s e2e -x 160 -y 40 "env -i HOME=$HOME PATH=$STUBS:/usr/local/bin:/usr/bin:/bin TERM=xterm-256color \
+# \$TMUX and \$TMUX_PANE are the private server's (expanded inside the pane), never the caller's own tmux;
+# the PATH quoted: WSL's has spaces
+tm new-session -d -s e2e -x 160 -y 40 "env -i HOME=$HOME PATH=${PANE_PATH@Q} TERM=xterm-256color \
     COLORTERM=truecolor LANG=C.UTF-8 XDG_CONFIG_HOME=$XDG LESS=-R WAYLAND_DISPLAY=wayland-e2e \
     TMUX=\$TMUX TMUX_PANE=\$TMUX_PANE bash --norc --noprofile"
 # as Bilal's tmux: modified keys apart for the programs that ask (sf: Ctrl-Shift-Alt-F is not Ctrl-Alt-F);
@@ -131,7 +144,7 @@ wait_pane '^READY>' || { echo "e2e: shell did not start" >&2; exit 2; }
 tm rename-window -t e2e shell
 
 # the defaults: hidden files off, ignored files on
-n_files=$(cd "$T" && fd --type f --no-ignore --exclude .git . | wc -l)
+n_files=$(cd "$T" && "$FD" --type f --no-ignore --exclude .git . | wc -l)
 keys "'$SF'" Enter
 expect 'start: tab bar with Config'        'Files +Content +Deep +Folders +Git .*⚙ Config'
 expect "start: $n_files files listed"      "$n_files/$n_files"
@@ -199,6 +212,18 @@ keys C-s Space Escape
 expect 'in file: on a line again'          'In main\.c › second more .*words on a line +0/0'
 keys Escape
 expect 'files: Esc closes the window'      "Files › main .* 1/$n_files"
+# before the views below write into empty.txt
+clear_query; type_ 'empty'
+expect 'files: an empty file says so'      '│empty file'
+clear_query; type_ 'blob'
+if [[ -n $FILE ]]; then
+    expect 'files: a binary, its type from file' '│No text preview: data'
+else
+    expect 'files: a binary, file not installed' '│No text preview: binary file \(install `file` for its type\)'
+    skip "files: a binary's type from file (no working file in the pane's PATH)"
+fi
+clear_query; type_ 'main'
+expect 'files: back to main'               "Files › main .* 1/$n_files"
 
 keys Tab
 expect 'tab: Search keeps the query'       'Content › main'
@@ -463,6 +488,33 @@ keys Escape
 expect 'utf-16: Esc back to the pattern'   'Content › needle .* 1/1'
 keys Escape
 expect 'utf-16: quit'                      '^READY>\s*$'
+# a name with a newline: one row in Content and in Deep, and Enter opens it; the OPEN stub's log line
+# breaks at the newline, so the path's halves are two log lines
+mkdir "$W/newline" && printf 'needle\n' > "$W/newline/x"$'\n'"y.txt"
+# nl_opened NAME N: the path opened N times so far, each time both halves
+nl_opened() {
+    local i n
+    for i in $(seq 50); do n=$(grep -cxF "OPEN [$W/newline/x" "$LOG"); (( n >= $2 )) && break; sleep 0.1; done
+    if [[ $n -eq $2 && $(grep -A1 -xF "OPEN [$W/newline/x" "$LOG" | grep -cxF 'y.txt]') -eq $2 ]]; then
+        ok "$1"
+    else
+        bad "$1 ($n OPEN lines for x<LF>y.txt, want $2)"; tail -4 "$LOG"
+    fi
+}
+keys "clear; cd '$W/newline'; '$SF' content needle" Enter
+expect 'newline: Content, one row'         'Content filter › .* · pattern: needle .* 1/1'
+keys Enter; nl_opened 'newline: Content, Enter opens it' 1
+keys Escape
+expect 'newline: Esc back to the pattern'  'Content › needle .* 1/1'
+keys Escape
+expect 'newline: quit Content'             '^READY>\s*$'
+keys "clear; '$SF' deep needle" Enter
+expect 'newline: Deep, one row'            'Deep filter › .* · pattern: needle .* 1/1'
+keys Enter; nl_opened 'newline: Deep, Enter opens it' 2
+keys Escape
+expect 'newline: Esc back to Deep'         'Deep › needle .* 1/1'
+keys Escape
+expect 'newline: quit Deep'                '^READY>\s*$'
 keys "cd '$T'" Enter
 keys "clear; '$SF' deep needle | grep -F 'arch.zip{'" Enter
 expect "piped: deep prints ugrep's members" '^docs/arch\.zip\{inzip\.txt\}\s*$'
@@ -475,7 +527,7 @@ expect 'refused: exit 2'                   '^rc-refused=2'
 PKG=$W/pkg
 mkdir -p "$PKG/bin" "$PKG/lib/sf"
 cp "$SF" "$PKG/bin/sf"
-for e in fd ugrep; do ln -s "$(command -v "$e")" "$PKG/lib/sf/$e"; done   # the pane's PATH may have neither
+ln -s "$FD" "$PKG/lib/sf/fd"; ln -s "$(command -v ugrep)" "$PKG/lib/sf/ugrep"   # the pane's PATH may have neither
 cat > "$PKG/lib/sf/nvim" <<EOF
 #!/bin/bash
 printf 'BUNDLED-NVIM %s PATH=%s\n' "\${@: -1}" "\$PATH" >> "$LOG"
@@ -502,8 +554,14 @@ printf 'changed by e2e\n' >> "$T/empty.txt"
 keys "clear; '$SF' files empty" Enter
 expect 'views: sf starts'                  'Files › empty .* 1/'
 keys C-g
-# delta's numbered line: only the loaded view has it (Files' preview shows the line too, as bat's)
-expect 'views: Ctrl-G shows the change'    '│changed by e2e'
+# delta's numbered line: only the loaded view has it (Files' preview shows the line too, as bat's);
+# without delta the view is git's own diff
+if [[ $DELTA == /* ]]; then
+    expect 'views: Ctrl-G shows the change'    '│changed by e2e'
+else
+    expect 'views: Ctrl-G shows git'"'"'s diff'   '\+changed by e2e'
+    skip "views: delta's numbered line (no delta in the pane's PATH)"
+fi
 shot view_diff
 keys /
 type_ 'changed'
@@ -575,6 +633,6 @@ keys Escape
 expect 'theme: quit'                       '^READY>\s*$'
 [[ $(cat "$W/xdg-theme/sf/config.toml") == $'[theme]\nborder = 99' ]] && ok 'theme: its config untouched' || bad 'theme: its config changed'
 
-echo "pass=$PASS fail=$FAIL (screens in $SHOTS)"
+echo "pass=$PASS fail=$FAIL skip=$SKIP (screens in $SHOTS)"
 tm kill-server
 [[ $FAIL -eq 0 ]]
