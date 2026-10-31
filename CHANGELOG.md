@@ -42,6 +42,8 @@ This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the 
 - The fixture builds `docs/arch.zip` with `python3 -m zipfile` when `zip` is missing.
 - New end-to-end cases: an empty file, a binary file without `file`, a name with a newline, and a UTF-16LE
   file with its byte order mark. A run without `file` and `delta` gives 238 pass, 0 fail and 2 skips.
+- The release workflow and `packaging/test_package.sh` run the suite with `SF_STRICT_SKIPS=1`, so an
+  unexpected skip fails the release.
 
 ## Earlier releases
 

@@ -435,7 +435,7 @@ env -i HOME=$HOME PATH=/usr/local/bin:/usr/bin:/bin bash tests/e2e.sh $C/<new em
 The links point to Debian's binaries, unpacked in `~/workspace/sf-live/card-t_7c990be7/tools/root/usr/bin/`.
 The `file` there does not run (`libmagic.so.1` is missing). Keep the workdir path short: at about 150
 characters, path-dependent lines are cut at 160 columns. `sudo apt install file zip git-delta` makes the links
-needless.
+needless. `SF_STRICT_SKIPS=1` makes a skip a failure; the release runs use it, a local run should not need it.
 
 Open:
 - The e2e check `No text preview: data` (file found and working) did not run: vpsbilal has no working `file`.

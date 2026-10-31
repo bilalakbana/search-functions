@@ -4,6 +4,8 @@
 # The package is unpacked into ~/.local as the README says; then `sf doctor` must name the bundled engines,
 # and sf-rs/tests/e2e.sh must pass against the installed sf. Logs and screens of each image go to
 # WORKDIR/<image>/.
+# The e2e runs with SF_STRICT_SKIPS=1: the package bundles fd, bat, ugrep, ugrep+ and delta, and the container
+# installs file and zip, so a skip fails the test.
 #
 # usage: packaging/test_package.sh PACKAGE WORKDIR [IMAGE...]
 #        (WORKDIR: a new, empty folder; nothing in it is ever deleted)
@@ -36,7 +38,7 @@ for e in fd bat ugrep ugrep+ delta; do
     else echo "FAIL  doctor: $e is not the packaged one"; fail=1; fi
 done
 export PATH=$HOME/.local/lib/sf:$PATH   # for the tests'"'"' own fd / ugrep calls
-SF_BIN=$HOME/.local/bin/sf /tests/e2e.sh /work/e2e || fail=1
+SF_STRICT_SKIPS=1 SF_BIN=$HOME/.local/bin/sf /tests/e2e.sh /work/e2e || fail=1
 exit $fail
 '
 

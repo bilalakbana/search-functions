@@ -7,6 +7,7 @@
 # without delta and file (their cases print SKIP and check what sf shows instead) and without zip (the
 # fixture's archive comes from python3). The pane's PATH is the system's, then the caller's: give a run
 # delta or file through PATH.
+# With SF_STRICT_SKIPS=1 (the release runs) a skip is a failure: a FAIL line that names the skip.
 # The config lives in a fresh XDG_CONFIG_HOME. Screens are saved as ANSI captures for ansi2png.py.
 #
 # usage: tests/e2e.sh WORKDIR        (WORKDIR: a new, empty folder; nothing in it is ever deleted)
@@ -61,7 +62,10 @@ tm() { tmux -L sfrs-e2e -f /dev/null "$@"; }
 pane() { tm capture-pane -p -t e2e | sed -E 's/\x1b\[[0-9;]*m//g'; }
 PASS=0 FAIL=0 SKIP=0
 ok() { echo "PASS  $*"; PASS=$((PASS + 1)); }
-skip() { echo "SKIP  $*"; SKIP=$((SKIP + 1)); }
+skip() {
+    if [[ ${SF_STRICT_SKIPS:-} == 1 ]]; then echo "FAIL  $* (SKIP: SF_STRICT_SKIPS=1)"; FAIL=$((FAIL + 1))
+    else echo "SKIP  $*"; SKIP=$((SKIP + 1)); fi
+}
 bad() { echo "FAIL  $*"; FAIL=$((FAIL + 1)); pane | grep -v '^\s*$' | tail -15; }
 wait_pane() { local i; for i in $(seq 60); do pane | grep -qE -- "$1" && return 0; sleep 0.1; done; return 1; }
 expect() { if wait_pane "$2"; then ok "$1"; else bad "$1 (no /$2/ on screen)"; fi; }

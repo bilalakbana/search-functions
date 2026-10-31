@@ -18,6 +18,8 @@ jobs:
     timeout-minutes: 45
     permissions:
       contents: write # gh release create
+    env:
+      SF_STRICT_SKIPS: "1" # an e2e skip fails the release
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
