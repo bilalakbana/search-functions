@@ -357,7 +357,19 @@ fn run(tab: Tab, query: String, extra: Vec<OsString>, start: Start) -> anyhow::R
     };
 
     let mut terminal = ratatui::try_init().context("starting the terminal")?;
-    let keys = KeyReports::choose(std::env::var_os("TMUX").is_some(), || {
+    // one tmux call: its server options say whether it can pass modified keys on as sf reads them
+    let tmux_options = std::env::var_os("TMUX").is_some().then(|| {
+        Command::new("tmux")
+            .args(["show-options", "-s"])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default()
+    });
+    let keys = KeyReports::choose(tmux_options.as_deref(), || {
         ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false)
     });
     // ratatui's hook leaves raw mode and the alternate screen; this one also ends the mouse capture
@@ -511,7 +523,7 @@ fn event_loop(
 /// How sf asks the terminal to tell modified keys apart (Bilal: Ctrl-Shift-Alt-F is not Ctrl-Alt-F). In
 /// tmux xterm's modifyOtherKeys mode 1, which tmux passes on as csi-u (`ESC[102;8u`) when its
 /// `extended-keys` is on and its `extended-keys-format` csi-u; elsewhere the kitty protocol, where the
-/// terminal has it; else nothing, and both keys reach sf as Ctrl-Alt-F.
+/// terminal has it; else nothing (tmux's xterm format too), and both keys reach sf as Ctrl-Alt-F.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum KeyReports {
     Off,
@@ -523,15 +535,27 @@ const MODIFY_OTHER_KEYS_ON: &str = "\x1b[>4;1m";
 const MODIFY_OTHER_KEYS_OFF: &str = "\x1b[>4;0m";
 
 impl KeyReports {
-    /// tmux knows no kitty protocol: it is asked for modifyOtherKeys, and only another terminal is
-    /// asked (`kitty`) whether it has the kitty protocol.
-    fn choose(tmux: bool, kitty: impl FnOnce() -> bool) -> KeyReports {
-        if tmux {
-            KeyReports::ModifyOtherKeys
-        } else if kitty() {
-            KeyReports::Kitty
-        } else {
-            KeyReports::Off
+    /// `tmux`: tmux's `show-options -s` (empty when it could not be read), None outside tmux. tmux
+    /// knows no kitty protocol: it is asked for modifyOtherKeys, unless its `extended-keys` is off or
+    /// its `extended-keys-format` xterm (it would answer `ESC[27;7;102~`, which crossterm drops, and
+    /// Shift-Tab, Ctrl-Alt-F, Ctrl-Alt-H would never reach sf). Only another terminal is asked
+    /// (`kitty`) whether it has the kitty protocol.
+    fn choose(tmux: Option<&str>, kitty: impl FnOnce() -> bool) -> KeyReports {
+        let Some(options) = tmux else {
+            return if kitty() {
+                KeyReports::Kitty
+            } else {
+                KeyReports::Off
+            };
+        };
+        let option = |name: &str| {
+            options
+                .lines()
+                .find_map(|l| l.strip_prefix(name)?.strip_prefix(' '))
+        };
+        match (option("extended-keys"), option("extended-keys-format")) {
+            (Some("off"), _) | (_, Some("xterm")) => KeyReports::Off,
+            _ => KeyReports::ModifyOtherKeys,
         }
     }
 
@@ -701,16 +725,32 @@ mod tests {
 
     #[test]
     fn modified_keys_are_asked_for_as_the_terminal_can_tell_them() {
-        // tmux: xterm's modifyOtherKeys mode 1, which tmux reports as csi-u (extended-keys on)
+        // tmux (its `show-options -s`): xterm's modifyOtherKeys mode 1, which tmux reports as csi-u
+        let csi_u =
+            "escape-time 10\nextended-keys on\nextended-keys-format csi-u\nfocus-events off\n";
         let mut asked = false;
-        let in_tmux = KeyReports::choose(true, || {
+        let in_tmux = KeyReports::choose(Some(csi_u), || {
             asked = true;
             true
         });
         assert_eq!(in_tmux, KeyReports::ModifyOtherKeys);
         assert!(!asked, "tmux is not asked for the kitty protocol");
-        assert_eq!(KeyReports::choose(false, || true), KeyReports::Kitty);
-        assert_eq!(KeyReports::choose(false, || false), KeyReports::Off);
+        // tmux's xterm format answers mode 1 with ESC[27;7;102~, which crossterm drops: not asked
+        let xterm = "extended-keys on\nextended-keys-format xterm\n";
+        assert_eq!(KeyReports::choose(Some(xterm), || true), KeyReports::Off);
+        let off = "extended-keys off\nextended-keys-format csi-u\n";
+        assert_eq!(KeyReports::choose(Some(off), || true), KeyReports::Off);
+        // the query failed, or a tmux without extended-keys-format (it sends csi-u anyway)
+        assert_eq!(
+            KeyReports::choose(Some(""), || true),
+            KeyReports::ModifyOtherKeys
+        );
+        assert_eq!(
+            KeyReports::choose(Some("extended-keys on\n"), || true),
+            KeyReports::ModifyOtherKeys
+        );
+        assert_eq!(KeyReports::choose(None, || true), KeyReports::Kitty);
+        assert_eq!(KeyReports::choose(None, || false), KeyReports::Off);
         assert_eq!(MODIFY_OTHER_KEYS_ON, "\x1b[>4;1m");
         assert_eq!(MODIFY_OTHER_KEYS_OFF, "\x1b[>4;0m");
     }

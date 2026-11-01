@@ -618,8 +618,6 @@ find_saved=$(awk '/^\[/ { s = ($0 == "[find]") } s' "$XDG/sf/config.toml" 2>/dev
     && ok 'git: Find'"'"'s options saved as [find]' || bad "git: [find] not saved: ${find_saved:-none}"
 keys Escape
 expect 'git: Esc back to the list'         'Git › '
-keys C-M-f
-expect_not 'versions: Ctrl-Alt-F is not it'  'Search in versions'
 keys C-M-S-f
 expect 'versions: Ctrl-Shift-Alt-F, every version' 'Search in versions › type a pattern'
 expect 'versions: nothing typed, every file'"'"'s history' 'Search in versions › .* 12/12'
@@ -653,6 +651,52 @@ shot theme
 keys Escape
 expect 'theme: quit'                       '^READY>\s*$'
 [[ $(cat "$W/xdg-theme/sf/config.toml") == $'[theme]\nborder = 99' ]] && ok 'theme: its config untouched' || bad 'theme: its config changed'
+
+# modified_keys FORMAT: the keys that need tmux's extended keys, sf started anew in its extended-keys-format
+# FORMAT, each with a config of its own. csi-u: sf asks for modifyOtherKeys and reads ESC[102;7u; xterm:
+# tmux would answer ESC[27;7;102~, which crossterm drops, so sf does not ask and the keys come as they
+# always did (Ctrl-Shift-Alt-F as ESC ^F, the same as Ctrl-Alt-F: Search in versions has no key there)
+modified_keys() {
+    local f=$1 p=$PASS x=$FAIL s=$SKIP
+    tm set -s extended-keys-format "$f"
+    keys "clear; cd '$T' && XDG_CONFIG_HOME='$W/xdg-$f' '$SF'" Enter
+    expect "$f: sf starts"                      'Files › type to filter'
+    type_ 'main'
+    expect "$f: main typed"                     "Files › main .* 1/$n_files"
+    keys Tab Tab
+    expect "$f: Tab Tab to Deep"                'Deep › main'
+    keys BTab
+    expect "$f: Shift-Tab back to Content"      'Content › main'
+    keys BTab
+    expect "$f: Shift-Tab back to Files"        "Files › main .* 1/$n_files"
+    keys C-M-h
+    expect "$f: Ctrl-Alt-H clears the query"    "Files › type to filter .* $n_files/$n_files"
+    keys Tab; type_ 'needle'
+    expect "$f: Content finds needle"           'Content › needle .* 5/5'
+    keys C-M-f; type_ 'main'
+    expect "$f: Ctrl-Alt-F filters the rows"    'Content filter › main · pattern: needle .* 1/5'
+    keys Escape
+    expect "$f: Esc back to the pattern"        'Content › needle .* 5/5'
+    keys Escape
+    expect "$f: quit"                           '^READY>\s*$'
+    keys "clear; XDG_CONFIG_HOME='$W/xdg-$f' '$SF' git" Enter
+    expect "$f: the Git tab"                    'second \(feat\)'
+    keys C-M-f
+    expect_not "$f: Ctrl-Alt-F is not Search in versions" 'Search in versions'
+    keys C-M-S-f
+    if [[ $f == csi-u ]]; then
+        expect "$f: Ctrl-Shift-Alt-F is Search in versions" 'Search in versions › type a pattern'
+        keys Escape
+        expect "$f: Esc back to the commits"    'Git › '
+    else
+        expect_not "$f: Ctrl-Shift-Alt-F arrives as Ctrl-Alt-F, no Search in versions" 'Search in versions'
+    fi
+    keys Escape
+    expect "$f: quit Git"                       '^READY>\s*$'
+    echo "pass $f: pass=$((PASS - p)) fail=$((FAIL - x)) skip=$((SKIP - s))"
+}
+modified_keys csi-u
+modified_keys xterm
 
 echo "pass=$PASS fail=$FAIL skip=$SKIP (screens in $SHOTS)"
 tm kill-server
