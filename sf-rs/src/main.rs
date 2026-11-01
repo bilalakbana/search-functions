@@ -98,9 +98,15 @@ const MESSAGES_PER_FRAME: usize = 2000;
 
 fn main() -> ExitCode {
     use_bundle();
+    runner::end_engines_with_sf();
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     let (tab, query, print, nul, extra) = match cli::parse(&args) {
         Ok(Cli::InFile { file, query }) => {
+            // as `sf open` says it, not as a window with "1 path could not be read"
+            if !Path::new(&file).exists() {
+                eprintln!("sf in: no such file or folder: {}", file.to_string_lossy());
+                return ExitCode::from(1);
+            }
             return report(run(Tab::Content, query, Vec::new(), Start::InFile(file)));
         }
         Ok(Cli::View { view, file }) => {

@@ -399,6 +399,7 @@ fn run_limited(
             kill_group(Some(pgid)); // a newer request came while this one started
         } else {
             st.running.push(pgid);
+            crate::runner::track(pgid);
         }
     }
     let (out, cut) = read_capped(
@@ -411,6 +412,7 @@ fn run_limited(
         kill_group(Some(pgid));
     }
     lock(&shared.state).running.retain(|&g| g != pgid);
+    crate::runner::untrack(pgid);
     for mut c in children {
         let _ = c.wait();
     }

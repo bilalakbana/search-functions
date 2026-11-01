@@ -12,6 +12,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -39,6 +40,13 @@ const MAX_ERRORS: usize = 100;
 const MAX_RECORD: usize = 64 << 10;
 /// The longest stderr line kept.
 const MAX_ERROR_LINE: usize = 4 << 10;
+/// The most rows a list of matches (Matching lines, Each match, the versions search) keeps: a row
+/// takes about 200 bytes, so 200 MB. A one-letter pattern in a large tree has tens of millions, more
+/// memory than the machine has (2.7 million Each match rows of `struct` in Linux's tree: 537 MB).
+#[cfg(not(test))]
+const MAX_MATCH_ROWS: usize = 1_000_000;
+#[cfg(test)]
+const MAX_MATCH_ROWS: usize = 1000;
 
 pub struct Runner {
     tx: Sender<ListMsg>,
@@ -87,6 +95,7 @@ impl Runner {
                 return;
             }
         };
+        track(child.id());
         let stdout = child.stdout.take().expect("stdout is piped");
         let stderr = child.stderr.take().expect("stderr is piped");
         let child = Arc::new(Mutex::new((child, false)));
@@ -118,6 +127,7 @@ impl Runner {
         let mut guard = job.child.lock().unwrap_or_else(|e| e.into_inner());
         let (child, reaped) = &mut *guard;
         if !*reaped {
+            untrack(child.id());
             // SAFETY: kill(2) with a negative pid signals that process group; the group's id is our
             // unreaped child's pid, so it cannot belong to anyone else.
             unsafe { libc::kill(-(child.id() as libc::pid_t), libc::SIGKILL) };
@@ -130,6 +140,7 @@ impl Runner {
 /// Waits for the child after its output has ended, without holding the lock while it runs (cancel
 /// needs it).
 fn reap(job: &Mutex<(Child, bool)>) {
+    untrack(job.lock().unwrap_or_else(|e| e.into_inner()).0.id());
     loop {
         {
             let mut guard = job.lock().unwrap_or_else(|e| e.into_inner());
@@ -140,6 +151,52 @@ fn reap(job: &Mutex<(Child, bool)>) {
             }
         }
         thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// The process groups of the engines running now (the list's, the preview's). Each has a group of its
+/// own, so cancelling ends what it started; but then the signal that ends sf (SIGHUP when the terminal
+/// closes, SIGTERM, Ctrl-C's SIGINT under --print) never reaches them, and an engine that finds
+/// nothing to write ran on for good. `end_engines_with_sf` kills these groups first.
+/// shortcut: SIGKILL cannot be caught, so `kill -9` of sf still leaves an engine running until it
+/// writes; a slot is a group, and more than GROUPS.len() at once go untracked.
+static GROUPS: [AtomicI32; 8] = [const { AtomicI32::new(0) }; 8];
+
+/// `pgid` is an engine's process group from now on, until `untrack`, which comes before its reaping.
+pub fn track(pgid: u32) {
+    let pgid = pgid as i32;
+    let _ = GROUPS.iter().any(|g| {
+        g.compare_exchange(0, pgid, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    });
+}
+
+pub fn untrack(pgid: u32) {
+    for g in &GROUPS {
+        let _ = g.compare_exchange(pgid as i32, 0, Ordering::SeqCst, Ordering::SeqCst);
+    }
+}
+
+/// SIGHUP, SIGTERM, SIGINT and SIGQUIT kill the engines' process groups, then end sf as they would.
+pub fn end_engines_with_sf() {
+    extern "C" fn on_signal(signal: libc::c_int) {
+        for g in &GROUPS {
+            let pgid = g.load(Ordering::SeqCst);
+            if pgid > 0 {
+                // SAFETY: kill(2) is async-signal-safe; the group is our unreaped child's (`track`).
+                unsafe { libc::kill(-pgid, libc::SIGKILL) };
+            }
+        }
+        // SAFETY: signal(2) and raise(3) are async-signal-safe: sf ends as the signal says.
+        unsafe {
+            libc::signal(signal, libc::SIG_DFL);
+            libc::raise(signal);
+        }
+    }
+    let handler = on_signal as extern "C" fn(libc::c_int) as libc::sighandler_t;
+    for signal in [libc::SIGHUP, libc::SIGTERM, libc::SIGINT, libc::SIGQUIT] {
+        // SAFETY: signal(2) with a handler that makes only async-signal-safe calls.
+        unsafe { libc::signal(signal, handler) };
     }
 }
 
@@ -156,17 +213,34 @@ pub fn unreadable_note(n: usize) -> String {
     )
 }
 
+/// The first of ugrep's three lines for a pattern that is no regular expression; the second is the
+/// expression as ugrep compiled it (with its own `(?mi)`, which the position counts), the third a
+/// mark under the place with what is wrong.
+const REGEX_ERROR: &str = "ugrep: error: error at position ";
+
+/// ugrep's three lines for a bad regular expression as one that says what is wrong; None for others.
+fn regex_error(lines: &[String]) -> Option<String> {
+    let [first, _, mark] = lines else {
+        return None;
+    };
+    let what = mark
+        .trim_start_matches("\\___")
+        .trim_end_matches("___/")
+        .trim();
+    (first.starts_with(REGEX_ERROR) && mark.contains("___") && !what.is_empty()).then(|| {
+        format!(
+            "ugrep: not a valid regular expression ({what}); \
+             ⚙ Config: Regular expression off searches the text as typed"
+        )
+    })
+}
+
 /// The engine's stderr lines as errors; the `unreadable` ones as one line at the end.
 fn read_errors(generation: u64, stderr: impl Read, tx: &Sender<ListMsg>) {
     let mut shown = 0;
     let mut more = 0;
     let mut unread = 0;
-    let (mut reader, mut line) = (BufReader::new(stderr), Vec::new());
-    while let Ok(Some(_)) = read_record(&mut reader, b'\n', &mut line, MAX_ERROR_LINE) {
-        let line = String::from_utf8_lossy(&line).trim().to_string();
-        if line.is_empty() {
-            continue;
-        }
+    let mut emit = |line: String| {
         if unreadable(line.as_bytes()) {
             unread += 1;
         } else if shown == MAX_ERRORS {
@@ -174,8 +248,37 @@ fn read_errors(generation: u64, stderr: impl Read, tx: &Sender<ListMsg>) {
         } else if tx.send(ListMsg::Error(generation, line)).is_ok() {
             shown += 1;
         } else {
-            return;
+            return false;
         }
+        true
+    };
+    let (mut reader, mut line) = (BufReader::new(stderr), Vec::new());
+    let mut held = Vec::new();
+    while let Ok(Some(_)) = read_record(&mut reader, b'\n', &mut line, MAX_ERROR_LINE) {
+        let line = String::from_utf8_lossy(&line).trim().to_string();
+        if line.is_empty() {
+            continue;
+        }
+        if held.is_empty() && !line.starts_with(REGEX_ERROR) {
+            if !emit(line) {
+                return;
+            }
+            continue;
+        }
+        held.push(line);
+        if held.len() == 3 {
+            let lines = std::mem::take(&mut held);
+            let sent = match regex_error(&lines) {
+                Some(one) => emit(one),
+                None => lines.into_iter().all(&mut emit),
+            };
+            if !sent {
+                return;
+            }
+        }
+    }
+    if !held.into_iter().all(&mut emit) {
+        return;
     }
     if unread > 0 {
         let _ = tx.send(ListMsg::Error(generation, unreadable_note(unread)));
@@ -216,6 +319,7 @@ fn read_items(
     let (mut record, mut batch, mut records) = (Vec::new(), Vec::new(), Vec::new());
     let mut seen = HashSet::new();
     let mut split = Vec::new();
+    let mut listed = 0;
     let mut sent = Instant::now();
     loop {
         // Send what is there before a read that may wait for the engine.
@@ -265,6 +369,12 @@ fn read_items(
                 continue;
             }
             batch.push(item);
+            if delimiter == b'\n' {
+                listed += 1;
+                if listed == MAX_MATCH_ROWS {
+                    break; // dropping stdout ends the engine (SIGPIPE)
+                }
+            }
         }
     }
     match kind {
@@ -282,6 +392,14 @@ fn read_items(
     if !batch.is_empty() {
         let _ = tx.send(ListMsg::Items(generation, batch));
     }
+    if listed == MAX_MATCH_ROWS {
+        let _ = tx.send(ListMsg::Error(generation, cut_note()));
+    }
+}
+
+/// What the list says when it stopped at MAX_MATCH_ROWS.
+fn cut_note() -> String {
+    format!("only the first {MAX_MATCH_ROWS} matches are listed: a narrower pattern lists them all")
 }
 
 /// Search and version rows are lines, but a path may hold a newline: its row then comes as several
@@ -588,6 +706,39 @@ mod tests {
         );
         assert!(items.is_empty());
         assert_eq!(errors, ["oops", "two"]);
+    }
+
+    #[test]
+    fn a_list_of_matches_stops_at_its_most_rows_and_says_so() {
+        // an engine that never ends: the list stops it at MAX_MATCH_ROWS
+        let endless = sh("while :; do printf 'a\\0001\\037x\\n'; done");
+        let (items, errors) = run(endless, ParseKind::SearchLines);
+        assert_eq!(items.len(), MAX_MATCH_ROWS);
+        assert_eq!(errors, [cut_note()]);
+        // a file list (one row a file) is not cut
+        let files = sh("i=0; while [ $i -lt 1100 ]; do printf 'f%d\\0' $i; i=$((i+1)); done");
+        let (items, errors) = run(files, ParseKind::SearchFiles { archives: false });
+        assert_eq!((items.len(), errors.len()), (1100, 0));
+    }
+
+    #[test]
+    fn a_bad_regular_expression_is_one_line_that_says_what_is_wrong() {
+        // ugrep's own three lines: the position counts in its (?mi) prefix, the mark loses its column
+        let script = "printf 'ugrep: error: error at position 7\\n(?mi)a(\\n       \\\\___mismatched ( )\\n\\n' >&2";
+        let (_, errors) = run(sh(script), ParseKind::Files);
+        assert_eq!(
+            errors,
+            ["ugrep: not a valid regular expression (mismatched ( )); \
+              ⚙ Config: Regular expression off searches the text as typed"]
+        );
+        let script =
+            "printf 'ugrep: error: error at position 19\\n(?mi)abc(\\n mismatched ( )___/\\n' >&2";
+        let (_, errors) = run(sh(script), ParseKind::Files);
+        assert!(errors[0].contains("(mismatched ( ))"), "{errors:?}");
+        // anything else, or the output ending early, stays as it was
+        let script = "printf 'ugrep: error: error at position 3\\nother\\n' >&2";
+        let (_, errors) = run(sh(script), ParseKind::Files);
+        assert_eq!(errors, ["ugrep: error: error at position 3", "other"]);
     }
 
     #[test]

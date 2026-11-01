@@ -144,6 +144,9 @@ else
     want="sf $v"
     got=$("$SF" --version) && [[ $got == "$want" ]] && ok "version: --version prints $want" || bad "version: --version printed '$got', want '$want'"
 fi
+got=$("$SF" in "$W/no such file" 2>&1 </dev/null); code=$?
+[[ $code -eq 1 && $got == "sf in: no such file or folder: $W/no such file" ]] \
+    && ok 'sf in: a missing file is said, as sf open says it' || bad "sf in: missing file: exit $code, '$got'"
 
 tm kill-server 2>/dev/null
 # \$TMUX and \$TMUX_PANE are the private server's (expanded inside the pane), never the caller's own tmux;
@@ -703,6 +706,26 @@ modified_keys() {
 }
 modified_keys csi-u
 modified_keys xterm
+
+# A closed terminal (SIGHUP) ends the engine too: it runs in a process group of its own, which the
+# terminal's signal never reaches. ugrep's Each match over a 20 MB line of a writes nothing for minutes.
+# The engine is found in /proc by its pattern (no ps in the package test's images), matched inside bash.
+engines_of() { local p c; for p in /proc/[0-9]*; do c=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null); [[ $c == *ugrep*'a|zq'* ]] && echo "${p#/proc/}"; done; }
+mkdir -p "$W/hup" "$W/xdg-hup/sf"
+python3 -I -c "open('$W/hup/long.txt', 'w').write('a' * 20000000)"
+printf '[content]\neach_match = true\n' > "$W/xdg-hup/sf/config.toml"
+tm new-window -d -t e2e -n hup -c "$W/hup" "env -i HOME=$HOME PATH=${PANE_PATH@Q} TERM=xterm-256color \
+    LANG=C.UTF-8 XDG_CONFIG_HOME=$W/xdg-hup '$SF' content 'a|zq'"
+for i in $(seq 50); do [[ -n $(engines_of) ]] && break; sleep 0.1; done
+if [[ -z $(engines_of) ]]; then
+    bad 'hangup: the slow search never started'
+else
+    tm kill-window -t e2e:hup
+    for i in $(seq 30); do [[ -z $(engines_of) ]] && break; sleep 0.1; done
+    left=$(engines_of)
+    if [[ -z $left ]]; then ok 'hangup: a closed terminal ends the search engine too'
+    else bad "hangup: the engine runs on after the terminal closed (pids $left)"; kill $left 2>/dev/null; fi
+fi
 
 echo "pass=$PASS fail=$FAIL skip=$SKIP (screens in $SHOTS)"
 tm kill-server
