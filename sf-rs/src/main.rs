@@ -283,10 +283,26 @@ fn doctor() -> ExitCode {
             &engines,
             config::default_path().as_deref(),
             root.as_deref(),
+            tmux_options().as_deref(),
             &run
         )
     );
     ExitCode::SUCCESS
+}
+
+/// tmux's `show-options -s` (empty when it cannot be read), None outside tmux.
+fn tmux_options() -> Option<String> {
+    std::env::var_os("TMUX").is_some().then(|| {
+        Command::new("tmux")
+            .args(["show-options", "-s"])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default()
+    })
 }
 
 /// A release package's `lib/sf` beside sf's folder, when there is one: it goes in front of sf's own
@@ -358,17 +374,7 @@ fn run(tab: Tab, query: String, extra: Vec<OsString>, start: Start) -> anyhow::R
 
     let mut terminal = ratatui::try_init().context("starting the terminal")?;
     // one tmux call: its server options say whether it can pass modified keys on as sf reads them
-    let tmux_options = std::env::var_os("TMUX").is_some().then(|| {
-        Command::new("tmux")
-            .args(["show-options", "-s"])
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-            .ok()
-            .filter(|o| o.status.success())
-            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
-            .unwrap_or_default()
-    });
+    let tmux_options = tmux_options();
     let keys = KeyReports::choose(tmux_options.as_deref(), || {
         ratatui::crossterm::terminal::supports_keyboard_enhancement().unwrap_or(false)
     });
@@ -523,7 +529,9 @@ fn event_loop(
 /// How sf asks the terminal to tell modified keys apart (Bilal: Ctrl-Shift-Alt-F is not Ctrl-Alt-F). In
 /// tmux xterm's modifyOtherKeys mode 1, which tmux passes on as csi-u (`ESC[102;8u`) when its
 /// `extended-keys` is on and its `extended-keys-format` csi-u; elsewhere the kitty protocol, where the
-/// terminal has it; else nothing (tmux's xterm format too), and both keys reach sf as Ctrl-Alt-F.
+/// terminal has it; else nothing (tmux's xterm format too), and both keys reach sf as Ctrl-Alt-F. Not
+/// with tmux's `extended-keys always` and the xterm format: tmux sends `ESC[27;7;102~` unasked, crossterm
+/// drops it, and Shift-Tab, Ctrl-Alt-F and Ctrl-Alt-H do not reach sf either (`sf doctor` warns).
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum KeyReports {
     Off,
@@ -548,11 +556,7 @@ impl KeyReports {
                 KeyReports::Off
             };
         };
-        let option = |name: &str| {
-            options
-                .lines()
-                .find_map(|l| l.strip_prefix(name)?.strip_prefix(' '))
-        };
+        let option = |name| platform::setting(options, name);
         match (option("extended-keys"), option("extended-keys-format")) {
             (Some("off"), _) | (_, Some("xterm")) => KeyReports::Off,
             _ => KeyReports::ModifyOtherKeys,

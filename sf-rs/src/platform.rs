@@ -326,6 +326,14 @@ fn existing(path: &Path) -> Result<PathBuf, String> {
     }
 }
 
+/// The value of the option `name` in tmux's `show-options -s` output (`extended-keys on`), None when
+/// the output has no such line.
+pub fn setting<'a>(options: &'a str, name: &str) -> Option<&'a str> {
+    options
+        .lines()
+        .find_map(|l| l.strip_prefix(name)?.strip_prefix(' '))
+}
+
 /// `path` with `.` and `..` resolved by name, as `realpath -s` does (symbolic links are kept).
 pub fn normalize(path: &Path) -> PathBuf {
     use std::path::Component;
