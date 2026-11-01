@@ -478,7 +478,8 @@ cd ~/.SearchFunctions/sf-rs && cargo build --release && bash tests/speed_ratio.s
   | 5 | 223 / 136 | 1.64 | 87 ms |
 
   Median: TUI 215 ms, `--print` 136 ms → **overhead 79 ms (limit 150) PASS**; the ratio of the medians is 1.58,
-  which the old 1.5 rule would have failed on the same unchanged tree.
+  and the median of the 5 run ratios (the old rule's number) is 1.64, which the old 1.5 rule would have failed on
+  the same unchanged tree.
 - Earlier the same day, with three stale debug sf processes using about 30 % of one CPU (load 0.58–0.94), the
   median ratios were 1.41, 1.54 and 1.55 — the same flapping.
 
