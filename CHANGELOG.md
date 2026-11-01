@@ -3,6 +3,27 @@
 sf searches file names, file contents (also PDF, Office files and archives) and git history in one terminal window.
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the newest release comes first.
 
+## [0.13.3] - 2026-11-01
+
+### Fixed
+- In tmux with `extended-keys on` and the default `extended-keys-format xterm`, Shift-Tab, Ctrl-Alt-F and
+  Ctrl-Alt-H work again (0.13.2 lost them). sf asks tmux for modified keys only when tmux sends them in the
+  csi-u form that sf reads. In the xterm form, Ctrl-Shift-Alt-F arrives as Ctrl-Alt-F, so Search in versions
+  has no key there. The README and the help say so.
+- `sf doctor` warns about a search root under `/mnt/` only in WSL, where it is a slow Windows drive mount.
+  Plain Linux also mounts disks there.
+
+### Changed
+- `sf doctor` warns in tmux when `extended-keys always` meets the xterm form. tmux then sends Shift-Tab,
+  Ctrl-Alt-F and Ctrl-Alt-H in a form that sf cannot read.
+- The help names tmux's three settings for Ctrl-Shift-Alt-F (`extended-keys on`, `extended-keys-format csi-u`,
+  `xterm*:extkeys`) on rows of their own, so 80 columns show them whole.
+
+### Tests
+- The end-to-end suite also checks the xterm form. On tmux before 3.5 (no `extended-keys-format`), it prints
+  one `INFO` line for that check.
+- The package test also runs in Debian 13 (tmux 3.5a), so four images now.
+
 ## [0.13.2] - 2026-11-01
 
 First release of this line: 0.13.0 and 0.13.1 were built but never published (the package step of 0.13.0
@@ -64,4 +85,5 @@ images), so everything below ships as 0.13.2.
 Releases up to 0.12.1 came out before this changelog. Their notes are on the
 [GitHub releases page](https://github.com/bilalakbana/search-functions/releases).
 
+[0.13.3]: https://github.com/bilalakbana/search-functions/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/bilalakbana/search-functions/compare/v0.12.1...v0.13.2
