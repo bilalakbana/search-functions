@@ -1424,7 +1424,6 @@ impl App {
         vec![self.run_list()]
     }
 
-    /// The versions to choose from, newest first.
     /// Why Git's list `generation` is empty, in place of its rows.
     pub fn on_why_empty(&mut self, generation: u64, why: &str) {
         if generation == self.list_gen {
@@ -1432,6 +1431,7 @@ impl App {
         }
     }
 
+    /// The versions to choose from, newest first.
     pub fn on_versions(&mut self, list: Vec<VersionRow>) {
         if let Some(v) = &mut self.versions {
             v.list = list;
