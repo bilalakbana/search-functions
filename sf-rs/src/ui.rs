@@ -2359,12 +2359,23 @@ mod tests {
             input_row(&buf)
         );
         assert!(a.layout.help.height > 0);
-        // tmux's three settings and no key in its xterm format: the row is as wide as the manual's
-        // widest, so 128 columns show it whole
-        let tall = render(&mut a, 128, 60);
-        let versions = "Ctrl-Shift-Alt-F  Git: Search in versions; tmux: extended-keys on, \
-                        extended-keys-format csi-u (not xterm), xterm*:extkeys";
-        assert!(find(&tall, versions).is_some(), "{versions}");
+        // tmux's three settings and no key in its xterm format: rows of their own, whole at 80 columns
+        let versions = [
+            ("Ctrl-Shift-Alt-F", "Git: Search in versions"),
+            (
+                "  in tmux",
+                "set -s extended-keys on, extended-keys-format csi-u",
+            ),
+            ("", "set -as terminal-features ',xterm*:extkeys'"),
+            ("", "xterm format or always: no key there, see README"),
+        ];
+        for w in [80, 128] {
+            let tall = render(&mut a, w, 60);
+            for (what, does) in versions {
+                let line = format!("  {what:<17} {does}");
+                assert!(find(&tall, &line).is_some(), "{w} columns: {line}");
+            }
+        }
         for c in "ctrl-f".chars() {
             a.handle_key(key(KeyCode::Char(c)), now);
         }
