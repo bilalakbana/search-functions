@@ -85,7 +85,7 @@ const KEYS: &[(&str, &str)] = &[
         "set -s extended-keys on, extended-keys-format csi-u",
     ),
     ("", "set -as terminal-features ',xterm*:extkeys'"),
-    ("", "xterm format or always: no key there, see README"),
+    ("", "extended-keys-format xterm: no key there, see README"),
     ("Ctrl-L", "hide or show the preview"),
     ("Ctrl-R", "run the list again"),
     ("Alt-↑  Alt-↓", "scroll the preview"),

@@ -2367,7 +2367,7 @@ mod tests {
                 "set -s extended-keys on, extended-keys-format csi-u",
             ),
             ("", "set -as terminal-features ',xterm*:extkeys'"),
-            ("", "xterm format or always: no key there, see README"),
+            ("", "extended-keys-format xterm: no key there, see README"),
         ];
         for w in [80, 128] {
             let tall = render(&mut a, w, 60);
