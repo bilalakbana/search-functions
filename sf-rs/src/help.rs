@@ -81,7 +81,7 @@ const KEYS: &[(&str, &str)] = &[
     ),
     (
         "Ctrl-Shift-Alt-F",
-        "Git: Search in versions (tmux needs extended-keys on, see README)",
+        "Git: Search in versions; tmux: extended-keys on, extended-keys-format csi-u (not xterm), xterm*:extkeys",
     ),
     ("Ctrl-L", "hide or show the preview"),
     ("Ctrl-R", "run the list again"),

@@ -2359,6 +2359,12 @@ mod tests {
             input_row(&buf)
         );
         assert!(a.layout.help.height > 0);
+        // tmux's three settings and no key in its xterm format: the row is as wide as the manual's
+        // widest, so 128 columns show it whole
+        let tall = render(&mut a, 128, 60);
+        let versions = "Ctrl-Shift-Alt-F  Git: Search in versions; tmux: extended-keys on, \
+                        extended-keys-format csi-u (not xterm), xterm*:extkeys";
+        assert!(find(&tall, versions).is_some(), "{versions}");
         for c in "ctrl-f".chars() {
             a.handle_key(key(KeyCode::Char(c)), now);
         }
