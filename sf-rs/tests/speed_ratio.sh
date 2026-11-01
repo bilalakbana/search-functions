@@ -17,6 +17,9 @@
 #        missing: 100,000 empty files f000000 … f099999 in one folder)
 #        SF_BIN=path/to/sf (default target/release/sf); SF_SPEED_OVERHEAD_MS=150 (the overhead's limit)
 set -u
+# the timer ($EPOCHREALTIME) follows LC_NUMERIC: a German locale gives a decimal comma, and the arithmetic
+# below would read only the digits after it
+export LC_ALL=C
 die() { echo "speed_ratio.sh: $*" >&2; exit 2; }
 crate=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 SF=${SF_BIN:-$crate/target/release/sf}
