@@ -564,3 +564,18 @@ Folders left for Bilal to delete when he no longer needs them: `/home/bilal/work
 `/home/bilal/workspace/sf-live/scale-bigline` (50 MiB), `/home/bilal/workspace/sf-live/scale-tools` (scripts,
 results and the per-run config folders in `work/`).
 
+## Release 0.13.3 (2026-11-01)
+
+Content: the fixes of the OCR review of `v0.12.1..v0.13.2` (tmux `extended-keys-format xterm` lost Shift-Tab,
+Ctrl-Alt-F and Ctrl-Alt-H; `sf doctor`'s `/mnt` warning only in WSL; help rows) and two more review rounds with
+fixes (`96a2432..401964a`; the third round found nothing). Notes: `CHANGELOG.md` `## [0.13.3]`.
+
+- Test run without a tag: run 41298189486 on `1e365f4`, green. Release run: 41298621497 on tag `v0.13.3`, green;
+  it published `sf-linux-x86_64.tar.gz` (13,385,500 bytes) and its `.sha256`.
+- The package test now runs in four images. Ubuntu 22.04, Debian 12 and Ubuntu 24.04 (tmux before 3.5)
+  gave `pass=252 fail=0 skip=0`; Debian 13 (tmux 3.5a, with the xterm-form checks) gave `pass=266 fail=0 skip=0`.
+- Checked after the release: the downloaded package matches its sha256, and its `bin/sf --version` prints
+  `sf 0.13.3`. `~/.cargo/bin/sf` on vpsbilal is 0.13.3 (`cargo install --locked --path sf-rs`).
+- Open: `.github/workflows/release.yml` (the comment on line 2 and the step name) still says three images. The
+  narrow token cannot push workflow files, so Bilal changes these lines with his next workflow change.
+
