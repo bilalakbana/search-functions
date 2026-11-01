@@ -67,22 +67,24 @@ selected item are named at the right of the tab bar. Options are kept in $XDG_CO
 
 QUERY starts the tab with it: what filters the list in Files, Folders and Git, the pattern in Content and
 Deep, where typing then filters the files found by their names (Ctrl-Alt-F; Esc edits the pattern, as
-Ctrl-Alt-F does at any time; Ctrl-F finds in the preview). Options after -- go to the starting tab's engine: fd in Files and Folders, ugrep in
-Content and Deep, git log in Git (sf files -- -e rs, sf content TODO -- -t py, sf deep needle -- -i);
-those that change what the engine prints are refused. With --print, or when the output goes to a pipe or
-a file, sf prints the list instead of opening the window: on a terminal as the window shows it, into a
-pipe the real paths (Content and Deep: ugrep's own path:line:text); exit status 0 when something was
-listed, 1 when nothing, 2 on an error. --print0 puts a NUL after each path instead of the newline (as
-fd -0 and ugrep -0) for xargs -0: a list of files is path NUL path NUL ..., Matching lines and Each match
-path NUL line:text, Git's rows end in NUL; a terminal gets the rows as with --print.
+Ctrl-Alt-F does at any time; Ctrl-F finds in the preview).
+
+Options after -- go to the starting tab's engine: fd in Files and Folders, ugrep in Content and Deep,
+git log in Git (sf files -- -e rs, sf content TODO -- -t py, sf deep needle -- -i); those that change
+what the engine prints are refused. With --print, or when the output goes to a pipe or a file, sf prints
+the list instead of opening the window: on a terminal as the window shows it, into a pipe the real paths
+(Content and Deep: ugrep's own path:line:text); exit status 0 when something was listed, 1 when nothing,
+2 on an error. --print0 puts a NUL after each path instead of the newline (as fd -0 and ugrep -0) for
+xargs -0: a list of files is path NUL path NUL ..., Matching lines and Each match path NUL line:text,
+Git's rows end in NUL; a terminal gets the rows as with --print.
 
 sf in FILE [WORDS...] opens the window inside FILE, as Ctrl-T does (in tmux Ctrl-T opens it in a window
 of its own); the words are read as its options say (all on a line by default), Esc quits. sf history,
 log and diff [--short] FILE show the file's history with its changes, its log, its changes against HEAD
 (whole or short), as Ctrl-U, Alt-U, Ctrl-G and Alt-G do (in tmux in windows of their own); Esc quits.
 
-sf grep-versions is what the Git tab's Ctrl-Shift-Alt-F runs: git grep over every version (or those given),
-documents and archives too with --documents.
+sf grep-versions is what the Git tab's Ctrl-Shift-Alt-F runs: git grep over every version (or those
+given), documents and archives too with --documents.
 
 The other forms do one action as the window does, on Linux and on WSL alike: open PATH with its default
 application, reveal it in the file manager, copy PATH (on WSL its Windows form) or TEXT to the

@@ -6,7 +6,9 @@
 //! and every stderr line becomes an `Error`.
 
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::io::{self, BufRead, BufReader, Read};
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
@@ -91,9 +93,16 @@ impl Runner {
 
         let err_tx = self.tx.clone();
         let errors = thread::spawn(move || read_errors(generation, stderr, &err_tx));
-        let (tx, job) = (self.tx.clone(), child.clone());
+        let (tx, job, root) = (self.tx.clone(), child.clone(), root.to_path_buf());
         thread::spawn(move || {
-            read_items(generation, kind, keep.map(|k| k.keeper()), stdout, &tx);
+            read_items(
+                generation,
+                kind,
+                keep.map(|k| k.keeper()),
+                stdout,
+                &tx,
+                &root,
+            );
             let _ = errors.join();
             reap(&job);
             let _ = tx.send(ListMsg::Done(generation));
@@ -187,6 +196,7 @@ fn read_items(
     keep: Option<Keeper>,
     stdout: impl Read,
     tx: &Sender<ListMsg>,
+    root: &Path,
 ) {
     let delimiter = match kind {
         ParseKind::Files | ParseKind::Folders | ParseKind::SearchFiles { .. } => 0,
@@ -205,6 +215,7 @@ fn read_items(
     let mut reader = BufReader::with_capacity(64 * 1024, stdout);
     let (mut record, mut batch, mut records) = (Vec::new(), Vec::new(), Vec::new());
     let mut seen = HashSet::new();
+    let mut split = Vec::new();
     let mut sent = Instant::now();
     loop {
         // Send what is there before a read that may wait for the engine.
@@ -239,6 +250,9 @@ fn read_items(
             records.push(std::mem::take(&mut record)); // numbered once all are there
             continue;
         }
+        if delimiter == b'\n' && !rejoin(kind, &mut split, &mut record, root) {
+            continue;
+        }
         if let Some(item) = parse(kind, &record, 0) {
             if matches!(kind, ParseKind::SearchFiles { .. }) && !seen.insert(item.key.clone()) {
                 continue;
@@ -268,6 +282,60 @@ fn read_items(
     if !batch.is_empty() {
         let _ = tx.send(ListMsg::Items(generation, batch));
     }
+}
+
+/// Search and version rows are lines, but a path may hold a newline: its row then comes as several
+/// lines, and only the last holds the NUL after the path. The lines before it wait in `split`; false
+/// while `record` may be such a start. A Matching lines or Each match row joins the waiting lines that
+/// make its path one that exists in `root` (the others are ugrep's "Binary file … matches" lines);
+/// a version row (`REV:PATH\0LINE\0TEXT`) joins from a line that starts with `REV:` to its second NUL.
+fn rejoin(kind: ParseKind, split: &mut Vec<Vec<u8>>, record: &mut Vec<u8>, root: &Path) -> bool {
+    const MAX_SPLIT: usize = 64;
+    let nuls = record.iter().filter(|&&b| b == 0).count();
+    if kind == ParseKind::Versions {
+        let starts = |r: &[u8]| {
+            r.get(40) == Some(&b':')
+                && r.get(..40)
+                    .is_some_and(|h| h.iter().all(u8::is_ascii_hexdigit))
+        };
+        if split.is_empty() && (nuls >= 2 || !starts(record)) {
+            return true;
+        }
+        split.push(std::mem::take(record));
+        let joined = split.join(&b'\n');
+        if joined.iter().filter(|&&b| b == 0).count() < 2 && split.len() < MAX_SPLIT {
+            return false;
+        }
+        split.clear();
+        *record = joined;
+        return true;
+    }
+    let Some(nul) = record.iter().position(|&b| b == 0) else {
+        if split.len() == MAX_SPLIT {
+            split.remove(0);
+        }
+        split.push(std::mem::take(record));
+        return false;
+    };
+    // Each match: ugrep's colour reset after the name is not part of it
+    let name = &record[..nul];
+    let name = name.strip_suffix(b"\x1b[m").unwrap_or(name);
+    let joins = (1..=split.len()).find(|&k| {
+        let mut path = split[split.len() - k..].join(&b'\n');
+        path.push(b'\n');
+        path.extend_from_slice(name);
+        root.join(OsStr::from_bytes(&path))
+            .symlink_metadata()
+            .is_ok()
+    });
+    if let Some(k) = joins {
+        let mut joined = split[split.len() - k..].join(&b'\n');
+        joined.push(b'\n');
+        joined.append(record);
+        *record = joined;
+    }
+    split.clear();
+    true
 }
 
 /// Git rows numbered as sub-functions/git_logs does: the oldest commit 1, the newest the count.
@@ -587,6 +655,40 @@ mod tests {
         let mut r = Runner::new(tx);
         r.start(1, cmd, kind, None, root);
         until_done(&rx, 1)
+    }
+
+    #[test]
+    fn a_newline_in_a_path_keeps_its_matching_line_one_row() {
+        let dir = temp_dir("runner_newline");
+        std::fs::write(dir.join("match\nnewline.txt"), "").unwrap();
+        std::fs::write(dir.join("plain.txt"), "").unwrap();
+        // ugrep's Matching lines rows, with a binary's message line before the split one
+        let rows = "Binary file x.bin matches\\nmatch\\nnewline.txt\\0001\\037\\001needle\\002 a\\n\
+                    plain.txt\\0002\\037\\001needle\\002 b\\n";
+        let (items, errors) = run_in(printf(rows), ParseKind::SearchLines, &dir);
+        assert_eq!(errors, Vec::<String>::new());
+        assert_eq!(keys(&items), ["match\nnewline.txt", "plain.txt"]);
+        assert_eq!(items[0].line, Some(1));
+        // Each match: ugrep's colour reset after the name, and an escape sequence in the name itself
+        std::fs::write(dir.join("esc-\x1b[31mred.txt"), "").unwrap();
+        let rows = "match\\nnewline.txt\\033[m\\0001\\033[m\\037\\033[7mneedle\\033[m a\\n\
+                    esc-\\033[31mred.txt\\033[m\\0002\\033[m\\037\\033[7mneedle\\033[m b\\n";
+        let (items, _) = run_in(printf(rows), ParseKind::SearchMatches, &dir);
+        assert_eq!(keys(&items), ["match\nnewline.txt", "esc-\x1b[31mred.txt"]);
+        assert_eq!(items[1].line, Some(2));
+    }
+
+    #[test]
+    fn a_newline_in_a_versions_path_keeps_its_row_one_row() {
+        let rev = "a".repeat(40);
+        let rows = format!(
+            "Binary file {rev}:x matches\\n{rev}:two\\nlines.txt\\0003\\000needle\\n{rev}:b.txt\\0004\\000n\\n"
+        );
+        let (items, _) = run(printf(&rows), ParseKind::Versions);
+        assert_eq!(
+            keys(&items),
+            [format!("{rev}:two\nlines.txt"), format!("{rev}:b.txt")]
+        );
     }
 
     #[test]

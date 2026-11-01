@@ -274,9 +274,12 @@ pub fn parse(kind: ParseKind, raw: &[u8], git_number: u32) -> Option<Item> {
 }
 
 /// ugrep's coloured Each match record as a Matching lines record: the match, `ESC[7m` up to the next
-/// `ESC[m`, between MATCH_START and MATCH_END; every other escape sequence dropped.
+/// `ESC[m`, between MATCH_START and MATCH_END; every other escape sequence after the name dropped.
+/// The name keeps its bytes (it may hold an escape sequence), less ugrep's colour reset after it.
 fn marked(raw: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(raw.len());
+    let (name, raw) = raw.split_at(raw.iter().position(|&b| b == 0).unwrap_or(0));
+    let mut out = name.strip_suffix(b"\x1b[m").unwrap_or(name).to_vec();
+    out.reserve(raw.len());
     let mut in_match = false;
     let mut i = 0;
     while i < raw.len() {
