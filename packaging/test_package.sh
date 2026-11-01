@@ -18,17 +18,28 @@ mkdir -p "$W" && W=$(realpath -- "$W")
 images=("${@:3}")
 (( ${#images[@]} )) || images=(ubuntu:22.04 debian:12 ubuntu:24.04)
 
-# runs in the container as root; /work is given back to the caller's user ($OWNER) on the way out
+# The crate version that `sf --version` must print: the container mounts only sf-rs/tests, not Cargo.toml
+V=$(sed -n 's/^version = "\(.*\)"/\1/p' "$here/../sf-rs/Cargo.toml" | head -1)
+[[ -n $V ]] || { echo "test_package.sh: no version in $here/../sf-rs/Cargo.toml" >&2; exit 2; }
+
+# runs in the container: apt-get and the setup as root, then sf and the e2e as the user "tester" (root reads
+# the e2e's chmod 000 paths anyway); /work is given back to the caller's user ($OWNER) on the way out
 inside='
 set -u
 trap '\''chown -R "$OWNER" /work'\'' EXIT
+[[ -n ${SF_EXPECT_VERSION:-} ]] || { echo "SETUP SF_EXPECT_VERSION is not set"; exit 3; }
 export DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8 LC_ALL=C.UTF-8
 apt-get update -qq >/dev/null && apt-get install -y -qq git tmux zip python3 file less >/dev/null \
     || { echo "SETUP apt-get failed"; exit 3; }
 for e in fd fdfind bat batcat ugrep ug delta; do
     command -v "$e" >/dev/null && { echo "SETUP the image already has $e"; exit 3; }
 done
-mkdir -p ~/.local && tar -xzf /pkg.tar.gz -C ~/.local || { echo "SETUP unpacking failed"; exit 3; }
+useradd -m tester || { echo "SETUP useradd failed"; exit 3; }
+mkdir -p /home/tester/.local && tar -xzf /pkg.tar.gz -C /home/tester/.local || { echo "SETUP unpacking failed"; exit 3; }
+chown -R tester /home/tester /work
+cat > /tmp/as-tester.sh <<\EOT
+set -u
+export HOME=/home/tester
 fail=0
 ~/.local/bin/sf doctor > /work/doctor.txt; rc=$?
 cat /work/doctor.txt
@@ -37,9 +48,11 @@ for e in fd bat ugrep ugrep+ delta; do
     if grep -qE "^  $e +$HOME/.local/lib/sf/$e " /work/doctor.txt; then echo "PASS  doctor: $e from the package"
     else echo "FAIL  doctor: $e is not the packaged one"; fail=1; fi
 done
-export PATH=$HOME/.local/lib/sf:$PATH   # for the tests'"'"' own fd / ugrep calls
+export PATH=$HOME/.local/lib/sf:$PATH   # for the fd / ugrep calls of the tests themselves
 SF_STRICT_SKIPS=1 SF_BIN=$HOME/.local/bin/sf /tests/e2e.sh /work/e2e || fail=1
 exit $fail
+EOT
+su -s /bin/bash -c "bash /tmp/as-tester.sh" tester
 '
 
 failed=()
@@ -47,7 +60,8 @@ for img in "${images[@]}"; do
     out=$W/${img//[:\/]/-}
     mkdir -p "$out"
     echo "== $img"
-    docker run --rm -e OWNER="$(id -u):$(id -g)" -v "$PKG:/pkg.tar.gz:ro" -v "$here/../sf-rs/tests:/tests:ro" \
+    docker run --rm -e OWNER="$(id -u):$(id -g)" -e SF_EXPECT_VERSION="$V" \
+        -v "$PKG:/pkg.tar.gz:ro" -v "$here/../sf-rs/tests:/tests:ro" \
         -v "$out:/work" "$img" bash -c "$inside" > "$out/log.txt" 2>&1
     rc=$?
     grep -E '^(FAIL|SETUP)|^pass=' "$out/log.txt"

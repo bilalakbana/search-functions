@@ -9,9 +9,13 @@
 # delta or file through PATH.
 # With SF_STRICT_SKIPS=1 (the release runs) a skip is a failure: a FAIL line that names the skip.
 # The config lives in a fresh XDG_CONFIG_HOME. Screens are saved as ANSI captures for ansi2png.py.
+# `sf --version` must print the crate version: SF_EXPECT_VERSION names it, else ../Cargo.toml beside the
+# tests (a copy of tests/ alone, as in the package test's container, needs SF_EXPECT_VERSION).
+# Run it as a user other than root: root reads the chmod 000 paths anyway, so a root run skips those cases.
 #
 # usage: tests/e2e.sh WORKDIR        (WORKDIR: a new, empty folder; nothing in it is ever deleted)
 #        SF_BIN=path/to/sf tests/e2e.sh WORKDIR   (default: target/debug/sf)
+#        SF_EXPECT_VERSION=0.13.2 tests/e2e.sh WORKDIR   (default: the version in ../Cargo.toml)
 set -u
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 W=${1:?usage: e2e.sh WORKDIR}
@@ -133,8 +137,13 @@ engine() { env -i HOME="$HOME" PATH="$PANE_PATH" XDG_CONFIG_HOME="$XDG" "$SF" do
 DELTA=$(engine delta) FILE=$(engine file)
 [[ $FILE == /* ]] && "$FILE" -b /dev/null >/dev/null 2>&1 || FILE=   # found, and it must run too
 
-want="sf $(sed -n 's/^version = "\(.*\)"/\1/p' "$here/../Cargo.toml" | head -1)"
-got=$("$SF" --version) && [[ $got == "$want" ]] && ok "version: --version prints $want" || bad "version: --version printed '$got', want '$want'"
+v=${SF_EXPECT_VERSION:-$(sed -n 's/^version = "\(.*\)"/\1/p' "$here/../Cargo.toml" 2>/dev/null | head -1)}
+if [[ -z $v ]]; then
+    bad "version: no SF_EXPECT_VERSION and no Cargo.toml with a version beside the tests ($here/../Cargo.toml)"
+else
+    want="sf $v"
+    got=$("$SF" --version) && [[ $got == "$want" ]] && ok "version: --version prints $want" || bad "version: --version printed '$got', want '$want'"
+fi
 
 tm kill-server 2>/dev/null
 # \$TMUX and \$TMUX_PANE are the private server's (expanded inside the pane), never the caller's own tmux;
@@ -467,22 +476,27 @@ mkdir "$W/names" && printf 'needle\n' > "$W/names/a"$'\n'"b.txt" && printf 'need
 keys "clear; cd '$W/names'; '$SF' content needle --print0 | tr '\0\n' '|~'; echo; '$SF' files --print0 | tr '\0\n' '#~'; echo; cd '$T'" Enter
 expect 'print0: content, a NUL after each path' '^a~b\.txt\|c d\.txt\|\s*$'
 expect 'print0: files, a NUL after each path'   '^a~b\.txt#c d\.txt#\s*$'
-# a file and a folder sf may not read: one line says so (as Bilal's user: root reads them anyway)
-mkdir -p "$W/perms/locked" && printf 'needle\n' | tee "$W/perms/r.txt" "$W/perms/u.txt" "$W/perms/locked/x.txt" >/dev/null
-chmod 000 "$W/perms/u.txt" "$W/perms/locked"
-keys "clear; cd '$W/perms'; '$SF' content needle --print 2>&1 | cat; echo rc-perms=\${PIPESTATUS[0]}" Enter
-expect 'perms: --print names the count'    '^2 paths could not be read\s*$'
-expect 'perms: --print exits 2'            '^rc-perms=2'
-keys "clear; '$SF' content needle" Enter
-expect 'perms: the window says it once'    '2 paths could not be read'
-expect 'perms: the readable file listed'   'Content filter › .* · pattern: needle .* 1/1'
-[[ $(pane | grep -c 'could not be read') -eq 1 ]] && ok 'perms: one line, not one a path' || bad 'perms: more than one line'
-shot perms
-keys Escape
-expect 'perms: Esc back to the pattern'    'Content › needle .* 1/1'
-keys Escape
-expect 'perms: quit'                       '^READY>\s*$'
-chmod 700 "$W/perms/u.txt" "$W/perms/locked"
+# a file and a folder sf may not read: one line says so. Root reads chmod 000 paths anyway, so a root run
+# skips the whole block with one line (a FAIL under SF_STRICT_SKIPS=1)
+if [[ $(id -u) == 0 ]]; then
+    skip 'perms: the run is root, which reads chmod 000 paths anyway (run e2e.sh as another user)'
+else
+    mkdir -p "$W/perms/locked" && printf 'needle\n' | tee "$W/perms/r.txt" "$W/perms/u.txt" "$W/perms/locked/x.txt" >/dev/null
+    chmod 000 "$W/perms/u.txt" "$W/perms/locked"
+    keys "clear; cd '$W/perms'; '$SF' content needle --print 2>&1 | cat; echo rc-perms=\${PIPESTATUS[0]}" Enter
+    expect 'perms: --print names the count'    '^2 paths could not be read\s*$'
+    expect 'perms: --print exits 2'            '^rc-perms=2'
+    keys "clear; '$SF' content needle" Enter
+    expect 'perms: the window says it once'    '2 paths could not be read'
+    expect 'perms: the readable file listed'   'Content filter › .* · pattern: needle .* 1/1'
+    [[ $(pane | grep -c 'could not be read') -eq 1 ]] && ok 'perms: one line, not one a path' || bad 'perms: more than one line'
+    shot perms
+    keys Escape
+    expect 'perms: Esc back to the pattern'    'Content › needle .* 1/1'
+    keys Escape
+    expect 'perms: quit'                       '^READY>\s*$'
+    chmod 700 "$W/perms/u.txt" "$W/perms/locked"
+fi
 keys "cd '$T'" Enter
 # UTF-16 with its byte order mark: ugrep reads it as text, so Content, Deep and the preview find the words
 mkdir "$W/utf16" && { printf '\xff\xfe'; printf 'hello needle\n' | iconv -f UTF-8 -t UTF-16LE; } > "$W/utf16/le.txt"
