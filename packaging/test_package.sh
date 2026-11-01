@@ -1,6 +1,8 @@
 #!/bin/bash
-# Test of a release package in clean containers, by default Ubuntu 22.04, Debian 12 and Ubuntu 24.04. Only
-# what the tests themselves need comes from apt (git, tmux, zip, python3, file, less), none of sf's engines.
+# Test of a release package in clean containers, by default Ubuntu 22.04, Debian 12, Ubuntu 24.04 and
+# Debian 13. Only what the tests themselves need comes from apt (git, tmux, zip, python3, file, less), none
+# of sf's engines. Debian 13 is there for its tmux 3.5a: the e2e's xterm pass needs extended-keys-format
+# (tmux 3.5 and later); the older images' tmux 3.2a, 3.3a and 3.4 run only the csi-u pass.
 # The package is unpacked into ~/.local as the README says; then `sf doctor` must name the bundled engines,
 # and sf-rs/tests/e2e.sh must pass against the installed sf. Logs and screens of each image go to
 # WORKDIR/<image>/.
@@ -16,7 +18,7 @@ W=${2:?usage: test_package.sh PACKAGE WORKDIR [IMAGE...]}
 mkdir -p "$W" && W=$(realpath -- "$W")
 [[ -z $(ls -A "$W") ]] || { echo "test_package.sh: $W is not empty" >&2; exit 2; }
 images=("${@:3}")
-(( ${#images[@]} )) || images=(ubuntu:22.04 debian:12 ubuntu:24.04)
+(( ${#images[@]} )) || images=(ubuntu:22.04 debian:12 ubuntu:24.04 debian:13)
 
 # The crate version that `sf --version` must print: the container mounts only sf-rs/tests, not Cargo.toml
 V=$(sed -n 's/^version = "\(.*\)"/\1/p' "$here/../sf-rs/Cargo.toml" | head -1)
