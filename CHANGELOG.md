@@ -3,10 +3,11 @@
 sf searches file names, file contents (also PDF, Office files and archives) and git history in one terminal window.
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the newest release comes first.
 
-## [0.13.1] - 2026-10-31
+## [0.13.2] - 2026-11-01
 
-First release of this line: the 0.13.0 tag was built but never published (the package step stopped on an
-outdated constant in `packaging/bundle.toml`), so everything below ships as 0.13.1.
+First release of this line: 0.13.0 and 0.13.1 were built but never published (the package step of 0.13.0
+stopped on an outdated constant in `packaging/bundle.toml`, then the package test of 0.13.1 failed on all three
+images), so everything below ships as 0.13.2.
 
 ### Added
 - `sf --version` prints `sf <version>` (the crate version at build time) and exits 0. After `--` it stays
@@ -54,10 +55,13 @@ outdated constant in `packaging/bundle.toml`), so everything below ships as 0.13
 - `tests/speed_ratio.sh` measures the TUI's own overhead on 100,000 files: the median time to the first row
   minus the median `sf files --print` time over 5 paired release runs, failing above 150 ms. The ratio of the
   two is printed for information; it sat at 1.5 and flapped there on an unchanged tree.
+- The package test runs the suite in each container as a non-root user, so the `chmod 000` cases really run
+  (a root run skips them with one line). It names the crate version with `SF_EXPECT_VERSION`, because the
+  container mounts only `tests/`: the old check compared against `sf ` and failed on every image.
 
 ## Earlier releases
 
 Releases up to 0.12.1 came out before this changelog. Their notes are on the
 [GitHub releases page](https://github.com/bilalakbana/search-functions/releases).
 
-[0.13.1]: https://github.com/bilalakbana/search-functions/compare/v0.12.1...v0.13.1
+[0.13.2]: https://github.com/bilalakbana/search-functions/compare/v0.12.1...v0.13.2
