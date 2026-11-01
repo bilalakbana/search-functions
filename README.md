@@ -220,7 +220,7 @@ without it they use xdg-open, `open_in_file_manager` and wl-copy.
 
 The release package is built by `python3 -I packaging/build.py NEW_EMPTY_FOLDER` from the versions pinned in
 `packaging/bundle.toml` (needs docker and `rustup target add x86_64-unknown-linux-musl`) and tested in clean
-Ubuntu 22.04, Debian 12 and Ubuntu 24.04 containers by `packaging/test_package.sh PACKAGE NEW_EMPTY_FOLDER`;
+Ubuntu 22.04, Debian 12, Ubuntu 24.04 and Debian 13 containers by `packaging/test_package.sh PACKAGE NEW_EMPTY_FOLDER`;
 `.github/workflows/release.yml` does both for a pushed tag `vX.Y.Z` and publishes the release.
 
 Tests: `cargo test` in `sf-rs`, `sf-rs/tests/e2e.sh NEW_EMPTY_FOLDER` (runs it in a private tmux server),

@@ -268,7 +268,7 @@ Release package (Step 2 of `docs/sf-next-steps.md`, 2026-10-17):
   carries), ugrep's libraries (pcre2, zlib, bzip2, xz, lz4, zstd, brotli, musl, the GCC runtime exception), the
   166 Rust crates sf links (their license files; three MIT crates without one get a NOTICE with their authors)
   and Rust's standard library (`COPYRIGHT-library.html` and its license texts).
-- `packaging/test_package.sh` unpacks the package in clean Ubuntu 22.04, Debian 12 and Ubuntu 24.04 containers
+- `packaging/test_package.sh` unpacks the package in clean Ubuntu 22.04, Debian 12, Ubuntu 24.04 and Debian 13 containers
   (apt gives only the tests' own git, tmux, zip, python3, file, less; the image must have none of the engines),
   checks that `sf doctor` names the bundled engines and sub-functions, and runs `tests/e2e.sh` against the
   installed sf and `tests/sub_functions.sh` against the packaged scripts.
