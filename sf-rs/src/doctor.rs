@@ -61,7 +61,7 @@ pub fn report(
         platform.push("inside tmux".into());
     }
     row("Platform", &platform.join(", "));
-    if let Some(root) = root.filter(|r| r.starts_with("/mnt")) {
+    if let Some(root) = root.filter(|r| p.wsl.is_some() && r.starts_with("/mnt")) {
         row(
             "Search root",
             &format!(
@@ -484,8 +484,12 @@ mod tests {
     }
 
     #[test]
-    fn a_search_root_under_mnt_is_warned_about() {
-        let s = setup("doctor_mnt", &[], wayland_tmux());
+    fn a_search_root_under_mnt_is_warned_about_in_wsl() {
+        let wsl = Platform {
+            wsl: Some("Ubuntu-24.04".into()),
+            ..Platform::default()
+        };
+        let s = setup("doctor_mnt", &[], wsl);
         let at = |root: Option<&str>| {
             report(
                 &s.env,
@@ -506,6 +510,22 @@ mod tests {
         for root in [Some("/home/bilal/x"), Some("/mntx/c"), None] {
             let r = at(root);
             assert!(!r.contains("Search root"), "{root:?}: {r}");
+        }
+    }
+
+    #[test]
+    fn a_search_root_under_mnt_outside_wsl_is_no_warning() {
+        // plain Linux mounts disks under /mnt too; only WSL's drive mounts are slow
+        let s = setup("doctor_mnt_linux", &[], wayland_tmux());
+        for root in ["/mnt", "/mnt/c/Users/bilal/project"] {
+            let r = report(
+                &s.env,
+                &s.engines,
+                Some(&s.config),
+                Some(Path::new(root)),
+                &answers,
+            );
+            assert!(!r.contains("Search root"), "{root}: {r}");
         }
     }
 
