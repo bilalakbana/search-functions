@@ -345,7 +345,7 @@ fn draw_preview(
     let inner = block.inner(area);
     frame.render_widget(block, area);
     // Only the lines that can be on screen: a preview can have hundreds of thousands.
-    let from = (app.preview_scroll as usize).min(app.preview.lines.len());
+    let from = app.preview_scroll.min(app.preview.lines.len());
     let mut shown: Vec<Line> = app.preview.lines[from..]
         .iter()
         .take(inner.height as usize)

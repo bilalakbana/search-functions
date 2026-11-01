@@ -295,7 +295,7 @@ pub struct App {
     pub preview: Text<'static>,
     /// Content's and Deep's pattern with its count in the previewed file (the preview's top right).
     pub preview_found: Option<Found>,
-    pub preview_scroll: u16,
+    pub preview_scroll: usize,
     /// The tabs whose preview Ctrl-L has hidden; every tab starts with one.
     previews_hidden: Vec<Tab>,
     /// The current row's preview, while it is wanted and not here yet.
@@ -810,7 +810,7 @@ impl App {
                     .saturating_sub(self.layout.preview.height as usize);
                 let to =
                     (fraction(self.layout.preview_bar).min(1.0) * last as f64).round() as usize;
-                self.preview_scroll = u16::try_from(to).unwrap_or(u16::MAX);
+                self.preview_scroll = to;
                 return Vec::new();
             }
             if self.layout.list_bar.contains(at) {
@@ -999,7 +999,7 @@ impl App {
     /// The current match's line with two lines above it.
     fn scroll_to_match(&mut self) {
         if let Some(i) = self.preview_find.as_ref().and_then(Find::found_line) {
-            self.preview_scroll = u16::try_from(i.saturating_sub(2)).unwrap_or(u16::MAX);
+            self.preview_scroll = i.saturating_sub(2);
         }
     }
 
@@ -1145,7 +1145,7 @@ impl App {
             .current()
             .and_then(|i| i.line)
             .map_or(0, |n| (n as usize).saturating_sub(third));
-        self.preview_scroll = u16::try_from(at).unwrap_or(u16::MAX);
+        self.preview_scroll = at;
     }
 
     /// Starts the current tab's list afresh.
@@ -1278,8 +1278,11 @@ impl App {
     }
 
     fn scroll_preview(&mut self, by: i32) -> Vec<Effect> {
-        let last = self.preview.lines.len().saturating_sub(1) as i32;
-        self.preview_scroll = (i32::from(self.preview_scroll) + by).clamp(0, last.max(0)) as u16;
+        let last = self.preview.lines.len().saturating_sub(1);
+        self.preview_scroll = self
+            .preview_scroll
+            .saturating_add_signed(by as isize)
+            .min(last);
         Vec::new()
     }
 
@@ -3483,6 +3486,42 @@ pub(crate) mod tests {
         assert_eq!(a.handle_key(ctrl('l'), now), []);
         assert!(!a.preview_visible());
         assert_eq!(a.handle_key(ctrl('l'), now), [Effect::Preview]);
+    }
+
+    #[test]
+    fn preview_scroll_reaches_the_end_of_a_preview_longer_than_65535_lines() {
+        // a 4 MiB line that bat wraps for a narrow pane is ~140,000 lines: the position wrapped at u16
+        let (mut a, now) = app(Tab::Content);
+        feed(&mut a, &["a"]);
+        a.layout.preview = Rect::new(1, 2, 30, 17);
+        a.on_preview(PreviewMsg {
+            found: None,
+            generation: a.preview_gen,
+            text: Text::raw("x\n".repeat(140_000)),
+        });
+        for _ in 0..140_000 / 17 + 2 {
+            a.handle_key(alt(KeyCode::Down), now);
+        }
+        assert_eq!(
+            a.preview_scroll, 139_999,
+            "the last line, not wrapped round"
+        );
+        a.preview_find = None;
+        a.layout.preview_bar = Rect::new(40, 2, 1, 17);
+        a.handle_mouse(
+            MouseEvent {
+                kind: MouseEventKind::Down(MouseButton::Left),
+                column: 40,
+                row: 18,
+                modifiers: KeyModifiers::NONE,
+            },
+            now,
+        );
+        assert_eq!(
+            a.preview_scroll,
+            140_000 - 17,
+            "the bar's bottom: the last page"
+        );
     }
 
     fn drawn(a: &mut App) {
