@@ -9,10 +9,12 @@ use crate::commands::{Cmd, GIT_SHOW_FORMAT, GREP_PALETTE, PreviewPlan, delta_arg
 use crate::engines::Engines;
 
 /// The output of `git config -z --show-scope --name-only --get-regexp ^filter\.` in `folder`: scope
-/// NUL key NUL, one pair per setting; empty when git cannot say.
-fn scoped_filters(git: &Path, folder: &Path) -> Vec<u8> {
-    std::process::Command::new(git)
+/// NUL key NUL, one pair per setting (exit 1: none). Err holds git's first error line: a git before
+/// 2.26 (no --show-scope) or a config git cannot read; the diff view then runs no diff.
+fn scoped_filters(git: &Path, folder: &Path) -> Result<Vec<u8>, String> {
+    let out = std::process::Command::new(git)
         .args(crate::engines::GIT_RUNS_NO_PROGRAMS)
+        .envs(crate::engines::GIT_ENV)
         .arg("-C")
         .arg(folder)
         .args([
@@ -24,10 +26,17 @@ fn scoped_filters(git: &Path, folder: &Path) -> Vec<u8> {
             r"^filter\.",
         ])
         .stdin(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
         .output()
-        .map(|o| o.stdout)
-        .unwrap_or_default()
+        .map_err(|e| e.to_string())?;
+    if matches!(out.status.code(), Some(0 | 1)) {
+        return Ok(out.stdout);
+    }
+    let err = String::from_utf8_lossy(&out.stderr);
+    Err(err
+        .lines()
+        .next()
+        .unwrap_or("git config failed")
+        .to_string())
 }
 
 /// `-c` settings that turn off each content filter the repository's own config (local or worktree
@@ -158,6 +167,7 @@ pub fn view_plan(kind: &ViewKind, width: u16, e: &Engines) -> PreviewPlan {
     let git = |folder: &Path| {
         Cmd::new(git_path)
             .args(crate::engines::GIT_RUNS_NO_PROGRAMS)
+            .envs(&crate::engines::GIT_ENV)
             .arg("-C")
             .arg(folder)
     };
@@ -165,16 +175,33 @@ pub fn view_plan(kind: &ViewKind, width: u16, e: &Engines) -> PreviewPlan {
         ViewKind::Diff { path, full } => {
             let (folder, name) = place(path);
             let context = if *full { WHOLE } else { "--unified=10" };
-            let Some(off) = filters_off(&scoped_filters(git_path, &folder)) else {
+            let scoped = match scoped_filters(git_path, &folder) {
+                Ok(scoped) => scoped,
+                Err(e) => {
+                    let e = crate::items::printable(&e);
+                    return PreviewPlan::Text(format!(
+                        "sf cannot read the repository's filters, so it shows no diff: {e}"
+                    ));
+                }
+            };
+            let Some(off) = filters_off(&scoped) else {
                 return PreviewPlan::Text(
                     "The repository's config names a filter that sf cannot turn off".into(),
                 );
             };
+            // a submodule's own config (its filters, its hooks) would run in the git status that
+            // git diff starts in it to see whether it holds changes; a new commit in it still shows
             let cmd = git(&folder)
                 .args(off)
                 .arg("diff")
                 .args(NO_PROGRAMS)
-                .args(["--color=always", "HEAD", context, "--"])
+                .args([
+                    "--ignore-submodules=dirty",
+                    "--color=always",
+                    "HEAD",
+                    context,
+                    "--",
+                ])
                 .arg(name);
             (cmd, true)
         }
@@ -294,11 +321,12 @@ fn version_plan(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::testutil::temp_dir;
+    use crate::testutil::{calls, stub, temp_dir};
 
     fn engines() -> Engines {
         Engines {
-            git: Some("/bin/git".into()),
+            // the diff view asks git for the repository's filters: true answers "none"
+            git: Some("/bin/true".into()),
             delta: Some("/bin/delta".into()),
             theme: "base16".into(),
             ..Engines::default()
@@ -317,7 +345,8 @@ mod tests {
         }
     }
 
-    /// `git` without its first arguments, which turn off the programs a repository's config names.
+    /// `git` without its first arguments and its environment, which turn off the programs a
+    /// repository's config names.
     fn without_guard(mut git: Cmd) -> Cmd {
         let n = crate::engines::GIT_RUNS_NO_PROGRAMS.len();
         assert_eq!(
@@ -325,6 +354,11 @@ mod tests {
             crate::engines::GIT_RUNS_NO_PROGRAMS.map(OsString::from)
         );
         git.args.drain(..n);
+        assert_eq!(
+            git.env,
+            crate::engines::GIT_ENV.map(|(k, v)| (k.to_string(), v.to_string()))
+        );
+        git.env.clear();
         git
     }
 
@@ -432,6 +466,7 @@ mod tests {
                 "diff",
                 "--no-ext-diff",
                 "--no-textconv",
+                "--ignore-submodules=dirty",
                 "--color=always",
                 "HEAD",
                 "--unified=99999999",
@@ -471,6 +506,37 @@ mod tests {
         assert_eq!(args, want, "git-lfs of the user's own config stays");
         assert_eq!(filters_off(b"local\0filter.x=y.clean\0"), None);
         assert_eq!(filters_off(b""), Some(Vec::new()));
+    }
+
+    #[test]
+    fn no_diff_when_git_cannot_name_the_repositorys_filters() {
+        let dir = temp_dir("view_old_git");
+        stub(&dir, "git");
+        let e = Engines {
+            git: Some(dir.join("git")),
+            ..engines()
+        };
+        let kind = ViewKind::Diff {
+            path: dir.join("a.txt"),
+            full: true,
+        };
+        // exit 1: no filter at all
+        std::fs::write(dir.join("git.exit"), "1").unwrap();
+        assert!(matches!(view_plan(&kind, 80, &e), PreviewPlan::Pipe(..)));
+        // a git before 2.26 knows no --show-scope: the filters would run, so there is no diff
+        std::fs::write(dir.join("git.exit"), "129").unwrap();
+        std::fs::write(
+            dir.join("git.err"),
+            "error: unknown option `show-scope'\nusage\n",
+        )
+        .unwrap();
+        let PreviewPlan::Text(t) = view_plan(&kind, 80, &e) else {
+            panic!("expected a text")
+        };
+        assert!(t.ends_with("unknown option `show-scope'"), "{t}");
+        let config = &calls(&dir, "git")[0];
+        let n = crate::engines::GIT_RUNS_NO_PROGRAMS.len();
+        assert_eq!(config[n + 2..n + 5], ["config", "-z", "--show-scope"]);
     }
 
     #[test]

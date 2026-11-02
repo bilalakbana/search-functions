@@ -107,6 +107,10 @@ impl Cmd {
         self.env.push((key.to_string(), value.to_string()));
         self
     }
+
+    pub fn envs(self, vars: &[(&str, &str)]) -> Cmd {
+        vars.iter().fold(self, |cmd, &(k, v)| cmd.env(k, v))
+    }
 }
 
 /// How a list's output is cut into rows and parsed.
@@ -556,6 +560,7 @@ pub fn list_plan_with(
             };
             let mut cmd = Cmd::new(git)
                 .args(crate::engines::GIT_RUNS_NO_PROGRAMS)
+                .envs(&crate::engines::GIT_ENV)
                 .arg("log");
             if opts.git.all_branches {
                 cmd = cmd.arg("--all");
@@ -1769,16 +1774,26 @@ mod tests {
     fn git_all_branches_flag() {
         let (cmd, kind) = run(list_plan(Tab::Git, &Options::default(), "", &engines()));
         assert_eq!(
-            &cmd.args[..6],
+            &cmd.args[..10],
             &os(&[
                 "-c",
                 "core.fsmonitor=false",
                 "-c",
                 "log.showSignature=false",
+                "-c",
+                "core.hooksPath=/dev/null",
+                "-c",
+                "diff.submodule=short",
                 "log",
                 "--all"
             ])[..],
             "a repository's config runs no program"
+        );
+        assert_eq!(
+            cmd.env,
+            [("GIT_NO_LAZY_FETCH", "1"), ("GIT_ALLOW_PROTOCOL", "none")]
+                .map(|(k, v)| (k.to_string(), v.to_string())),
+            "a partial clone fetches nothing"
         );
         assert!(
             cmd.args
@@ -2227,8 +2242,9 @@ mod tests {
             panic!("{plan:?}")
         };
         assert_eq!(show.program, PathBuf::from("/bin/git"));
+        let n = crate::engines::GIT_RUNS_NO_PROGRAMS.len();
         assert_eq!(
-            &show.args[4..7],
+            &show.args[n..n + 3],
             &os(&["-C", "/r", "show"])[..],
             "the root's repository"
         );

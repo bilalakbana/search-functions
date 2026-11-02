@@ -192,6 +192,7 @@ fn load_versions(app: &App) -> Result<Vec<versions::VersionRow>, String> {
     let git = app.engines.git.as_ref().ok_or("git is not installed")?;
     let out = Command::new(git)
         .args(engines::GIT_RUNS_NO_PROGRAMS)
+        .envs(engines::GIT_ENV)
         .args(versions::LOG_ARGS)
         .current_dir(&app.root)
         .stdin(Stdio::null())
@@ -216,6 +217,7 @@ fn name_rev(git: &Path, root: &Path, hashes: String) -> std::io::Result<Vec<u8>>
     use std::io::Write;
     let mut child = Command::new(git)
         .args(engines::GIT_RUNS_NO_PROGRAMS)
+        .envs(engines::GIT_ENV)
         .args(versions::NAME_REV_ARGS)
         .current_dir(root)
         .stdin(Stdio::piped())

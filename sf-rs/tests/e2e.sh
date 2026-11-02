@@ -797,6 +797,44 @@ done
 ran=$(cd "$W" && ls evilgit-ran-* 2>/dev/null | tr '\n' ' ')
 [[ -z $ran ]] && ok "git config: the repository's textconv, external diff, fsmonitor and clean filter do not run" \
     || bad "git config: the repository's programs ran: $ran"
+# Nor do its hooks (git diff writes the index when a file has a new time but the same text, as in an
+# unpacked archive, and that runs post-index-change), a submodule's own config (git diff looks into the
+# submodule; git log -p with diff.submodule=diff runs git diff in it) or a partial clone's fetch of a
+# missing object (its core.sshCommand)
+for p in hook:true subclean:cat subext:true ssh:false; do   # a clean filter writes its stdin back
+    printf '#!/bin/sh\ntouch %s\n%s\n' "$W/evilgit2-ran-${p%:*}" "${p#*:}" > "$W/evil2-${p%:*}" \
+        && chmod +x "$W/evil2-${p%:*}"
+done
+G=(git -c user.name=T -c user.email=t@t -c protocol.file.allow=always)
+mkdir -p "$W/evilhook" "$W/evilsub-src" "$W/evilsub" "$W/evilpc"
+(cd "$W/evilhook" && git init -q && printf 'a\n' > a.txt && git add a.txt && "${G[@]}" commit -qm one \
+    && cp "$W/evil2-hook" .git/hooks/post-index-change)
+(cd "$W/evilsub-src" && git init -q && printf 's\n' > s.txt && printf 's.txt filter=sf\n' > .gitattributes \
+    && git add -A && "${G[@]}" commit -qm s)
+(cd "$W/evilsub" && git init -q && printf 't\n' > t.txt && git add t.txt && "${G[@]}" commit -qm t \
+    && "${G[@]}" submodule -q add "$W/evilsub-src" sub && "${G[@]}" commit -qm sub \
+    && printf 'z\n' >> sub/s.txt && "${G[@]}" -C sub commit -qam s2 && git add sub && "${G[@]}" commit -qm bump \
+    && git -C sub config filter.sf.clean "$W/evil2-subclean" && git -C sub config filter.sf.required true \
+    && git -C sub config diff.external "$W/evil2-subext" && git config diff.submodule diff)
+# the partial clone's commit names a blob that was never written (mktree --missing): git must fetch it
+(cd "$W/evilpc" && git init -q && printf 'one\n' > a.txt \
+    && tree=$(printf '100644 blob %s\ta.txt\n' "$(git hash-object a.txt)" | git mktree --missing) \
+    && git update-ref HEAD "$(printf 'one\n' | "${G[@]}" commit-tree "$tree")" \
+    && git config core.repositoryformatversion 1 && git config extensions.partialClone origin \
+    && git config remote.origin.url ssh://example.invalid/x.git && git config remote.origin.promisor true \
+    && git config protocol.ssh.allow always && git config core.sshCommand "$W/evil2-ssh")
+sleep 1.1
+touch "$W/evilhook/a.txt" "$W/evilsub/sub/s.txt"
+for run in "evilhook diff a.txt" "evilsub diff ." "evilsub history ." "evilpc history a.txt"; do
+    read -r dir args <<< "$run"
+    tm new-window -d -t e2e -n evil -c "$W/$dir" "env -i HOME=$HOME PATH=${PANE_PATH@Q} TERM=xterm-256color \
+        LANG=C.UTF-8 XDG_CONFIG_HOME=$XDG '$SF' $args"
+    sleep 2
+    tm kill-window -t e2e:evil 2>/dev/null
+done
+ran=$(cd "$W" && ls evilgit2-ran-* 2>/dev/null | tr '\n' ' ')
+[[ -z $ran ]] && ok "git config: no hook, no submodule filter or external diff, no fetch of a partial clone runs" \
+    || bad "git config: the repository's programs ran: $ran"
 # ... and the settings that turn them off reach only sf's own git: a program sf opens (an editor, its
 # shells) keeps the user's git config
 mkdir -p "$W/envstub"

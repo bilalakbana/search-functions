@@ -366,6 +366,7 @@ pub fn filters(path_var: &std::ffi::OsStr) -> String {
 fn git_output(git: &Path, root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     let out = Command::new(git)
         .args(crate::engines::GIT_RUNS_NO_PROGRAMS)
+        .envs(crate::engines::GIT_ENV)
         .args(args)
         .current_dir(root)
         .stdin(Stdio::null())
@@ -476,6 +477,7 @@ fn grep_chunk(
 ) -> Result<bool, String> {
     let mut child = Command::new(git)
         .args(crate::engines::GIT_RUNS_NO_PROGRAMS)
+        .envs(crate::engines::GIT_ENV)
         .args(git_grep_args(q, revs))
         .current_dir(root)
         .stdin(Stdio::null())
@@ -528,6 +530,7 @@ fn documents(
         let doc = doc_kind(path).expect("only documents are held");
         let mut cat = Command::new(git)
             .args(crate::engines::GIT_RUNS_NO_PROGRAMS)
+            .envs(crate::engines::GIT_ENV)
             .args(["cat-file", "blob", blob])
             .current_dir(root)
             .stdin(Stdio::null())
