@@ -590,3 +590,27 @@ fixes (`96a2432..401964a`; the third round found nothing). Notes: `CHANGELOG.md`
 - Open: `.github/workflows/release.yml` (the comment on line 2 and the step name) still says three images. The
   narrow token cannot push workflow files, so Bilal changes these lines with his next workflow change.
 
+## Release 0.13.4 (2026-11-02)
+
+Content: a deep QA run (live sweep on git/git and linux clones, hostile files, three independent testers, seven
+OCR rounds and one GPT-6.1 Sol review). Mostly security: a searched folder's `.ugrep` and a downloaded `.git/`
+ran no program any more (filters, hooks also from config on git 2.54, submodules, a partial clone's fetch), plus
+the robustness fixes. Notes: `CHANGELOG.md` `## [0.13.4]`. Workspace with findings, decisions and the report:
+`~/workspace/sf-qa-2026-11-02/` (REPORT.md, FINDINGS.md, DECISIONS.md).
+
+- Reviews: OCR rounds `401964a..a600b20` (3 Medium), `a600b20..ab560be` (1 High, 3 Medium), `ab560be..9035d75`
+  (0), `9035d75..743305a` (1 Medium, 3 High that 0.13.3 already had), `743305a..703b0a8` (1 High, 3 Medium),
+  `703b0a8..664f5b5` (1 High, 1 Medium), `664f5b5..a54589b` (0). GPT-6.1 Sol on `v0.13.3..9035d75`: 7 findings,
+  5 new beyond OCR, 6 real; 3 fixed, 4 kept (low or theoretical). The release commit adds only the version, the
+  changelog and this file's state lines.
+- Test run without a tag: run 41423475494 on `c43ba4b`, green. Release run: 41424332101 on tag `v0.13.4`, green;
+  it published `sf-linux-x86_64.tar.gz` (13,410,357 bytes, sha256 `7016c33a…`) and its `.sha256`. Ubuntu 22.04,
+  Debian 12 and Ubuntu 24.04 gave `pass=269 fail=0 skip=0`; Debian 13 gave `pass=283 fail=0 skip=0`.
+- Checked after the release: the downloaded package matches its sha256; its `bin/sf --version` prints
+  `sf 0.13.4` and its doctor lists the bundled engines. `~/.cargo/bin/sf` on vpsbilal is 0.13.4.
+- Limit of the tests: hooks defined in config exist from git 2.54; every test image and vpsbilal have an older
+  git, so the e2e canaries for them cannot fail there. They were proved live with git 2.54.0 built from
+  kernel.org's tarball.
+- Open: the old fzf shell functions still pass a pattern with `-e` (a pattern `---` loads ugrep's config there)
+  and run git without the guards; the `release.yml` lines above.
+
