@@ -48,6 +48,11 @@ pub fn delta_args(theme: &str) -> Vec<OsString> {
     args
 }
 
+/// The first argument of every ugrep+ call: ugrep+ runs `ug`, which loads a `.ugrep` from the folder it
+/// searches, and a downloaded repository's `filter=txt:CMD` there ran CMD on every file (and could hide
+/// files). sf passes every option it needs itself.
+const NO_CONFIG: &str = "--no-config";
+
 /// The Git list: graph, short hash, author, refs, subject, age; the full hash after a 0x1f at the end.
 const GIT_LOG_FORMAT: &str = "--format=format:%C(bold blue)%h%C(reset) %C(dim white)%an%C(reset)%C(bold yellow)%d%C(reset) \
      %C(white)%s%C(reset) %C(bold green)(%ar)%C(reset)%x1f%H";
@@ -479,6 +484,7 @@ pub fn list_plan_with(
                 (false, _, true) => "-rzl",
             };
             let mut cmd = Cmd::new(program)
+                .args(documents.then_some(NO_CONFIG))
                 .args([first, "--sort=name"])
                 .args(reading.flags());
             if !binaries {
@@ -664,6 +670,7 @@ pub fn preview_plan_with(
             let grep = if s.documents { &e.ugrep_plus } else { &e.ugrep };
             let with_pattern = |g: &PathBuf, opts: &[&'static str]| {
                 Cmd::new(g)
+                    .args(s.documents.then_some(NO_CONFIG))
                     .args(s.reading.into(opts))
                     .args(extra)
                     .args(s.patterns(query))
@@ -695,7 +702,7 @@ pub fn preview_plan_with(
                     // documents and archives: their text as ugrep+ converts it
                     (Tab::Content, Some(plus)) if s.documents => Binary::Show(
                         Cmd::new(plus)
-                            .args(["-z", "-n", "--color=always", "-e", "", "--"])
+                            .args([NO_CONFIG, "-z", "-n", "--color=always", "-e", "", "--"])
                             .arg(&path)
                             .env("GREP_COLORS", GREP_PALETTE),
                     ),
@@ -1008,7 +1015,7 @@ mod tests {
         o.toggle(Tab::Deep, Opt::Documents);
         let (cmd, _) = run(list_plan(Tab::Deep, &o, "needle", &engines()));
         assert_eq!(cmd.program, PathBuf::from("/bin/ugrep+"));
-        assert_eq!(cmd.args[0], "-rzl");
+        assert_eq!(&cmd.args[..2], &os(&["--no-config", "-rzl"])[..]);
         let e = Engines {
             ugrep_plus: None,
             ..engines()
@@ -1456,6 +1463,7 @@ mod tests {
         assert_eq!(
             cmd.args,
             os(&[
+                "--no-config",
                 "-rzl",
                 "--sort=name",
                 "-i",
@@ -1503,7 +1511,10 @@ mod tests {
         o.toggle(Tab::Content, Opt::Archives);
         let (cmd, kind) = run(list_plan(Tab::Content, &o, "needle", &engines()));
         assert_eq!(cmd.program, PathBuf::from("/bin/ugrep+"));
-        assert_eq!(&cmd.args[..2], &os(&["-rzn", "--sort=name"])[..]);
+        assert_eq!(
+            &cmd.args[..3],
+            &os(&["--no-config", "-rzn", "--sort=name"])[..]
+        );
         assert!(cmd.args.contains(&"--replace=\x01%o\x02".into()));
         assert!(cmd.args.contains(&"--exclude=*.rar".into()));
         assert_eq!(kind, ParseKind::SearchLines);
@@ -1841,6 +1852,7 @@ mod tests {
         assert_eq!(
             binary.args,
             os(&[
+                "--no-config",
                 "-znao",
                 "-i",
                 "--color=always",
@@ -2004,7 +2016,7 @@ mod tests {
         o.toggle(Tab::Content, Opt::Archives);
         let (cmd, _) = run(list_plan(Tab::Content, &o, "needle", &engines()));
         assert_eq!(cmd.program, PathBuf::from("/bin/ugrep+"));
-        assert_eq!(&cmd.args[..1], &os(&["-rzno"])[..]);
+        assert_eq!(&cmd.args[..2], &os(&["--no-config", "-rzno"])[..]);
     }
 
     #[test]

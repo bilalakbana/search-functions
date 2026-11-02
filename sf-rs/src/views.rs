@@ -82,6 +82,11 @@ fn place(path: &Path) -> (PathBuf, OsString) {
     (folder.unwrap_or(Path::new("/")).to_path_buf(), name)
 }
 
+/// After every git command that prints changes or a file: a repository's own config (a downloaded tree
+/// with its .git/, a bare repository inside a clone) can name a diff program or a textconv program,
+/// which git ran as soon as the Git tab showed a commit. sf shows git's own diff, through delta.
+const NO_PROGRAMS: [&str; 2] = ["--no-ext-diff", "--no-textconv"];
+
 /// The commands of a view `width` columns wide.
 /// git's context for a whole file: more lines than any file has.
 const WHOLE: &str = "--unified=99999999";
@@ -96,13 +101,18 @@ pub fn view_plan(kind: &ViewKind, width: u16, e: &Engines) -> PreviewPlan {
             let (folder, name) = place(path);
             let context = if *full { WHOLE } else { "--unified=10" };
             let cmd = git(&folder)
-                .args(["diff", "--color=always", "HEAD", context, "--"])
+                .arg("diff")
+                .args(NO_PROGRAMS)
+                .args(["--color=always", "HEAD", context, "--"])
                 .arg(name);
             (cmd, true)
         }
         ViewKind::History { path, whole } => {
             let (folder, name) = place(path);
-            let mut cmd = git(&folder).args(["log", "--color=always", "-p"]);
+            let mut cmd = git(&folder)
+                .arg("log")
+                .args(NO_PROGRAMS)
+                .args(["--color=always", "-p"]);
             if *whole {
                 cmd = cmd.arg(WHOLE);
             }
@@ -123,8 +133,7 @@ pub fn view_plan(kind: &ViewKind, width: u16, e: &Engines) -> PreviewPlan {
             return PreviewPlan::Run(cmd); // already coloured, nothing for delta to do
         }
         ViewKind::Commit { root, hash, whole } => {
-            let mut cmd = git(root).args([
-                "show",
+            let mut cmd = git(root).arg("show").args(NO_PROGRAMS).args([
                 "--color=always",
                 "--date=format:%Y-%m-%d %H:%M:%S",
                 GIT_SHOW_FORMAT,
@@ -189,7 +198,7 @@ fn version_plan(
         let ug = ug.args(["-e", ""]).env("GREP_COLORS", GREP_PALETTE);
         return PreviewPlan::Pipe(git.args(["cat-file", "blob"]).arg(object), ug);
     }
-    let show = git.arg("show").arg(object);
+    let show = git.arg("show").args(NO_PROGRAMS).arg(object);
     let Some(bat) = &e.bat else {
         return PreviewPlan::Run(show);
     };
@@ -259,6 +268,8 @@ mod tests {
                 "-C",
                 "/r",
                 "show",
+                "--no-ext-diff",
+                "--no-textconv",
                 "0123456789abcdef0123456789abcdef01234567:src/a b.c"
             ])
         );
@@ -334,6 +345,8 @@ mod tests {
                 "-C",
                 "/r/src",
                 "diff",
+                "--no-ext-diff",
+                "--no-textconv",
                 "--color=always",
                 "HEAD",
                 "--unified=99999999",
@@ -383,8 +396,15 @@ mod tests {
             &engines(),
         ));
         assert_eq!(
-            &git.args[..4],
-            &os(&["-C", "/r/src", "log", "--color=always"])[..]
+            &git.args[..6],
+            &os(&[
+                "-C",
+                "/r/src",
+                "log",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--color=always"
+            ])[..]
         );
         assert!(git.args.contains(&"-p".into()) && git.args.ends_with(&os(&["--", "main.c"])));
         assert!(delta.args.contains(&"--side-by-side".into()));

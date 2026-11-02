@@ -734,6 +734,40 @@ else
     if [[ -z $left ]]; then ok 'hangup: a closed terminal ends the search engine too'
     else bad "hangup: the engine runs on after the terminal closed (pids $left)"; kill $left 2>/dev/null; fi
 fi
+# A .ugrep in the searched folder (a downloaded repository's) is not read: ugrep+ runs ug, which would
+# load it, and its filter= ran a command on every file and hid the file from the list
+mkdir -p "$W/ugrepcfg" "$W/xdg-docs/sf"
+printf 'needle\n' > "$W/ugrepcfg/a.txt"
+printf 'filter=txt:touch %s\n' "$W/ugrepcfg-PWNED" > "$W/ugrepcfg/.ugrep"
+printf '[content]\narchives = true\n[deep]\ndocuments = true\n' > "$W/xdg-docs/sf/config.toml"
+for t in content deep; do
+    got=$(cd "$W/ugrepcfg" && env -i HOME="$HOME" PATH="$PANE_PATH" XDG_CONFIG_HOME="$W/xdg-docs" "$SF" $t needle --print 2>&1)
+    if [[ -e $W/ugrepcfg-PWNED ]]; then bad "ugrep config: $t ran the folder's .ugrep filter"
+    elif [[ $got != a.txt ]]; then bad "ugrep config: $t listed '$got', want a.txt"
+    else ok "ugrep config: $t with documents ignores the folder's .ugrep"; fi
+done
+# A repository's own config (a downloaded tree with its .git/) names no program git runs for sf: the Git
+# tab's preview (git show), Ctrl-G (git diff HEAD) and Ctrl-U (git log -p) ran its textconv, external
+# diff and fsmonitor programs. Each program here leaves a file if it runs.
+R=$W/evilgit
+mkdir -p "$R"
+(cd "$R" && git init -q && printf 'needle\n' > a.txt && git add a.txt \
+    && git -c user.name=T -c user.email=t@t commit -qm one && printf 'more\n' >> a.txt)
+for p in textconv extdiff fsmonitor; do
+    printf '#!/bin/sh\ntouch %s\n' "$W/evilgit-ran-$p" > "$W/evil-$p" && chmod +x "$W/evil-$p"
+done
+printf '* diff=evil\n' > "$R/.gitattributes"
+printf '[core]\n\tfsmonitor = %s\n[diff]\n\texternal = %s\n[diff "evil"]\n\ttextconv = %s\n' \
+    "$W/evil-fsmonitor" "$W/evil-extdiff" "$W/evil-textconv" >> "$R/.git/config"
+for args in git 'diff a.txt' 'history a.txt'; do
+    tm new-window -d -t e2e -n evil -c "$R" "env -i HOME=$HOME PATH=${PANE_PATH@Q} TERM=xterm-256color \
+        LANG=C.UTF-8 XDG_CONFIG_HOME=$XDG '$SF' $args"
+    sleep 2
+    tm kill-window -t e2e:evil 2>/dev/null
+done
+ran=$(cd "$W" && ls evilgit-ran-* 2>/dev/null | tr '\n' ' ')
+[[ -z $ran ]] && ok "git config: the repository's textconv, external diff and fsmonitor do not run" \
+    || bad "git config: the repository's programs ran: $ran"
 # ... but an sf started with SIGHUP ignored (nohup) keeps ignoring it, as its engine does
 ( cd "$W/hup" && trap '' HUP && exec env -i HOME="$HOME" PATH="$PANE_PATH" XDG_CONFIG_HOME="$W/xdg-hup" \
     "$SF" content 'a|zq' --print >/dev/null 2>&1 ) &

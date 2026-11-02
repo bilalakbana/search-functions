@@ -98,6 +98,7 @@ const MESSAGES_PER_FRAME: usize = 2000;
 
 fn main() -> ExitCode {
     use_bundle();
+    git_runs_no_programs();
     runner::end_engines_with_sf();
     let args: Vec<OsString> = std::env::args_os().skip(1).collect();
     let (tab, query, print, nul, extra) = match cli::parse(&args) {
@@ -321,6 +322,29 @@ fn tmux_options() -> Option<String> {
 
 /// A release package's `lib/sf` beside sf's folder, when there is one: it goes in front of sf's own
 /// `$PATH`, which every program sf starts inherits, so its engines are found first.
+/// A repository's own config can name programs that git runs while sf only reads: a file system
+/// monitor (`core.fsmonitor`: git diff) and a signature checker (`log.showSignature` with `gpg.program`:
+/// git log, the Git tab's list). A downloaded tree with its .git/, or a bare repository inside a clone,
+/// ran them as soon as the Git tab opened. Both are off for every git sf starts, through git's
+/// GIT_CONFIG_COUNT (git 2.31 on; it outranks the repository's config); the views add --no-ext-diff
+/// --no-textconv. shortcut: a filter's clean program (`filter.NAME.clean`) still runs in git diff HEAD;
+/// git has no switch for it.
+fn git_runs_no_programs() {
+    let count = std::env::var("GIT_CONFIG_COUNT")
+        .ok()
+        .and_then(|n| n.parse::<usize>().ok())
+        .unwrap_or(0);
+    let settings = [("core.fsmonitor", "false"), ("log.showSignature", "false")];
+    // SAFETY: the first thing main does, before any thread starts.
+    unsafe {
+        for (i, (key, value)) in settings.iter().enumerate() {
+            std::env::set_var(format!("GIT_CONFIG_KEY_{}", count + i), key);
+            std::env::set_var(format!("GIT_CONFIG_VALUE_{}", count + i), value);
+        }
+        std::env::set_var("GIT_CONFIG_COUNT", (count + settings.len()).to_string());
+    }
+}
+
 fn use_bundle() {
     let Some(bundle) = std::env::current_exe()
         .ok()
