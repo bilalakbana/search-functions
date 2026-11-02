@@ -478,7 +478,20 @@ fn event_loop(
                         }
                     }
                 }
-                Effect::ChangeRoot(root) => pending.extend(app.set_root(root)),
+                // a folder that cannot be read is not gone into: its list, and the .. row, would be empty
+                Effect::ChangeRoot(root) => match std::fs::read_dir(&root) {
+                    Ok(_) => pending.extend(app.set_root(root)),
+                    Err(e) => {
+                        let name = root.file_name().unwrap_or(root.as_os_str());
+                        let e = e.to_string();
+                        let e = e.split(" (os error").next().unwrap_or(&e);
+                        app.set_status(
+                            &format!("Cannot open {}: {e}", name.to_string_lossy()),
+                            true,
+                            now,
+                        );
+                    }
+                },
                 Effect::View => {
                     // the text area inside the view's border: the terminal's width less two
                     let width = terminal.size().context("reading the terminal size")?.width;

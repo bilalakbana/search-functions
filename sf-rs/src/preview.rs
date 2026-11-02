@@ -744,7 +744,8 @@ pub fn is_text(path: &Path) -> io::Result<bool> {
     File::open(path)?
         .take(SNIFF as u64)
         .read_to_end(&mut head)?;
-    if head.is_empty() || head.contains(&0) {
+    // a PDF is binary to bat by its magic, NUL bytes or not (a PDF of text only has none)
+    if head.is_empty() || head.contains(&0) || head.starts_with(b"%PDF-") {
         return Ok(false);
     }
     let printable = head
@@ -891,6 +892,15 @@ mod tests {
             .unwrap()
         );
         assert!(is_text(&missing_dir().join("x")).is_err());
+        // a PDF of text only (no compressed streams): bat calls it binary by its magic and prints a
+        // warning in place of the preview, so it takes the document path (ugrep+'s pdftotext)
+        assert!(
+            !is_text(&file(
+                "plain.pdf",
+                b"%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\n"
+            ))
+            .unwrap()
+        );
     }
 
     fn missing_dir() -> std::path::PathBuf {

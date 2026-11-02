@@ -499,6 +499,14 @@ else
     expect 'perms: Esc back to the pattern'    'Content › needle .* 1/1'
     keys Escape
     expect 'perms: quit'                       '^READY>\s*$'
+    # Folders: a folder sf may not read is not gone into (its list, and the .. row, would be empty)
+    keys "clear; '$SF' folders locked" Enter
+    expect 'perms: Folders lists the locked folder' 'Folders › locked .* 1/2'
+    keys Enter
+    expect 'perms: Enter says it cannot be opened' 'Cannot open locked: Permission denied'
+    expect 'perms: Folders stays where it was'  'Folders › locked .* 1/2'
+    keys Escape Escape
+    expect 'perms: quit Folders'               '^READY>\s*$'
     chmod 700 "$W/perms/u.txt" "$W/perms/locked"
 fi
 keys "cd '$T'" Enter
