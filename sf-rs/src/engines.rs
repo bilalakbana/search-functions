@@ -6,13 +6,14 @@ use std::path::{Path, PathBuf};
 
 /// The first arguments of every git sf starts. A repository's own config can name programs that git
 /// runs while sf only reads: a file system monitor (`core.fsmonitor`: git diff), a signature checker
-/// (`log.showSignature` with `gpg.program`: git log, the Git tab's list), hooks (`post-index-change`:
-/// git diff writes the index when a file has a new time but the same text, as in an unpacked archive)
-/// and a submodule's own diff (`diff.submodule=diff`: git log -p runs git diff in the submodule). A
-/// downloaded tree with its .git/, or a bare repository inside a clone, ran them as soon as the Git tab
-/// opened. `-c` outranks the repository's config and reaches only this git and the gits it starts; the
-/// views add --no-ext-diff --no-textconv, and the diff view turns off the repository's own filters
-/// (`views::filters_off`) and does not look into submodules.
+/// (`log.showSignature` with `gpg.program`: git log, the Git tab's list), hook files
+/// (`post-index-change`: git diff writes the index when a file has a new time but the same text, as in
+/// an unpacked archive) and a submodule's own diff (`diff.submodule=diff`: git log -p runs git diff in
+/// the submodule). A downloaded tree with its .git/, or a bare repository inside a clone, ran them as
+/// soon as the Git tab opened. `-c` outranks the repository's config and reaches only this git and the
+/// gits it starts; the views add --no-ext-diff --no-textconv, and the diff view turns off the
+/// repository's own filters and the hooks defined in config (`views::programs_off`) and does not look
+/// into submodules.
 pub const GIT_RUNS_NO_PROGRAMS: [&str; 8] = [
     "-c",
     "core.fsmonitor=false",

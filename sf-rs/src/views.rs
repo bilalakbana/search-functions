@@ -8,10 +8,10 @@ use std::path::{Path, PathBuf};
 use crate::commands::{Cmd, GIT_SHOW_FORMAT, GREP_PALETTE, PreviewPlan, delta_args};
 use crate::engines::Engines;
 
-/// The output of `git config -z --show-scope --name-only --get-regexp ^filter\.` in `folder`: scope
-/// NUL key NUL, one pair per setting (exit 1: none). Err holds git's first error line: a git before
-/// 2.26 (no --show-scope) or a config git cannot read; the diff view then runs no diff.
-fn scoped_filters(git: &Path, folder: &Path) -> Result<Vec<u8>, String> {
+/// The output of `git config -z --show-scope --name-only --get-regexp '^(filter|hook)\.'` in
+/// `folder`: scope NUL key NUL, one pair per setting (exit 1: none). Err holds git's first error line:
+/// a git before 2.26 (no --show-scope) or a config git cannot read; the diff view then runs no diff.
+fn program_config(git: &Path, folder: &Path) -> Result<Vec<u8>, String> {
     let out = std::process::Command::new(git)
         .args(crate::engines::GIT_RUNS_NO_PROGRAMS)
         .envs(crate::engines::GIT_ENV)
@@ -23,7 +23,7 @@ fn scoped_filters(git: &Path, folder: &Path) -> Result<Vec<u8>, String> {
             "--show-scope",
             "--name-only",
             "--get-regexp",
-            r"^filter\.",
+            r"^(filter|hook)\.",
         ])
         .stdin(std::process::Stdio::null())
         .output()
@@ -39,42 +39,51 @@ fn scoped_filters(git: &Path, folder: &Path) -> Result<Vec<u8>, String> {
         .to_string())
 }
 
-/// `-c` settings that turn off each content filter the repository's own config (local or worktree
-/// scope) defines: git diff HEAD runs a filter's clean or process program on the working tree's file.
-/// The user's own filters (git-lfs) stay. None when a name holds `=`, which `-c` cannot write.
-fn filters_off(scoped: &[u8]) -> Option<Vec<OsString>> {
+/// `-c` settings that turn off the programs of the config that git diff HEAD would run: each content
+/// filter (clean, process) of the repository's own config (local or worktree scope), which runs on
+/// the working tree's file, and each hook defined in config (git 2.54 and later, any scope), which
+/// `core.hooksPath` does not reach: writing the index runs `post-index-change`. The user's own
+/// filters (git-lfs) stay. None when a name holds `=`, which `-c` cannot write.
+fn programs_off(scoped: &[u8]) -> Option<Vec<OsString>> {
     use std::os::unix::ffi::OsStrExt;
     let fields: Vec<&[u8]> = scoped.split(|&b| b == 0).collect();
-    let mut names: Vec<&[u8]> = Vec::new();
+    let mut off: Vec<Vec<u8>> = Vec::new();
     for &[scope, key] in fields.as_chunks::<2>().0 {
-        if !matches!(scope, b"local" | b"worktree") {
+        let (section, settings): (&[u8], &[&[u8]]) = if key.starts_with(b"hook.") {
+            (b"hook.", &[b"enabled=false"])
+        } else if key.starts_with(b"filter.") && matches!(scope, b"local" | b"worktree") {
+            (b"filter.", &[b"clean=", b"process=", b"required=false"])
+        } else {
             continue;
-        }
-        let Some(name) = key
-            .strip_prefix(b"filter.")
-            .and_then(|k| k.iter().rposition(|&b| b == b'.').map(|dot| &k[..dot]))
+        };
+        // the name is the subsection: from the section to the last dot (a name may hold dots)
+        let Some(name) = key[section.len()..]
+            .iter()
+            .rposition(|&b| b == b'.')
+            .map(|dot| &key[section.len()..section.len() + dot])
         else {
             continue;
         };
         if name.contains(&b'=') {
             return None;
         }
-        if !names.contains(&name) {
-            names.push(name);
+        for setting in settings {
+            let value = [section, name, b".", setting].concat();
+            if !off.contains(&value) {
+                off.push(value);
+            }
         }
     }
-    let mut args = Vec::new();
-    for name in names {
-        for setting in [&b"clean="[..], b"process=", b"required=false"] {
-            let mut value = b"filter.".to_vec();
-            value.extend_from_slice(name);
-            value.push(b'.');
-            value.extend_from_slice(setting);
-            args.push(OsString::from("-c"));
-            args.push(std::ffi::OsStr::from_bytes(&value).to_owned());
-        }
-    }
-    Some(args)
+    Some(
+        off.iter()
+            .flat_map(|v| {
+                [
+                    OsString::from("-c"),
+                    std::ffi::OsStr::from_bytes(v).to_owned(),
+                ]
+            })
+            .collect(),
+    )
 }
 
 /// What a view shows.
@@ -128,10 +137,18 @@ impl ViewKind {
     /// What the view says when git printed nothing.
     pub fn empty_note(&self) -> String {
         match self {
-            ViewKind::Diff { path, .. } => format!(
-                "No local changes in {}, or git does not track it",
-                path.display()
-            ),
+            ViewKind::Diff { path, .. } => {
+                // the diff does not look into submodules (--ignore-submodules=dirty)
+                let sub = if path.is_dir() {
+                    "; a submodule's own changes show in its folder"
+                } else {
+                    ""
+                };
+                format!(
+                    "No local changes in {}, or git does not track it{sub}",
+                    path.display()
+                )
+            }
             ViewKind::History { path, .. } | ViewKind::Log { path } => {
                 format!("No commits of {}", path.display())
             }
@@ -175,18 +192,18 @@ pub fn view_plan(kind: &ViewKind, width: u16, e: &Engines) -> PreviewPlan {
         ViewKind::Diff { path, full } => {
             let (folder, name) = place(path);
             let context = if *full { WHOLE } else { "--unified=10" };
-            let scoped = match scoped_filters(git_path, &folder) {
+            let scoped = match program_config(git_path, &folder) {
                 Ok(scoped) => scoped,
                 Err(e) => {
                     let e = crate::items::printable(&e);
                     return PreviewPlan::Text(format!(
-                        "sf cannot read the repository's filters, so it shows no diff: {e}"
+                        "sf cannot read the repository's filters and hooks, so it shows no diff: {e}"
                     ));
                 }
             };
-            let Some(off) = filters_off(&scoped) else {
+            let Some(off) = programs_off(&scoped) else {
                 return PreviewPlan::Text(
-                    "The repository's config names a filter that sf cannot turn off".into(),
+                    "The repository's config names a filter or hook that sf cannot turn off".into(),
                 );
             };
             // a submodule's own config (its filters, its hooks) would run in the git status that
@@ -492,8 +509,9 @@ mod tests {
     #[test]
     fn the_repositorys_own_filters_are_turned_off_in_a_diff() {
         let scoped = b"global\0filter.lfs.clean\0local\0filter.ev.clean\0local\0filter.ev.smudge\0\
-                       worktree\0filter.a.b.process\0";
-        let args: Vec<String> = filters_off(scoped)
+                       worktree\0filter.a.b.process\0local\0hook.x.y.event\0local\0hook.x.y.command\0\
+                       global\0hook.mine.command\0local\0hook.jobs\0";
+        let args: Vec<String> = programs_off(scoped)
             .unwrap()
             .iter()
             .map(|a| a.to_string_lossy().into_owned())
@@ -502,10 +520,17 @@ mod tests {
             ["clean=", "process=", "required=false"]
                 .map(|s| ["-c".to_string(), format!("filter.{n}.{s}")])
         };
-        let want: Vec<String> = [off("ev"), off("a.b")].concat().concat();
-        assert_eq!(args, want, "git-lfs of the user's own config stays");
-        assert_eq!(filters_off(b"local\0filter.x=y.clean\0"), None);
-        assert_eq!(filters_off(b""), Some(Vec::new()));
+        let hook = |n: &str| [["-c".to_string(), format!("hook.{n}.enabled=false")]];
+        let want: Vec<String> = [&off("ev")[..], &off("a.b"), &hook("x.y"), &hook("mine")]
+            .concat()
+            .concat();
+        assert_eq!(
+            args, want,
+            "git-lfs of the user's own config stays; every hook defined in config is off"
+        );
+        assert_eq!(programs_off(b"local\0filter.x=y.clean\0"), None);
+        assert_eq!(programs_off(b"global\0hook.x=y.command\0"), None);
+        assert_eq!(programs_off(b""), Some(Vec::new()));
     }
 
     #[test]
