@@ -378,7 +378,8 @@ pub fn in_file_plan(
             "--color=never",
         ]))
         .args(["--replace=\x01%o\x02", "-e", &pattern, "--"])
-        .arg(key);
+        // a file named "-" is stdin to ugrep, even after --
+        .arg(if key == "-" { "./-".as_ref() } else { key });
     ListPlan::Run {
         cmd,
         kind: ParseKind::SearchLines,
@@ -1417,6 +1418,11 @@ mod tests {
             "in a file too: case aside by default {:?}",
             cmd.args
         );
+        // a file named "-" would be ugrep's stdin
+        let (cmd, _) = run(in_file_plan("-".as_ref(), "x", &o, &engines()));
+        assert_eq!(cmd.args.last().unwrap(), "./-");
+        let (cmd, _) = run(in_file_plan("-n".as_ref(), "x", &o, &engines()));
+        assert_eq!(cmd.args.last().unwrap(), "-n", "after --, -n is a name");
     }
 
     #[test]

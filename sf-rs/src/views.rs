@@ -139,6 +139,8 @@ pub fn view_plan(kind: &ViewKind, width: u16, e: &Engines) -> PreviewPlan {
                 GIT_SHOW_FORMAT,
                 "--patch-with-stat",
             ]);
+            // the --stat bars fit the view (git's own width is the terminal's, or 80)
+            cmd = cmd.arg(format!("--stat-width={width}"));
             if *whole {
                 cmd = cmd.arg(WHOLE);
             }
@@ -425,6 +427,10 @@ mod tests {
         let (git, delta) = pipe(view_plan(&commit, 100, &engines()));
         assert_eq!(&git.args[..3], &os(&["-C", "/r", "show"])[..]);
         assert!(git.args.ends_with(&os(&["--end-of-options", "abcdef1"])));
+        assert!(
+            git.args.contains(&"--stat-width=100".into()),
+            "the stat bars fit the view"
+        );
         assert!(
             !delta.args.contains(&"--side-by-side".into()),
             "a commit reads top to bottom"

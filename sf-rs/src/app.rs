@@ -1097,6 +1097,9 @@ impl App {
                     };
                     self.notes.push(items::hint(hint));
                 }
+                if self.tab == Tab::Files && self.filter.total() == 0 && self.notes.is_empty() {
+                    self.notes.push(items::hint("No files here"));
+                }
                 // no commit (git log --all prints nothing then) or a bare repository: say which
                 if self.tab == Tab::Git
                     && self.versions.is_none()
@@ -2803,6 +2806,14 @@ pub(crate) mod tests {
             .map(|s| s.content.as_ref())
             .collect();
         assert_eq!(note, "No text files here");
+        // Files says it too (a blank list looked like one still loading)
+        let (mut a, _) = app(Tab::Files);
+        a.on_list(ListMsg::Done(a.list_gen));
+        assert_eq!(a.notes[0].text(), "No files here");
+        let (mut a, _) = app(Tab::Files);
+        feed(&mut a, &["a.txt"]);
+        a.on_list(ListMsg::Done(a.list_gen));
+        assert!(a.notes.is_empty(), "files listed: no note");
     }
 
     #[test]
