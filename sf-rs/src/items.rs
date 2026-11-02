@@ -523,8 +523,9 @@ fn first_line(bytes: &[u8]) -> Line<'static> {
         .unwrap_or_default()
 }
 
-/// Control characters (C0, DEL, C1) and the bidirectional formatting ones as U+FFFD, so nothing raw
-/// reaches the terminal and no name reads backwards ("rtl-\u{202e}txt.exe" drawn as "rtl-exe.txt").
+/// Control characters (C0, DEL, C1) and the bidirectional embeddings, overrides and isolates as
+/// U+FFFD, so nothing raw reaches the terminal and no name reads backwards ("rtl-\u{202e}txt.exe"
+/// drawn as "rtl-exe.txt"). The marks LRM and RLM stay: Arabic and Hebrew text has them.
 pub fn printable(s: &str) -> String {
     s.chars()
         .map(|c| if unshown(c) { '\u{fffd}' } else { c })
@@ -532,8 +533,7 @@ pub fn printable(s: &str) -> String {
 }
 
 fn unshown(c: char) -> bool {
-    c.is_control()
-        || matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+    c.is_control() || matches!(c, '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 
 /// A file's type for Ctrl-S: its extension as written (`a.tar.gz` → "gz"), None when it has none
@@ -948,7 +948,12 @@ mod tests {
     #[test]
     fn no_name_reads_backwards_and_no_text_is_concealed() {
         assert_eq!(printable("rtl-\u{202e}txt.exe"), "rtl-\u{fffd}txt.exe");
-        assert_eq!(printable("a\u{2067}b\u{200f}c"), "a\u{fffd}b\u{fffd}c");
+        assert_eq!(printable("a\u{2067}b\u{202a}c"), "a\u{fffd}b\u{fffd}c");
+        assert_eq!(
+            printable("قال\u{200f} 1.\u{200e}"),
+            "قال\u{200f} 1.\u{200e}",
+            "the marks of Arabic text stay"
+        );
         assert_eq!(
             printable("çay\u{200b}"),
             "çay\u{200b}",

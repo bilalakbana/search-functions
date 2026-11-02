@@ -53,6 +53,18 @@ pub fn delta_args(theme: &str) -> Vec<OsString> {
 /// files). sf passes every option it needs itself.
 const NO_CONFIG: &str = "--no-config";
 
+/// A pattern as ugrep's arguments, one argument when it has text: ugrep reads every argument that
+/// starts with `---` or `--config` as a config file to load before its options, also the value after
+/// `-e` (`---` loads `.ugrep`; ugrep 7.4.2 skips only an `-e` that is its first argument). An empty
+/// one stays `-e ""`: `--regexp=` with nothing after `=` takes the next argument as the pattern.
+pub fn regexp(pattern: &str) -> Vec<String> {
+    if pattern.is_empty() {
+        vec!["-e".into(), String::new()]
+    } else {
+        vec![format!("--regexp={pattern}")]
+    }
+}
+
 /// The Git list: graph, short hash, author, refs, subject, age; the full hash after a 0x1f at the end.
 const GIT_LOG_FORMAT: &str = "--format=format:%C(bold blue)%h%C(reset) %C(dim white)%an%C(reset)%C(bold yellow)%d%C(reset) \
      %C(white)%s%C(reset) %C(bold green)(%ar)%C(reset)%x1f%H";
@@ -297,8 +309,8 @@ impl Search {
         }
     }
 
-    /// ugrep's `-e` options: each word (listing matches), else the query; as typed without Regular
-    /// expression.
+    /// ugrep's `--regexp=` options: each word (listing matches), else the query; as typed without
+    /// Regular expression.
     fn patterns(&self, query: &str) -> Vec<String> {
         let typed = match &self.words {
             Some(w) => w.words.clone(),
@@ -306,7 +318,7 @@ impl Search {
         };
         typed
             .iter()
-            .flat_map(|p| ["-e".to_string(), self.reading.pattern(p)])
+            .flat_map(|p| regexp(&self.reading.pattern(p)))
             .collect()
     }
 }
@@ -377,7 +389,9 @@ pub fn in_file_plan(
             "--separator=\x1f",
             "--color=never",
         ]))
-        .args(["--replace=\x01%o\x02", "-e", &pattern, "--"])
+        .arg("--replace=\x01%o\x02")
+        .args(regexp(&pattern))
+        .arg("--")
         // a file named "-" is stdin to ugrep, even after --
         .arg(if key == "-" { "./-".as_ref() } else { key });
     ListPlan::Run {
@@ -540,7 +554,9 @@ pub fn list_plan_with(
             let Some(git) = &e.git else {
                 return hint("git is not installed");
             };
-            let mut cmd = Cmd::new(git).arg("log");
+            let mut cmd = Cmd::new(git)
+                .args(crate::engines::GIT_RUNS_NO_PROGRAMS)
+                .arg("log");
             if opts.git.all_branches {
                 cmd = cmd.arg("--all");
             }
@@ -898,7 +914,7 @@ mod tests {
 
     #[test]
     fn search_empty_query_lists_all_files() {
-        // as ugrep-fzf: `-e ''` matches every text file
+        // as ugrep-fzf: an empty pattern matches every text file
         let want = os(&[
             "-rlU",
             "--sort=name",
@@ -959,8 +975,7 @@ mod tests {
                 "--ignore-binary",
                 "--null",
                 "--exclude-dir=.git",
-                "-e",
-                "needle",
+                "--regexp=needle",
                 "."
             ])
         );
@@ -1002,8 +1017,7 @@ mod tests {
                 "--null",
                 "--exclude=*.rar",
                 "--exclude-dir=.git",
-                "-e",
-                "needle",
+                "--regexp=needle",
                 "."
             ])
         );
@@ -1047,8 +1061,7 @@ mod tests {
                 "-A50",
                 "--exclude=*.rar",
                 "--exclude-dir=.git",
-                "-e",
-                "needle",
+                "--regexp=needle",
                 "."
             ])
         );
@@ -1205,10 +1218,7 @@ mod tests {
         );
         for tab in [Tab::Content, Tab::Deep] {
             let mut o = Options::default();
-            let pattern_of = |c: &Cmd| {
-                let i = c.args.iter().position(|a| a == "-e").expect("-e");
-                c.args[i + 1].clone()
-            };
+            let pattern_of = |c: &Cmd| patterns_of(c).pop().expect("--regexp=");
             let (cmd, _) = run(list_plan(tab, &o, "a.b(", &engines()));
             assert_eq!(
                 pattern_of(&cmd),
@@ -1243,17 +1253,23 @@ mod tests {
         }
     }
 
-    /// What follows each `-e` of `cmd`.
+    /// The value of each `--regexp=` of `cmd`, and of each `-e` (only an empty one).
     fn patterns_of(cmd: &Cmd) -> Vec<String> {
         let a: Vec<String> = cmd
             .args
             .iter()
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
-        a.windows(2)
-            .filter(|w| w[0] == "-e")
-            .map(|w| w[1].clone())
-            .collect()
+        let mut out = Vec::new();
+        for (i, arg) in a.iter().enumerate() {
+            if let Some(p) = arg.strip_prefix("--regexp=") {
+                out.push(p.to_string());
+            } else if arg == "-e" {
+                assert_eq!(a[i + 1], "", "only an empty pattern follows -e");
+                out.push(String::new());
+            }
+        }
+        out
     }
 
     #[test]
@@ -1435,7 +1451,7 @@ mod tests {
         let o = InFileOpts::default();
         let a = args(&o);
         assert!(
-            a.contains(&"--bool".into()) && a.contains(&"ankara izmir".into()),
+            a.contains(&"--bool".into()) && a.contains(&"--regexp=ankara izmir".into()),
             "{a:?}"
         );
         let o = InFileOpts {
@@ -1455,7 +1471,7 @@ mod tests {
         };
         let a = args(&o);
         assert!(
-            !a.contains(&"--bool".into()) && a.contains(&"ankara|izmir".into()),
+            !a.contains(&"--bool".into()) && a.contains(&"--regexp=ankara|izmir".into()),
             "any of them: {a:?}"
         );
     }
@@ -1476,8 +1492,7 @@ mod tests {
                 "--null",
                 "--exclude=*.rar",
                 "--exclude-dir=.git",
-                "-e",
-                "needle",
+                "--regexp=needle",
                 "."
             ])
         );
@@ -1502,8 +1517,7 @@ mod tests {
                 "--color=never",
                 "--replace=\x01%o\x02",
                 "--exclude-dir=.git",
-                "-e",
-                "needle",
+                "--regexp=needle",
                 "."
             ])
         );
@@ -1552,8 +1566,8 @@ mod tests {
             false,
         ));
         assert_eq!(
-            &cmd.args[cmd.args.len() - 5..],
-            &os(&["-w", "--exclude-dir=.git", "-e", "needle", "."])[..],
+            &cmd.args[cmd.args.len() - 4..],
+            &os(&["-w", "--exclude-dir=.git", "--regexp=needle", "."])[..],
             "ugrep: before the pattern and the folder"
         );
         let (cmd, _) = run(list_plan_with(
@@ -1588,8 +1602,7 @@ mod tests {
                 "--ignore-binary",
                 "--color=auto",
                 "--exclude-dir=.git",
-                "-e",
-                "needle",
+                "--regexp=needle",
                 "."
             ])
         );
@@ -1637,7 +1650,11 @@ mod tests {
         };
         let before_e = |c: &Cmd| {
             let w = c.args.iter().position(|a| a == "-w");
-            w.is_some() && w.map(|w| w + 1) == c.args.iter().position(|a| a == "-e")
+            w.is_some()
+                && w.map(|w| w + 1)
+                    == c.args
+                        .iter()
+                        .position(|a| a.to_string_lossy().starts_with("--regexp="))
         };
         assert!(before_e(&lines), "{:?}", lines.args);
         assert!(before_e(&binary), "{:?}", binary.args);
@@ -1667,8 +1684,7 @@ mod tests {
                 "--separator=\x1f",
                 "--color=never",
                 "--replace=\x01%o\x02",
-                "-e",
-                "foo|bar",
+                "--regexp=foo|bar",
                 "--",
                 "src/a b.c"
             ])
@@ -1681,15 +1697,21 @@ mod tests {
     }
 
     #[test]
-    fn query_starting_with_dash_follows_e() {
-        let (cmd, _) = run(list_plan(
-            Tab::Content,
-            &Options::default(),
-            "-rf",
-            &engines(),
-        ));
-        let at = cmd.args.iter().position(|a| a == "-rf").unwrap();
-        assert_eq!(cmd.args[at - 1], "-e");
+    fn a_query_is_one_regexp_argument_also_when_it_looks_like_an_option() {
+        // --regexp= with nothing after = would take the next argument (`--`) as the pattern
+        assert_eq!(regexp(""), ["-e", ""]);
+        // ugrep loads a config file named by any argument that starts with --- or --config
+        for q in ["-rf", "---", "---evil", "--config=x"] {
+            let (cmd, _) = run(list_plan(Tab::Content, &Options::default(), q, &engines()));
+            assert_eq!(patterns_of(&cmd), [q]);
+            assert!(
+                !cmd.args
+                    .iter()
+                    .any(|a| a == q || a.to_string_lossy().starts_with("---")),
+                "{:?}",
+                cmd.args
+            );
+        }
     }
 
     #[test]
@@ -1721,7 +1743,18 @@ mod tests {
     #[test]
     fn git_all_branches_flag() {
         let (cmd, kind) = run(list_plan(Tab::Git, &Options::default(), "", &engines()));
-        assert_eq!(&cmd.args[..2], &os(&["log", "--all"])[..]);
+        assert_eq!(
+            &cmd.args[..6],
+            &os(&[
+                "-c",
+                "core.fsmonitor=false",
+                "-c",
+                "log.showSignature=false",
+                "log",
+                "--all"
+            ])[..],
+            "a repository's config runs no program"
+        );
         assert!(
             cmd.args
                 .last()
@@ -1830,8 +1863,7 @@ mod tests {
                 "--separator=\x1f",
                 "--color=never",
                 "--replace=\x01%o\x02",
-                "-e",
-                "ne",
+                "--regexp=ne",
                 "--",
                 "/r/a"
             ])
@@ -1864,8 +1896,7 @@ mod tests {
                 "--color=always",
                 "-B200",
                 "-A200",
-                "-e",
-                "ne",
+                "--regexp=ne",
                 "--",
                 "/r/a.zip"
             ])
@@ -1897,11 +1928,20 @@ mod tests {
         assert_eq!(m.text.program, PathBuf::from("/bin/ugrep"));
         assert_eq!(
             m.text.args,
-            os(&["-c", "-o", "-U", "-i", "-e", "ne", "--", "/r/src/a b"])
+            os(&["-c", "-o", "-U", "-i", "--regexp=ne", "--", "/r/src/a b"])
         );
         assert_eq!(
             m.binary.args,
-            os(&["-z", "-c", "-o", "-a", "-i", "-e", "ne", "--", "/r/src/a b"])
+            os(&[
+                "-z",
+                "-c",
+                "-o",
+                "-a",
+                "-i",
+                "--regexp=ne",
+                "--",
+                "/r/src/a b"
+            ])
         );
     }
 
@@ -2163,7 +2203,7 @@ mod tests {
         };
         assert_eq!(show.program, PathBuf::from("/bin/git"));
         assert_eq!(
-            &show.args[..3],
+            &show.args[4..7],
             &os(&["-C", "/r", "show"])[..],
             "the root's repository"
         );

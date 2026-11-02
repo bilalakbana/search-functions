@@ -95,7 +95,12 @@ pub fn view_plan(kind: &ViewKind, width: u16, e: &Engines) -> PreviewPlan {
     let Some(git_path) = &e.git else {
         return PreviewPlan::Text("git is not installed".into());
     };
-    let git = |folder: &Path| Cmd::new(git_path).arg("-C").arg(folder);
+    let git = |folder: &Path| {
+        Cmd::new(git_path)
+            .args(crate::engines::GIT_RUNS_NO_PROGRAMS)
+            .arg("-C")
+            .arg(folder)
+    };
     let (cmd, side_by_side) = match kind {
         ViewKind::Diff { path, full } => {
             let (folder, name) = place(path);
@@ -238,11 +243,23 @@ mod tests {
         args.iter().map(OsString::from).collect()
     }
 
+    /// git | its viewer, git's arguments after the ones every git gets.
     fn pipe(plan: PreviewPlan) -> (Cmd, Cmd) {
         match plan {
-            PreviewPlan::Pipe(git, delta) => (git, delta),
+            PreviewPlan::Pipe(git, delta) => (without_guard(git), delta),
             other => panic!("expected git | delta, got {other:?}"),
         }
+    }
+
+    /// `git` without its first arguments, which turn off the programs a repository's config names.
+    fn without_guard(mut git: Cmd) -> Cmd {
+        let n = crate::engines::GIT_RUNS_NO_PROGRAMS.len();
+        assert_eq!(
+            git.args[..n],
+            crate::engines::GIT_RUNS_NO_PROGRAMS.map(OsString::from)
+        );
+        git.args.drain(..n);
+        git
     }
 
     fn version(path: &str) -> ViewKind {

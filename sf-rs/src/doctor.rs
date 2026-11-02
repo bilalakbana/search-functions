@@ -173,6 +173,11 @@ pub fn report(
                 let mut value = format!("{:<width$}  {first}", path.display());
                 let ugrep = name.starts_with("ugrep").then(|| ugrep_version(first));
                 match ugrep.flatten() {
+                    // sf starts each ugrep+ with --no-config (5.0.0), so a searched folder's .ugrep
+                    // runs nothing
+                    Some(v) if *name == "ugrep+" && v < UGREP_ALL_MATCHES => value.push_str(
+                        "  ! older than 5.0.0: Archives and Documents will not work (no --no-config)",
+                    ),
                     Some(v) if v < UGREP_REPLACE => {
                         value.push_str("  ! older than 3.6.0: Matching lines will not work")
                     }
@@ -463,7 +468,22 @@ mod tests {
     #[test]
     fn an_old_ugrep_is_warned_about() {
         // measured: 3.3.3 has no --replace; 3.7.2 and 3.11.2 mark only a line's first match; 5.0.0 as 7.8.5
-        let s = setup("doctor_old_ugrep", &["ugrep"], wayland_tmux());
+        let s = setup("doctor_old_ugrep", &["ugrep", "ugrep+"], wayland_tmux());
+        for (version, plus) in [
+            (
+                "ugrep 4.5.2 x86_64-pc-linux-gnu",
+                Some("Archives and Documents"),
+            ),
+            ("ugrep 5.0.0 x86_64-pc-linux-gnu", None),
+        ] {
+            let answer = |_: &Path, _: &[&str]| Some(format!("{version}\n"));
+            let r = report(&s.env, &s.engines, Some(&s.config), None, None, &answer);
+            let row = line(&r, "ugrep+");
+            match plus {
+                Some(w) => assert!(row.contains(w), "{version}: {row}"),
+                None => assert!(!row.contains("older"), "{version}: {row}"),
+            }
+        }
         for (version, warning) in [
             (
                 "ugrep 3.3.3 x86_64-pc-linux-gnu +sse2",

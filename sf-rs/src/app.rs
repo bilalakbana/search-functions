@@ -2883,8 +2883,11 @@ pub(crate) mod tests {
             .iter()
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
-        let e = args.iter().rposition(|a| a == "-e").expect("-e");
-        args[e + 2..].to_vec()
+        let e = args
+            .iter()
+            .rposition(|a| a.starts_with("--regexp="))
+            .expect("--regexp=");
+        args[e + 1..].to_vec()
     }
 
     #[test]
@@ -3912,7 +3915,11 @@ pub(crate) mod tests {
         let ListPlan::Run { cmd, .. } = a.list_plan() else {
             panic!()
         };
-        assert!(cmd.args.contains(&"foo|bar".into()), "{:?}", cmd.args);
+        assert!(
+            cmd.args.contains(&"--regexp=foo|bar".into()),
+            "{:?}",
+            cmd.args
+        );
         // Esc goes back to the tab and its filter; the next one quits
         assert_eq!(a.handle_key(key(KeyCode::Esc), now), [Effect::RunList]);
         assert_eq!(

@@ -337,7 +337,7 @@ fn ugrep_args(q: &Query, path: &str, doc: Doc, filters: &str) -> Vec<String> {
         a.push("-w".into());
     }
     a.push(if o.regex { "-P" } else { "-F" }.into());
-    a.extend(["-e".to_string(), q.pattern.clone()]);
+    a.extend(crate::commands::regexp(&q.pattern));
     a
 }
 
@@ -365,6 +365,7 @@ pub fn filters(path_var: &std::ffi::OsStr) -> String {
 /// `git ARGS` in `root`: its output, or what went wrong.
 fn git_output(git: &Path, root: &Path, args: &[&str]) -> Result<Vec<u8>, String> {
     let out = Command::new(git)
+        .args(crate::engines::GIT_RUNS_NO_PROGRAMS)
         .args(args)
         .current_dir(root)
         .stdin(Stdio::null())
@@ -474,6 +475,7 @@ fn grep_chunk(
     err: &mut impl Write,
 ) -> Result<bool, String> {
     let mut child = Command::new(git)
+        .args(crate::engines::GIT_RUNS_NO_PROGRAMS)
         .args(git_grep_args(q, revs))
         .current_dir(root)
         .stdin(Stdio::null())
@@ -525,6 +527,7 @@ fn documents(
         let (_, path) = &held[0];
         let doc = doc_kind(path).expect("only documents are held");
         let mut cat = Command::new(git)
+            .args(crate::engines::GIT_RUNS_NO_PROGRAMS)
             .args(["cat-file", "blob", blob])
             .current_dir(root)
             .stdin(Stdio::null())

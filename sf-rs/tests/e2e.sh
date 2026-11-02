@@ -737,7 +737,8 @@ fi
 # A .ugrep in the searched folder (a downloaded repository's) is not read: ugrep+ runs ug, which would
 # load it, and its filter= ran a command on every file and hid the file from the list
 mkdir -p "$W/ugrepcfg" "$W/xdg-docs/sf"
-printf 'needle\n' > "$W/ugrepcfg/a.txt"
+printf 'needle\n---\n' > "$W/ugrepcfg/a.txt"
+printf 'other\n' > "$W/ugrepcfg/b.txt"
 printf 'filter=txt:touch %s\n' "$W/ugrepcfg-PWNED" > "$W/ugrepcfg/.ugrep"
 printf '[content]\narchives = true\n[deep]\ndocuments = true\n' > "$W/xdg-docs/sf/config.toml"
 for t in content deep; do
@@ -745,6 +746,25 @@ for t in content deep; do
     if [[ -e $W/ugrepcfg-PWNED ]]; then bad "ugrep config: $t ran the folder's .ugrep filter"
     elif [[ $got != a.txt ]]; then bad "ugrep config: $t listed '$got', want a.txt"
     else ok "ugrep config: $t with documents ignores the folder's .ugrep"; fi
+done
+# Typed in the window, a pattern ---... was an argument of its own after -e, and ugrep loads a config
+# file named by any argument that starts with --- (plain ugrep too): the search found nothing. The
+# empty pattern lists a.txt and b.txt; --- lists only a.txt.
+only_a() { local s; s=$(tm capture-pane -p -t e2e:cfg); [[ $s == *a.txt* && $s != *b.txt* ]]; }
+for x in "$W/xdg-docs" "$W/xdg-plain"; do
+    mkdir -p "$x"
+    pwned=$W/ugrepcfg-PWNED-${x##*/}
+    printf 'filter=txt:touch %s\n' "$pwned" > "$W/ugrepcfg/.ugrep"
+    tm new-window -d -t e2e -n cfg -c "$W/ugrepcfg" "env -i HOME=$HOME PATH=${PANE_PATH@Q} \
+        TERM=xterm-256color LANG=C.UTF-8 XDG_CONFIG_HOME=$x '$SF' content"
+    for i in $(seq 50); do tm capture-pane -p -t e2e:cfg | grep -q 'b\.txt' && break; sleep 0.1; done
+    tm send-keys -t e2e:cfg -l -- '---'
+    for i in $(seq 50); do only_a && break; sleep 0.1; done
+    only_a; found=$?
+    tm kill-window -t e2e:cfg
+    if [[ -e $pwned ]]; then bad "ugrep config: the pattern --- loaded the folder's .ugrep (${x##*/})"
+    elif [[ $found != 0 ]]; then bad "ugrep config: the pattern --- did not list a.txt alone (${x##*/})"
+    else ok "ugrep config: the pattern --- is searched, the folder's .ugrep is not read (${x##*/})"; fi
 done
 # A repository's own config (a downloaded tree with its .git/) names no program git runs for sf: the Git
 # tab's preview (git show), Ctrl-G (git diff HEAD) and Ctrl-U (git log -p) ran its textconv, external
@@ -768,6 +788,16 @@ done
 ran=$(cd "$W" && ls evilgit-ran-* 2>/dev/null | tr '\n' ' ')
 [[ -z $ran ]] && ok "git config: the repository's textconv, external diff and fsmonitor do not run" \
     || bad "git config: the repository's programs ran: $ran"
+# ... and the settings that turn them off reach only sf's own git: a program sf opens (an editor, its
+# shells) keeps the user's git config
+mkdir -p "$W/envstub"
+printf '#!/bin/sh\nprintf "%%s\\n" "${GIT_CONFIG_COUNT-none}" > %s\n' "$W/envstub-seen" > "$W/envstub/xdg-open"
+chmod +x "$W/envstub/xdg-open"
+(cd "$R" && env -i HOME="$HOME" PATH="$W/envstub:$PANE_PATH" XDG_CONFIG_HOME="$XDG" "$SF" open a.txt)
+for i in $(seq 30); do [[ -s $W/envstub-seen ]] && break; sleep 0.1; done
+seen=$(cat "$W/envstub-seen" 2>/dev/null)
+[[ $seen == none ]] && ok "git config: a program sf opens gets no GIT_CONFIG_* of sf's" \
+    || bad "git config: a program sf opens saw GIT_CONFIG_COUNT=$seen"
 # sf gives its tmux window its name back as it was: rename-window expands formats, a # is written ##
 idx=$(tm new-window -d -P -F '#{window_index}' -t e2e "env -i HOME=$HOME PATH=${PANE_PATH@Q} \
     TERM=xterm-256color LANG=C.UTF-8 XDG_CONFIG_HOME=$XDG TMUX=\$TMUX TMUX_PANE=\$TMUX_PANE bash --norc --noprofile")

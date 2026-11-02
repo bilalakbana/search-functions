@@ -4,6 +4,20 @@ use std::ffi::{OsStr, OsString};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+/// The first arguments of every git sf starts. A repository's own config can name programs that git
+/// runs while sf only reads: a file system monitor (`core.fsmonitor`: git diff) and a signature
+/// checker (`log.showSignature` with `gpg.program`: git log, the Git tab's list). A downloaded tree
+/// with its .git/, or a bare repository inside a clone, ran them as soon as the Git tab opened. `-c`
+/// outranks the repository's config and reaches no program but this git; the views add --no-ext-diff
+/// --no-textconv. shortcut: a filter's clean program (`filter.NAME.clean`) still runs in git diff
+/// HEAD; git has no switch for it.
+pub const GIT_RUNS_NO_PROGRAMS: [&str; 4] = [
+    "-c",
+    "core.fsmonitor=false",
+    "-c",
+    "log.showSignature=false",
+];
+
 /// Where each engine lives; `None` when it is not installed. A tab that needs a missing one says so.
 #[derive(Clone, Debug, Default)]
 pub struct Engines {
