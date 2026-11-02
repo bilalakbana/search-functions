@@ -446,7 +446,8 @@ fn cut_note() -> String {
 /// lines); a version row (`REV:PATH\0LINE\0TEXT`) joins from a line that starts with `REV:` to its
 /// second NUL.
 fn rejoin(kind: ParseKind, split: &mut Vec<Vec<u8>>, record: &mut Vec<u8>, root: &Path) -> bool {
-    // shortcut: a path with 64 newlines or more loses its row; raise it if such names turn up
+    // shortcut: a path with 64 newlines or more is listed under its last line, not its path; raise
+    // the limit if such names turn up
     const MAX_SPLIT: usize = 64;
     let nuls = record.iter().filter(|&&b| b == 0).count();
     if kind == ParseKind::Versions {
