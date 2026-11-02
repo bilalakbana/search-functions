@@ -520,6 +520,7 @@ fn event_loop(
         terminal
             .draw(|f| ui::draw(f, &mut app))
             .context("drawing")?;
+        app.help_resized();
         pending.extend(app.preview_resized());
         if let Some(v) = &app.view
             && app.layout.view.width != 0

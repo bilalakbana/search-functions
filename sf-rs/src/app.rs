@@ -171,6 +171,8 @@ pub struct Help {
     pub search: String,
     /// The line it was found on; None when it is nowhere.
     pub found: Option<usize>,
+    /// The columns `text` is wrapped to (0: as written).
+    pub width: u16,
 }
 
 impl Help {
@@ -350,6 +352,7 @@ impl App {
                 scroll: 0,
                 search: String::new(),
                 found: None,
+                width: 0,
             },
             extra: None,
             editor: "nvim".into(),
@@ -1252,6 +1255,23 @@ impl App {
 
     /// After a frame: the preview's width is another than its request's (a resize, or a request made
     /// before the frame that laid the preview out), so bat needs the new width.
+    /// The manual wrapped again when the Help tab's text area changed its width (after a draw); what
+    /// is looked for is found again in the new rows.
+    pub fn help_resized(&mut self) {
+        // the text area is the inner width less the column kept before the text
+        let width = self.layout.help.width.saturating_sub(1);
+        let h = &mut self.help;
+        if width == h.width || width == 0 {
+            return;
+        }
+        h.width = width;
+        h.text = crate::help::wrapped(&crate::help::text(), width.into());
+        h.scroll = h.scroll.min(h.text.lines.len().saturating_sub(1));
+        if !h.search.is_empty() {
+            h.find(0);
+        }
+    }
+
     pub fn preview_resized(&mut self) -> Vec<Effect> {
         let width = self.layout.preview.width;
         if width == self.planned_width || width == 0 {
@@ -3678,6 +3698,21 @@ pub(crate) mod tests {
         assert_eq!(a.help.found, Some(matches[1]), "Enter: the next one");
         assert_eq!(a.handle_key(key(KeyCode::Esc), now), []);
         assert_eq!((a.help.search.as_str(), a.help.found), ("", None));
+        // a narrow window: the manual wrapped to the text area, what is looked for found again in it
+        typed(&mut a, "MATCH", now);
+        a.layout.help = Rect::new(1, 2, 60, 10);
+        a.help_resized();
+        assert!(a.help.text.lines.iter().all(|l| l.width() <= 59));
+        let found = a.help.found.expect("found again");
+        assert!(lines_with(&a, "match").contains(&found));
+        let before = a.help.text.lines.len();
+        a.help_resized();
+        assert_eq!(a.help.text.lines.len(), before, "the same width: as it was");
+        assert_eq!(
+            a.handle_key(key(KeyCode::Esc), now),
+            [],
+            "Esc clears the search first"
+        );
         assert_eq!(a.handle_key(key(KeyCode::Esc), now), [Effect::Quit]);
         assert_eq!(a.handle_key(key(KeyCode::Tab), now), [Effect::RunList]);
         assert_eq!(a.tab, Tab::Files);

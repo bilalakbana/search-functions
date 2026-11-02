@@ -373,6 +373,44 @@ fn table(
     }
 }
 
+/// `text` with each line wider than `width` columns broken between words into rows, the new rows
+/// indented two columns past the line's own indent, so a narrow terminal shows the whole manual (it
+/// was cut at the edge: 80 columns lost the ends of the key and example rows).
+pub fn wrapped(text: &Text<'static>, width: usize) -> Text<'static> {
+    let mut rows = Vec::new();
+    for line in &text.lines {
+        if line.width() <= width {
+            rows.push(line.clone());
+            continue;
+        }
+        let first = line.spans.first().map_or("", |s| s.content.as_ref());
+        let hang = " ".repeat((first.len() - first.trim_start().len() + 2).min(width / 2));
+        let (mut spans, mut used, mut start) = (Vec::<Span<'static>>::new(), 0, 0);
+        for span in &line.spans {
+            // each word with the spaces after it, in its span's style
+            for piece in span.content.split_inclusive(' ') {
+                let w = Span::raw(piece).width();
+                if used > start && used + Span::raw(piece.trim_end()).width() > width {
+                    if let Some(last) = spans.last_mut() {
+                        let kept = last.content.trim_end().to_string();
+                        last.content = kept.into();
+                    }
+                    rows.push(Line::from(std::mem::take(&mut spans)));
+                    spans.push(Span::raw(hang.clone()));
+                    (used, start) = (hang.len(), hang.len());
+                }
+                if used == start && start > 0 && piece.trim().is_empty() {
+                    continue; // no spaces at a new row's start
+                }
+                spans.push(Span::styled(piece.to_string(), span.style));
+                used += w;
+            }
+        }
+        rows.push(Line::from(spans));
+    }
+    Text::from(rows)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -449,6 +487,31 @@ mod tests {
             assert_eq!(through(q), want, "{q}: {what}");
         }
         assert!(plain(&text()).contains("!test"));
+    }
+
+    #[test]
+    fn a_narrow_manual_is_wrapped_between_words_and_keeps_every_word() {
+        let full = text();
+        for width in [58, 78, 100] {
+            let narrow = wrapped(&full, width);
+            let words = |t: &Text| {
+                plain(t)
+                    .split_whitespace()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(words(&narrow), words(&full), "width {width}");
+            for l in &narrow.lines {
+                // a single word wider than the row may stay (none in the manual at 58)
+                assert!(
+                    l.width() <= width,
+                    "width {width}: {:?}",
+                    plain(&Text::from(l.clone()))
+                );
+            }
+            assert!(narrow.lines.len() > full.lines.len(), "width {width}");
+        }
+        assert_eq!(wrapped(&full, 500), full, "wide enough: as it is");
     }
 
     #[test]
