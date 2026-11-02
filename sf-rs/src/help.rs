@@ -169,7 +169,7 @@ const PATTERNS: &[(&str, &str)] = &[
 const WORDS: &[(&str, &str)] = &[
     (
         "CODE interest",
-        "Matching lines, Each match: each word on the line or in the path",
+        "Matching lines, Each match: each word on the line or in the path (a - is text there)",
     ),
     ("ankara izmir", "both"),
     ("ankara|izmir", "either"),
