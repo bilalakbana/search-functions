@@ -724,7 +724,7 @@ modified_keys xterm
 # A closed terminal (SIGHUP) ends the engine too: it runs in a process group of its own, which the
 # terminal's signal never reaches. ugrep's Each match over a 20 MB line of a writes nothing for minutes.
 # The engine is found in /proc by its pattern (no ps in the package test's images), matched inside bash.
-engines_of() { local p c; for p in /proc/[0-9]*; do c=$(tr '\0' ' ' < "$p/cmdline" 2>/dev/null); [[ $c == *ugrep*'a|zq'* ]] && echo "${p#/proc/}"; done; }
+engines_of() { local p c; for p in /proc/[0-9]*; do c=$(tr '\0' ' ' 2>/dev/null < "$p/cmdline"); [[ $c == *ugrep*'a|zq'* ]] && echo "${p#/proc/}"; done; }
 mkdir -p "$W/hup" "$W/xdg-hup/sf"
 python3 -I -c "open('$W/hup/long.txt', 'w').write('a' * 20000000)"
 printf '[content]\neach_match = true\n' > "$W/xdg-hup/sf/config.toml"
