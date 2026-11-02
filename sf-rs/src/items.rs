@@ -573,9 +573,26 @@ pub fn ansi_text(bytes: &[u8]) -> Text<'static> {
     text
 }
 
-/// Files in byte order (as `LC_ALL=C sort`); the keys are unique, so an unstable sort will do.
+/// Files in the Content tab's order (`ugrep --sort=name`): in each folder its own files first, then its
+/// subfolders, each in byte order. The keys are unique, so an unstable sort will do.
 pub fn sort_files(items: &mut [Item]) {
-    items.sort_unstable_by(|a, b| a.key.as_bytes().cmp(b.key.as_bytes()));
+    items.sort_unstable_by(|a, b| tree_order(a.key.as_bytes(), b.key.as_bytes()));
+}
+
+/// Part by part in byte order; where two paths part, a file name (a last part) comes before a folder.
+/// Works on the bytes after the common prefix: splitting every path per comparison doubled the sort time.
+fn tree_order(a: &[u8], b: &[u8]) -> std::cmp::Ordering {
+    let i = a.iter().zip(b).take_while(|(x, y)| x == y).count();
+    let (ra, rb) = (&a[i..], &b[i..]);
+    // a '/' after the common prefix: that path goes on into a subfolder of the folder both are in
+    let in_folder = |r: &[u8]| r.contains(&b'/');
+    in_folder(ra).cmp(&in_folder(rb)).then_with(|| {
+        // the same kind: the part that ends here (at '/' or the path's end) is the shorter name
+        let end = |r: &[u8]| r.first().is_none_or(|&c| c == b'/');
+        end(rb)
+            .cmp(&end(ra))
+            .then_with(|| ra.first().cmp(&rb.first()))
+    })
 }
 
 /// Folders by depth, then in byte order.
@@ -981,14 +998,25 @@ mod tests {
     }
 
     #[test]
-    fn files_sorted_in_byte_order() {
-        let mut v: Vec<Item> = ["b", "B", "a/z", "a"]
-            .iter()
-            .map(|r| files(r.as_bytes()))
-            .collect();
+    fn files_sorted_folder_by_folder_files_first() {
+        // the expected order is ugrep 7.8.5's `-rl --sort=name` on this tree; a-b and a/s catch a plain byte
+        // compare ('-' sorts before '/', and the folder s is a prefix of sub)
+        let mut v: Vec<Item> = [
+            "b/y", "a/sub/z", "top", "a/x", "B", "a/B/w", "a/sub/A", "a.txt", "a-b/y", "ab/q",
+            "a/xz", "a/s/q",
+        ]
+        .iter()
+        .map(|r| files(r.as_bytes()))
+        .collect();
         sort_files(&mut v);
         let keys: Vec<_> = v.iter().map(|i| i.key.to_str().unwrap()).collect();
-        assert_eq!(keys, ["B", "a", "a/z", "b"]);
+        assert_eq!(
+            keys,
+            [
+                "B", "a.txt", "top", "a/x", "a/xz", "a/B/w", "a/s/q", "a/sub/A", "a/sub/z",
+                "a-b/y", "ab/q", "b/y"
+            ]
+        );
     }
 
     #[test]

@@ -3,6 +3,13 @@
 sf searches file names, file contents (also PDF, Office files and archives) and git history in one terminal window.
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the newest release comes first.
 
+## [Unreleased]
+
+### Changed
+- Files lists in the same order as Content: in each folder its own files first, then its subfolders, each
+  A–Z (as `ugrep --sort=name`). Before, Files sorted the whole path as text, so `bin/x` came between
+  `README.md` and `build.sh`. Listing 1,000,000 files takes about 0.18 s longer (0.69 → 0.87 s).
+
 ## [0.13.4] - 2026-11-02
 
 ### Security

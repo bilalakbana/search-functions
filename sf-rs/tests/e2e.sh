@@ -174,21 +174,22 @@ n_files=$(cd "$T" && "$FD" --type f --no-ignore --exclude .git . | wc -l)
 keys "'$SF'" Enter
 expect 'start: tab bar with Config'        'Files +Content +Deep +Folders +Git .*⚙ Config'
 expect "start: $n_files files listed"      "$n_files/$n_files"
-expect 'start: Files shows bat with numbers, no Ctrl-L' '│ *1 needle ignored'
+# the first row is empty.txt: a folder's own files come before its subfolders (the Content tab's order)
+expect 'start: Files previews the first file, no Ctrl-L' '│empty file'
 root=$(root_of "$T")
-layout 'look: top border, list and preview side by side, prompt box' "$root" yes '1 needle ignored'
+layout 'look: top border, list and preview side by side, prompt box' "$root" yes 'empty file'
 border_in 240 && ok 'theme: the default border is 38;5;240' || bad 'theme: no border in 38;5;240'
 keys C-l
-expect_not 'files: Ctrl-L hides the preview' '│ *1 needle ignored'
+expect_not 'files: Ctrl-L hides the preview' '│empty file'
 layout 'look: no preview, the list across the width, the prompt box stays' "$root" no
 keys C-l
-expect 'files: Ctrl-L shows it again'      '│ *1 needle ignored'
-layout 'look: the preview back on the right half' "$root" yes '1 needle ignored'
+expect 'files: Ctrl-L shows it again'      '│empty file'
+layout 'look: the preview back on the right half' "$root" yes 'empty file'
 expect 'start: footer'                     'Enter open · \^S options · \^O nvim'
 [[ $(tm display-message -p -t e2e '#W') == search ]] && ok 'tmux: window named search' || bad 'tmux: window not renamed'
 shot files
 tm resize-window -t e2e -x 90 -y 24
-layout 'narrow: the look at 90x24' "$root" yes '1 needle ignored'
+layout 'narrow: the look at 90x24' "$root" yes 'empty file'
 shot narrow
 tm resize-window -t e2e -x 160 -y 40
 layout 'narrow: back at 160x40' "$root" yes
@@ -209,6 +210,7 @@ expect 'files: fzf | either'               "Files › \\.md\\$ \\| \\.bin\\$ .* 
 clear_query
 type_ 'main'
 expect 'files: query filters'              "Files › main .* 1/$n_files"
+expect 'files: the preview is bat with numbers' '│ *1 needle in main'
 red_on 'main' && ok 'files: typed text highlighted' || bad 'files: typed text not highlighted'
 keys Enter;  expect_log 'files: Enter opens'           "OPEN [$T/src/main.c]"
 keys C-c;    expect_log 'files: Ctrl-C copies'         'COPY <src/main.c>'
@@ -486,6 +488,11 @@ mkdir "$W/names" && printf 'needle\n' > "$W/names/a"$'\n'"b.txt" && printf 'need
 keys "clear; cd '$W/names'; '$SF' content needle --print0 | tr '\0\n' '|~'; echo; '$SF' files --print0 | tr '\0\n' '#~'; echo; cd '$T'" Enter
 expect 'print0: content, a NUL after each path' '^a~b\.txt\|c d\.txt\|\s*$'
 expect 'print0: files, a NUL after each path'   '^a~b\.txt#c d\.txt#\s*$'
+# Files lists in Content's order (ugrep --sort=name): in each folder its files first, then its subfolders
+mkdir -p "$W/order/a/sub" "$W/order/b" && for f in top a/x a/sub/z b/y; do printf 'needle\n' > "$W/order/$f.txt"; done
+keys "clear; cd '$W/order'; echo F: \$('$SF' files --print); echo C: \$('$SF' content needle --print); cd '$T'" Enter
+expect 'order: files folder by folder, files first' '^F: top\.txt a/x\.txt a/sub/z\.txt b/y\.txt\s*$'
+expect 'order: content lists the same order'       '^C: top\.txt a/x\.txt a/sub/z\.txt b/y\.txt\s*$'
 # a file and a folder sf may not read: one line says so. Root reads chmod 000 paths anyway, so a root run
 # skips the whole block with one line (a FAIL under SF_STRICT_SKIPS=1)
 if [[ $(id -u) == 0 ]]; then

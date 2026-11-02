@@ -901,8 +901,8 @@ mod tests {
 
     #[test]
     fn files_are_sorted() {
-        let (items, _) = run(printf("./b\\0./a/z\\0./B\\0./a\\0"), ParseKind::Files);
-        assert_eq!(keys(&items), ["B", "a", "a/z", "b"]);
+        let (items, _) = run(printf("./b/y\\0./a/s/z\\0./B\\0./a/x\\0"), ParseKind::Files);
+        assert_eq!(keys(&items), ["B", "a/x", "a/s/z", "b/y"]);
     }
 
     #[test]

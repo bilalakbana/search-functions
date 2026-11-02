@@ -97,7 +97,7 @@ look; `docs/sf-next-steps.md`, "The fzf look", has the current one.
 
 | Tab | Lists | Typing | Options (default) |
 |---|---|---|---|
-| Files | `fd --type f`, sorted | filters the list (fuzzy) | Hidden files ✗, Ignored files ✓ (Bilal) |
+| Files | `fd --type f`, in Content's order (each folder's files, then its subfolders; byte order) | filters the list (fuzzy) | Hidden files ✗, Ignored files ✓ (Bilal) |
 | Search | `ugrep -rl` (files), matching lines (`ugrep -rn`) or each match (`ugrep -rno -B50 -A50`); `ugrep+ -z` with archives | the ugrep pattern; runs after a short pause (150 ms) | Matching lines ✗ (Bilal), Each match ✗, Archives & documents ✗, Hidden files ✗, Ignored files ✓ (Bilal) |
 | Deep | `ugrep -rzl` (files, binaries and archives included) or each match (`ugrep -rznoa -B50 -A50`); `ugrep+` with Documents | as Search | Each match ✗, Documents ✗, Hidden files ✗, Ignored files ✓ |
 | Folders | `fd --type d`, sorted by depth, `..` first | filters the list | Hidden folders ✗, Ignored folders ✓ (Bilal) |
