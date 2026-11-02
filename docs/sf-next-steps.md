@@ -17,9 +17,11 @@ How Bilal starts the next session (paste):
   `~/.cargo/bin/sf` (`cargo install --path ~/.SearchFunctions/sf-rs`); nothing else in PATH is named sf. The fzf
   prototype `~/.SearchFunctions/sf` still exists (README suggests `alias sf-fzf=…`).
 - Git: `origin` (github.com/bilalakbana/search-functions, public) has Steps 1 to 4, the Deep tab and the command
-  line; releases `v0.1.0` to `v0.13.0` (2026-10-17); later commits: `git log origin/main..main`.
-- Bilal's config `~/.config/sf/config.toml` holds every option explicitly (sf writes all values); on 2026-10-17
-  its hidden/ignored values were set to the new defaults (hidden false, ignored true) with his OK.
+  line; releases `v0.1.0` to `v0.13.4` (the "Release" sections at the end of this file, from 0.13.0 on); later
+  commits: `git log origin/main..main`.
+- Bilal's config `~/.config/sf/config.toml` on pcbilal holds every option explicitly (sf writes all values); on
+  2026-10-17 its hidden/ignored values were set to the new defaults (hidden false, ignored true) with his OK.
+  vpsbilal has no config file (checked 2026-11-02): sf uses its defaults there.
 - Tests, all green on 2026-10-17 after Step 1:
   - `cd ~/.SearchFunctions/sf-rs && cargo test` → 240 passed, 2 ignored (speed).
   - `cargo test --release -- --ignored` → filter speed (1 M rows < 30 ms per query; measured 1–10 ms).
@@ -559,10 +561,19 @@ no newline, made with `head -c 52428800 /dev/zero | tr '\0' a`)
 Nothing panicked, hung or ran out of memory. Not measured: WSL (no WSL machine here), delta's diffs (no delta in
 PATH), the time until a long preview's whole text has come.
 
-Folders left for Bilal to delete when he no longer needs them: `/home/bilal/workspace/sf-live/scale-1m`
-(1,000,000 files), `/home/bilal/workspace/sf-live/scale-git`,
-`/home/bilal/workspace/sf-live/scale-bigline` (50 MiB), `/home/bilal/workspace/sf-live/scale-tools` (scripts,
-results and the per-run config folders in `work/`).
+The scale folders (`/home/bilal/workspace/sf-live/scale-1m`, `scale-git`, `scale-bigline`, `scale-tools`) were
+deleted with all of `~/workspace/sf-live` on 2026-11-01 (Bilal). The scripts above need new trees to run again.
+The `as u16` lead was a real defect: 0.13.4 fixes it (a preview longer than 65,535 lines scrolls to its end).
+
+## Release 0.13.2 (2026-11-01)
+
+Content: the package test runs e2e as a non-root user and passes the version as `SF_EXPECT_VERSION`;
+`speed_ratio.sh` runs with `LC_ALL=C`. Notes: `CHANGELOG.md` `## [0.13.2]`. The tags `v0.13.0` and `v0.13.1`
+had no release and were deleted; 0.13.2 is the first 0.13 release.
+
+- Test run without a tag: run 41257444478 on `96a2432`, green (three images, `pass=238 fail=0 skip=0`). Release
+  run: 41257755856 on tag `v0.13.2`, green; it published `sf-linux-x86_64.tar.gz` (13,379,291 bytes) and its
+  `.sha256`.
 
 ## Release 0.13.3 (2026-11-01)
 

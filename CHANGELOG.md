@@ -3,6 +3,75 @@
 sf searches file names, file contents (also PDF, Office files and archives) and git history in one terminal window.
 This file follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the newest release comes first.
 
+## [0.13.4] - 2026-11-02
+
+### Security
+- A `.ugrep` file in the searched folder no longer runs a command. With Archives & documents (Content) or
+  Documents (Deep) on, sf runs `ugrep+`, which runs `ug`, and `ug` loaded the folder's `.ugrep`: its
+  `filter=` ran a program on every file and could hide files from the list. Every `ugrep+` call now
+  starts with `--no-config` (ugrep 5.0.0 or newer; `sf doctor` warns about an older one). A `~/.ugrep`
+  of your own is not read either.
+- A pattern that starts with `---` (as the `---` of Markdown and YAML) no longer loads a config file.
+  ugrep reads such an argument as `--config=FILE`, also after `-e`: the folder's `.ugrep` was loaded,
+  also in the default mode, and the search found nothing. sf now gives ugrep each pattern as one
+  argument, `--regexp=PATTERN`.
+- A repository's own git config no longer runs a program while you browse. A tree with its `.git/` or a
+  bare repository inside a clone ran its textconv program (Git tab preview, Ctrl-U), its external diff,
+  fsmonitor, clean filter and `post-index-change` hook (Ctrl-G; a hook file, or from git 2.54 on a hook
+  that its config defines), its gpg program (Git list), a submodule's own filter and external diff
+  (Ctrl-G and Ctrl-U on a folder) and, in a partial clone, its `core.sshCommand` (each view of an old
+  version). Each git that sf starts gets
+  `-c core.fsmonitor=false -c log.showSignature=false -c core.hooksPath=/dev/null -c diff.submodule=short`
+  and `GIT_NO_LAZY_FETCH=1 GIT_ALLOW_PROTOCOL=none`; `git diff`, `log -p` and `show` get
+  `--no-ext-diff --no-textconv`. The diff view turns off each filter (`clean`, `process`) that the
+  repository's own config defines and each hook defined in config (`hook.NAME.enabled=false`), and does
+  not look for changes inside submodules (`--ignore-submodules=dirty`). With git older than 2.26 it
+  shows no diff: such a git cannot name the repository's filters (`sf doctor` warns). Your own filters,
+  such as git-lfs, stay. Programs that sf opens (your editor, a shell) keep your git config.
+  What you see changes in three places:
+  - In a partial clone (`git clone --filter=blob:none`), a version whose content is not fetched yet
+    shows git's error (for example "lazy fetching disabled") instead of being fetched. Run the same
+    `git log -p` or `git show` once yourself to fetch it.
+  - A submodule's new commit shows as its old and new "Subproject commit" lines, also when your own
+    config says `diff.submodule=log` (a list of the submodule's commits).
+  - Ctrl-G on a folder does not show uncommitted changes inside a submodule; open the submodule's own
+    folder for them.
+- `sf in` and `sf open` show a missing name without its control characters.
+- No raw escape sequence reaches the terminal from `sf grep-versions` on a terminal. Bidirectional
+  embeddings, overrides and isolates (U+202E) in names show as U+FFFD; the marks LRM and RLM of Arabic
+  and Hebrew text stay. A file's own "concealed" colour no longer hides its text in the preview.
+
+### Fixed
+- A search engine no longer runs on after sf ends by a signal (the terminal closed, SIGTERM). An
+  `sf` started with SIGHUP ignored (`nohup`) keeps ignoring it.
+- Matching lines, Each match and the versions search keep at most 1,000,000 rows, say so, and end
+  the engine. A one-letter pattern in a large tree used to take all the memory.
+- The Git tab on a repository with a wide graph used much less memory: git/git with All branches,
+  1.75 GB before, 177 MB now.
+- A path with a newline, or an escape sequence in a name, no longer breaks Matching lines and Each
+  match rows (the row named another file). A path with 64 newlines or more is still listed under its
+  last line.
+- The preview scrolls to the end of a text longer than 65,535 lines (a 4 MiB line at 80 columns).
+- Each match counts ugrep's "cannot read" warnings as "N paths could not be read" instead of listing
+  them with colour remnants.
+- A burst of keys (Ctrl-R Ctrl-R) no longer drops the "…" while the list still loads.
+- Folders does not go into a folder it cannot read; it says "Cannot open NAME: Permission denied".
+- The Help tab wraps the manual at narrow widths instead of cutting it.
+- A pattern that is not a regular expression gets one line that says what is wrong.
+- `sf in` with a missing file says so. Ctrl-T on a file named `-` lists its lines.
+- A PDF of text only previews as a document. The Git preview's stat bars fit the preview.
+- An empty folder says "No files here" in Files.
+- sf gives its tmux window a name with `#` back as it was.
+- `sf grep-versions | head` ends at once.
+
+### Tests
+- New end-to-end cases: a closed terminal ends the engine, `nohup` keeps SIGHUP ignored, a folder's
+  `.ugrep` (also with the pattern `---`) and a repository's git config (also its hook, a submodule's
+  config and a partial clone's fetch) run nothing, a program sf opens
+  gets no git settings of sf's, a locked folder, `sf in` and `sf open` with a missing name that holds an
+  escape sequence, a window name with `#`. Unit tests check that a pattern such as `---` reaches ugrep as
+  one `--regexp=` argument in every search mode, in Ctrl-T and in `sf grep-versions`.
+
 ## [0.13.3] - 2026-11-01
 
 ### Fixed
@@ -85,5 +154,6 @@ images), so everything below ships as 0.13.2.
 Releases up to 0.12.1 came out before this changelog. Their notes are on the
 [GitHub releases page](https://github.com/bilalakbana/search-functions/releases).
 
+[0.13.4]: https://github.com/bilalakbana/search-functions/compare/v0.13.3...v0.13.4
 [0.13.3]: https://github.com/bilalakbana/search-functions/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/bilalakbana/search-functions/compare/v0.12.1...v0.13.2
