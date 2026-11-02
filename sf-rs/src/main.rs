@@ -436,6 +436,9 @@ fn event_loop(
         while let Some(effect) = pending.pop_front() {
             let now = Instant::now();
             match effect {
+                // a burst of keys (Ctrl-R Ctrl-R Ctrl-R) leaves several for the same list_gen: only the
+                // last starts, or a cancelled one's rows and Done would count as the new list's
+                Effect::RunList if pending.contains(&Effect::RunList) => {}
                 Effect::RunList => match app.list_plan() {
                     ListPlan::Run { cmd, kind, keep } => {
                         runner.start(app.list_gen, cmd, kind, keep, &app.root)
