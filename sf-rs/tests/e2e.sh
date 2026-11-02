@@ -147,6 +147,12 @@ fi
 got=$("$SF" in "$W/no such file" 2>&1 </dev/null); code=$?
 [[ $code -eq 1 && $got == "sf in: no such file or folder: $W/no such file" ]] \
     && ok 'sf in: a missing file is said, as sf open says it' || bad "sf in: missing file: exit $code, '$got'"
+# a name with an escape sequence (a dangling link in a downloaded folder) reaches the terminal as text
+for c in in open; do
+    got=$("$SF" $c $'gone-\e]0;x\a.txt' 2>&1 </dev/null)
+    [[ $got == *gone-* && $got != *$'\e'* && $got != *$'\a'* ]] \
+        && ok "sf $c: a missing name with an escape sequence is shown without it" || bad "sf $c: raw escape: '${got@Q}'"
+done
 
 tm kill-server 2>/dev/null
 # \$TMUX and \$TMUX_PANE are the private server's (expanded inside the pane), never the caller's own tmux;
@@ -776,9 +782,12 @@ mkdir -p "$R"
 for p in textconv extdiff fsmonitor; do
     printf '#!/bin/sh\ntouch %s\n' "$W/evilgit-ran-$p" > "$W/evil-$p" && chmod +x "$W/evil-$p"
 done
-printf '* diff=evil\n' > "$R/.gitattributes"
+# a clean filter reads the file on stdin and writes it back
+printf '#!/bin/sh\ntouch %s\ncat\n' "$W/evilgit-ran-clean" > "$W/evil-clean" && chmod +x "$W/evil-clean"
+printf '* diff=evil filter=evil\n' > "$R/.gitattributes"
 printf '[core]\n\tfsmonitor = %s\n[diff]\n\texternal = %s\n[diff "evil"]\n\ttextconv = %s\n' \
     "$W/evil-fsmonitor" "$W/evil-extdiff" "$W/evil-textconv" >> "$R/.git/config"
+printf '[filter "evil"]\n\tclean = %s\n\trequired = true\n' "$W/evil-clean" >> "$R/.git/config"
 for args in git 'diff a.txt' 'history a.txt'; do
     tm new-window -d -t e2e -n evil -c "$R" "env -i HOME=$HOME PATH=${PANE_PATH@Q} TERM=xterm-256color \
         LANG=C.UTF-8 XDG_CONFIG_HOME=$XDG '$SF' $args"
@@ -786,7 +795,7 @@ for args in git 'diff a.txt' 'history a.txt'; do
     tm kill-window -t e2e:evil 2>/dev/null
 done
 ran=$(cd "$W" && ls evilgit-ran-* 2>/dev/null | tr '\n' ' ')
-[[ -z $ran ]] && ok "git config: the repository's textconv, external diff and fsmonitor do not run" \
+[[ -z $ran ]] && ok "git config: the repository's textconv, external diff, fsmonitor and clean filter do not run" \
     || bad "git config: the repository's programs ran: $ran"
 # ... and the settings that turn them off reach only sf's own git: a program sf opens (an editor, its
 # shells) keeps the user's git config

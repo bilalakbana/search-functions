@@ -441,10 +441,12 @@ fn cut_note() -> String {
 
 /// Search and version rows are lines, but a path may hold a newline: its row then comes as several
 /// lines, and only the last holds the NUL after the path. The lines before it wait in `split`; false
-/// while `record` may be such a start. A Matching lines or Each match row joins the waiting lines that
-/// make its path one that exists in `root` (the others are ugrep's "Binary file … matches" lines);
-/// a version row (`REV:PATH\0LINE\0TEXT`) joins from a line that starts with `REV:` to its second NUL.
+/// while `record` may be such a start. A Matching lines or Each match row joins the most waiting lines
+/// that make its path one that exists in `root` (the others are ugrep's "Binary file … matches"
+/// lines); a version row (`REV:PATH\0LINE\0TEXT`) joins from a line that starts with `REV:` to its
+/// second NUL.
 fn rejoin(kind: ParseKind, split: &mut Vec<Vec<u8>>, record: &mut Vec<u8>, root: &Path) -> bool {
+    // shortcut: a path with 64 newlines or more loses its row; raise it if such names turn up
     const MAX_SPLIT: usize = 64;
     let nuls = record.iter().filter(|&&b| b == 0).count();
     if kind == ParseKind::Versions {
@@ -475,7 +477,7 @@ fn rejoin(kind: ParseKind, split: &mut Vec<Vec<u8>>, record: &mut Vec<u8>, root:
     // Each match: ugrep's colour reset after the name is not part of it
     let name = &record[..nul];
     let name = name.strip_suffix(b"\x1b[m").unwrap_or(name);
-    let joins = (1..=split.len()).find(|&k| {
+    let joins = (1..=split.len()).rev().find(|&k| {
         let mut path = split[split.len() - k..].join(&b'\n');
         path.push(b'\n');
         path.extend_from_slice(name);
@@ -869,6 +871,11 @@ mod tests {
         assert_eq!(errors, Vec::<String>::new());
         assert_eq!(keys(&items), ["match\nnewline.txt", "plain.txt"]);
         assert_eq!(items[0].line, Some(1));
+        // when a shorter join names a file too, the row is the longer path's, as its lines say
+        std::fs::write(dir.join("x\nmatch\nnewline.txt"), "").unwrap();
+        let rows = "x\\nmatch\\nnewline.txt\\0003\\037\\001needle\\002 c\\n";
+        let (items, _) = run_in(printf(rows), ParseKind::SearchLines, &dir);
+        assert_eq!(keys(&items), ["x\nmatch\nnewline.txt"]);
         // Each match: ugrep's colour reset after the name, and an escape sequence in the name itself
         std::fs::write(dir.join("esc-\x1b[31mred.txt"), "").unwrap();
         let rows = "match\\nnewline.txt\\033[m\\0001\\033[m\\037\\033[7mneedle\\033[m a\\n\

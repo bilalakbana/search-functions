@@ -9,8 +9,7 @@ use std::path::{Path, PathBuf};
 /// checker (`log.showSignature` with `gpg.program`: git log, the Git tab's list). A downloaded tree
 /// with its .git/, or a bare repository inside a clone, ran them as soon as the Git tab opened. `-c`
 /// outranks the repository's config and reaches no program but this git; the views add --no-ext-diff
-/// --no-textconv. shortcut: a filter's clean program (`filter.NAME.clean`) still runs in git diff
-/// HEAD; git has no switch for it.
+/// --no-textconv, and the diff view turns off the repository's own filters (`views::filters_off`).
 pub const GIT_RUNS_NO_PROGRAMS: [&str; 4] = [
     "-c",
     "core.fsmonitor=false",

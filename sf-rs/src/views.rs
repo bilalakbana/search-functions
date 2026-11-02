@@ -8,6 +8,66 @@ use std::path::{Path, PathBuf};
 use crate::commands::{Cmd, GIT_SHOW_FORMAT, GREP_PALETTE, PreviewPlan, delta_args};
 use crate::engines::Engines;
 
+/// The output of `git config -z --show-scope --name-only --get-regexp ^filter\.` in `folder`: scope
+/// NUL key NUL, one pair per setting; empty when git cannot say.
+fn scoped_filters(git: &Path, folder: &Path) -> Vec<u8> {
+    std::process::Command::new(git)
+        .args(crate::engines::GIT_RUNS_NO_PROGRAMS)
+        .arg("-C")
+        .arg(folder)
+        .args([
+            "config",
+            "-z",
+            "--show-scope",
+            "--name-only",
+            "--get-regexp",
+            r"^filter\.",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .map(|o| o.stdout)
+        .unwrap_or_default()
+}
+
+/// `-c` settings that turn off each content filter the repository's own config (local or worktree
+/// scope) defines: git diff HEAD runs a filter's clean or process program on the working tree's file.
+/// The user's own filters (git-lfs) stay. None when a name holds `=`, which `-c` cannot write.
+fn filters_off(scoped: &[u8]) -> Option<Vec<OsString>> {
+    use std::os::unix::ffi::OsStrExt;
+    let fields: Vec<&[u8]> = scoped.split(|&b| b == 0).collect();
+    let mut names: Vec<&[u8]> = Vec::new();
+    for &[scope, key] in fields.as_chunks::<2>().0 {
+        if !matches!(scope, b"local" | b"worktree") {
+            continue;
+        }
+        let Some(name) = key
+            .strip_prefix(b"filter.")
+            .and_then(|k| k.iter().rposition(|&b| b == b'.').map(|dot| &k[..dot]))
+        else {
+            continue;
+        };
+        if name.contains(&b'=') {
+            return None;
+        }
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    let mut args = Vec::new();
+    for name in names {
+        for setting in [&b"clean="[..], b"process=", b"required=false"] {
+            let mut value = b"filter.".to_vec();
+            value.extend_from_slice(name);
+            value.push(b'.');
+            value.extend_from_slice(setting);
+            args.push(OsString::from("-c"));
+            args.push(std::ffi::OsStr::from_bytes(&value).to_owned());
+        }
+    }
+    Some(args)
+}
+
 /// What a view shows.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ViewKind {
@@ -105,7 +165,13 @@ pub fn view_plan(kind: &ViewKind, width: u16, e: &Engines) -> PreviewPlan {
         ViewKind::Diff { path, full } => {
             let (folder, name) = place(path);
             let context = if *full { WHOLE } else { "--unified=10" };
+            let Some(off) = filters_off(&scoped_filters(git_path, &folder)) else {
+                return PreviewPlan::Text(
+                    "The repository's config names a filter that sf cannot turn off".into(),
+                );
+            };
             let cmd = git(&folder)
+                .args(off)
                 .arg("diff")
                 .args(NO_PROGRAMS)
                 .args(["--color=always", "HEAD", context, "--"])
@@ -386,6 +452,25 @@ mod tests {
         };
         let (git, _) = pipe(view_plan(&short, 120, &engines()));
         assert!(git.args.contains(&"--unified=10".into()));
+    }
+
+    #[test]
+    fn the_repositorys_own_filters_are_turned_off_in_a_diff() {
+        let scoped = b"global\0filter.lfs.clean\0local\0filter.ev.clean\0local\0filter.ev.smudge\0\
+                       worktree\0filter.a.b.process\0";
+        let args: Vec<String> = filters_off(scoped)
+            .unwrap()
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect();
+        let off = |n: &str| {
+            ["clean=", "process=", "required=false"]
+                .map(|s| ["-c".to_string(), format!("filter.{n}.{s}")])
+        };
+        let want: Vec<String> = [off("ev"), off("a.b")].concat().concat();
+        assert_eq!(args, want, "git-lfs of the user's own config stays");
+        assert_eq!(filters_off(b"local\0filter.x=y.clean\0"), None);
+        assert_eq!(filters_off(b""), Some(Vec::new()));
     }
 
     #[test]

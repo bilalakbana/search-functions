@@ -104,7 +104,8 @@ fn main() -> ExitCode {
         Ok(Cli::InFile { file, query }) => {
             // as `sf open` says it, not as a window with "1 path could not be read"
             if !Path::new(&file).exists() {
-                eprintln!("sf in: no such file or folder: {}", file.to_string_lossy());
+                let name = items::printable(&file.to_string_lossy());
+                eprintln!("sf in: no such file or folder: {name}");
                 return ExitCode::from(1);
             }
             return report(run(Tab::Content, query, Vec::new(), Start::InFile(file)));
@@ -287,7 +288,8 @@ fn command(name: &str, value: &OsStr) -> ExitCode {
             ExitCode::SUCCESS
         }
         Err(e) => {
-            eprintln!("sf {name}: {e}");
+            // the error names the path: a name can hold an escape sequence
+            eprintln!("sf {name}: {}", items::printable(&e));
             ExitCode::FAILURE
         }
     }
