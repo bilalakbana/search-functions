@@ -215,7 +215,8 @@ sf doctor
 ```
 Content needs ugrep 3.6.0 or newer for Matching lines; before 5.0.0 only the first match of a line is marked red
 (Ubuntu 22.04 ships 3.7.2, Debian 12 3.11.2; Ubuntu 24.04 and Debian 13 are fine). Archives and Documents need
-`ugrep+` of ugrep 5.0.0 or newer (`--no-config`). With `sf` installed, `Enter`,
+`ugrep+` of ugrep 5.0.0 or newer (`--no-config`). The diff view (`Ctrl-g`) needs git 2.26 or newer
+(`git config --show-scope`). With `sf` installed, `Enter`,
 `Ctrl-e` and `Ctrl-c` of the fzf functions go through it (`sub-functions/platform_action`), so they work on WSL too;
 without it they use xdg-open, `open_in_file_manager` and wl-copy.
 

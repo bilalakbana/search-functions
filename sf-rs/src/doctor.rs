@@ -22,6 +22,8 @@ pub type Run<'a> = &'a dyn Fn(&Path, &[&str]) -> Option<String>;
 /// needs `--replace` (3.6.0); before 5.0.0 (3.7.2, 3.11.2) only a line's first match is marked.
 const UGREP_REPLACE: (u32, u32, u32) = (3, 6, 0);
 const UGREP_ALL_MATCHES: (u32, u32, u32) = (5, 0, 0);
+/// git config --show-scope, which the diff view needs to turn off the repository's own filters.
+const GIT_SHOW_SCOPE: (u32, u32, u32) = (2, 26, 0);
 
 const FILE_MANAGER: &str = "org.freedesktop.FileManager1";
 
@@ -171,7 +173,11 @@ pub fn report(
                         l.split(';').next().unwrap_or(l).trim_end()
                     });
                 let mut value = format!("{:<width$}  {first}", path.display());
-                let ugrep = name.starts_with("ugrep").then(|| ugrep_version(first));
+                // the diff view asks git for the repository's filters with --show-scope
+                if *name == "git" && version_in(first, 2).is_some_and(|v| v < GIT_SHOW_SCOPE) {
+                    value.push_str("  ! older than 2.26: Ctrl-G shows no diff (no --show-scope)");
+                }
+                let ugrep = name.starts_with("ugrep").then(|| version_in(first, 1));
                 match ugrep.flatten() {
                     // sf starts each ugrep+ with --no-config (5.0.0), so a searched folder's .ugrep
                     // runs nothing
@@ -237,11 +243,12 @@ fn file_manager(dbus_send: &Path, run: Run) -> String {
     }
 }
 
-/// (major, minor, patch) from ugrep's first `--version` line, "ugrep 7.8.5 x86_64-…".
-fn ugrep_version(line: &str) -> Option<(u32, u32, u32)> {
+/// (major, minor, patch) from word `n` of a first `--version` line: 1 in "ugrep 7.8.5 x86_64-…",
+/// 2 in "git version 2.47.3".
+fn version_in(line: &str, n: usize) -> Option<(u32, u32, u32)> {
     let mut numbers = line
         .split_whitespace()
-        .nth(1)?
+        .nth(n)?
         .split('.')
         .map(|n| n.parse().ok());
     Some((
@@ -463,6 +470,21 @@ mod tests {
         assert!(line(&r, "delta").starts_with("not found"), "{r}");
         assert!(line(&r, "editor").contains("Ctrl-O"), "{r}");
         assert!(!line(&r, "ugrep").contains("older"), "{r}");
+    }
+
+    #[test]
+    fn a_git_without_show_scope_is_warned_about() {
+        let s = setup("doctor_old_git", &["git"], wayland_tmux());
+        for (version, old) in [
+            ("git version 2.25.1", true),
+            ("git version 2.26.0", false),
+            ("git version 2.39.5 (Apple Git-154)", false),
+        ] {
+            let answer = |_: &Path, _: &[&str]| Some(format!("{version}\n"));
+            let r = report(&s.env, &s.engines, Some(&s.config), None, None, &answer);
+            let row = line(&r, "git");
+            assert_eq!(row.contains("older than 2.26"), old, "{version}: {row}");
+        }
     }
 
     #[test]
