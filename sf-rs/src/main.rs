@@ -126,7 +126,13 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         Ok(Cli::Doctor) => return doctor(),
-        Ok(Cli::GrepVersions(query)) => return grep_versions(&query),
+        Ok(Cli::GrepVersions(query)) => {
+            // as grep: a reader that has gone (`| head`, the window's list cut) ends it, not a
+            // "Broken pipe" line for each of the versions left (Rust ignores SIGPIPE)
+            // SAFETY: signal(2) with SIG_DFL, before any thread starts.
+            unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
+            return grep_versions(&query);
+        }
         Ok(Cli::Command { name, value }) => return command(&name, &value),
         Ok(Cli::Run {
             tab,

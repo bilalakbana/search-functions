@@ -44,10 +44,12 @@ enum Look {
     Version { text: Box<str>, cut: bool },
     /// A `git log --graph` row as git wrote it (its colours), made into spans only when drawn: a graph
     /// of many branches has hundreds of escape bytes a row, and a span for each colour took kilobytes
-    /// (git/git with --all: 146,309 rows, 1.75 GB). `number`: a commit's, None on a graph-only row.
+    /// (git/git with --all: 146,309 rows, 1.75 GB). `number`: a commit's, None on a graph-only row;
+    /// `text`: the shown text, which Match case filters every row by.
     Git {
         number: Option<u32>,
         raw: Box<[u8]>,
+        text: Box<str>,
         lower: Box<str>,
     },
     /// Drawn as it is: notes, the parent row.
@@ -199,7 +201,8 @@ impl Item {
                 let (path, text) = self.match_parts().unwrap_or_default();
                 format!("{path}:{}:{text}", self.line.unwrap_or(0))
             }
-            Look::Version { .. } | Look::Git { .. } => self
+            Look::Git { text, .. } => text.to_string(),
+            Look::Version { .. } => self
                 .display()
                 .spans
                 .iter()
@@ -495,12 +498,19 @@ pub fn git_row(mut raw: Vec<u8>, number: u32) -> Item {
         look: Look::Git {
             number: commit,
             raw: raw.into_boxed_slice(),
+            text: Box::default(),
             lower: Box::default(),
         },
     };
-    let text = item.text().to_lowercase().into_boxed_str();
-    if let Look::Git { lower, .. } = &mut item.look {
-        *lower = text;
+    let shown: String = item
+        .display()
+        .spans
+        .iter()
+        .map(|s| s.content.as_ref())
+        .collect();
+    if let Look::Git { text, lower, .. } = &mut item.look {
+        *lower = shown.to_lowercase().into_boxed_str();
+        *text = shown.into_boxed_str();
     }
     item
 }
@@ -1004,7 +1014,8 @@ mod tests {
         let per_row = bytes_per_row(10_000, raw, ParseKind::Git);
         let len = raw(5000).len();
         eprintln!("{per_row} bytes per Git row of {len} bytes");
-        assert!(per_row <= len + 300, "{per_row} bytes per Git row of {len}");
+        // the raw bytes, the shown text as it is (Match case) and in lower case (the filter)
+        assert!(per_row <= len + 500, "{per_row} bytes per Git row of {len}");
         let it = parse(ParseKind::Git, &raw(7), 3).unwrap();
         assert_eq!(it.key, hash);
         assert!(text_of(&it.display()).starts_with("3 | | "));

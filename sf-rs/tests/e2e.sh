@@ -734,6 +734,16 @@ else
     if [[ -z $left ]]; then ok 'hangup: a closed terminal ends the search engine too'
     else bad "hangup: the engine runs on after the terminal closed (pids $left)"; kill $left 2>/dev/null; fi
 fi
+# ... but an sf started with SIGHUP ignored (nohup) keeps ignoring it, as its engine does
+( cd "$W/hup" && trap '' HUP && exec env -i HOME="$HOME" PATH="$PANE_PATH" XDG_CONFIG_HOME="$W/xdg-hup" \
+    "$SF" content 'a|zq' --print >/dev/null 2>&1 ) &
+nohup_pid=$!
+for i in $(seq 50); do [[ -n $(engines_of) ]] && break; sleep 0.1; done
+kill -HUP "$nohup_pid" 2>/dev/null; sleep 0.5
+if kill -0 "$nohup_pid" 2>/dev/null; then ok 'nohup: a SIGHUP sf was started ignoring stays ignored'
+else bad 'nohup: sf ended on a SIGHUP it was started ignoring'; fi
+kill "$nohup_pid" 2>/dev/null; wait "$nohup_pid" 2>/dev/null
+left=$(engines_of); [[ -n $left ]] && kill $left 2>/dev/null
 
 echo "pass=$PASS fail=$FAIL skip=$SKIP (screens in $SHOTS)"
 tm kill-server

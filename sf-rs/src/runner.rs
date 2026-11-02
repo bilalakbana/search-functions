@@ -111,6 +111,7 @@ impl Runner {
                 stdout,
                 &tx,
                 &root,
+                &job,
             );
             let _ = errors.join();
             reap(&job);
@@ -195,8 +196,13 @@ pub fn end_engines_with_sf() {
     }
     let handler = on_signal as extern "C" fn(libc::c_int) as libc::sighandler_t;
     for signal in [libc::SIGHUP, libc::SIGTERM, libc::SIGINT, libc::SIGQUIT] {
-        // SAFETY: signal(2) with a handler that makes only async-signal-safe calls.
-        unsafe { libc::signal(signal, handler) };
+        // SAFETY: signal(2) with a handler that makes only async-signal-safe calls; one sf was started
+        // ignoring (nohup's SIGHUP, a script's `&` job's SIGINT) keeps ignoring, as its engines then do
+        unsafe {
+            if libc::signal(signal, handler) == libc::SIG_IGN {
+                libc::signal(signal, libc::SIG_IGN);
+            }
+        }
     }
 }
 
@@ -300,6 +306,7 @@ fn read_items(
     stdout: impl Read,
     tx: &Sender<ListMsg>,
     root: &Path,
+    job: &Mutex<(Child, bool)>,
 ) {
     let delimiter = match kind {
         ParseKind::Files | ParseKind::Folders | ParseKind::SearchFiles { .. } => 0,
@@ -372,7 +379,13 @@ fn read_items(
             if delimiter == b'\n' {
                 listed += 1;
                 if listed == MAX_MATCH_ROWS {
-                    break; // dropping stdout ends the engine (SIGPIPE)
+                    // not left to SIGPIPE: sf grep-versions ignores it and would search on
+                    let guard = job.lock().unwrap_or_else(|e| e.into_inner());
+                    if !guard.1 {
+                        // SAFETY: kill(2) on our unreaped child's process group (see Job).
+                        unsafe { libc::kill(-(guard.0.id() as libc::pid_t), libc::SIGKILL) };
+                    }
+                    break;
                 }
             }
         }
@@ -713,6 +726,13 @@ mod tests {
         // an engine that never ends: the list stops it at MAX_MATCH_ROWS
         let endless = sh("while :; do printf 'a\\0001\\037x\\n'; done");
         let (items, errors) = run(endless, ParseKind::SearchLines);
+        assert_eq!(items.len(), MAX_MATCH_ROWS);
+        assert_eq!(errors, [cut_note()]);
+        // one that ignores SIGPIPE (sf grep-versions, a Rust program) is ended all the same
+        let deaf = sh(
+            "trap '' PIPE; while :; do printf 'a\\0001\\037x\\n' || echo 'write error' >&2; done",
+        );
+        let (items, errors) = run(deaf, ParseKind::SearchLines);
         assert_eq!(items.len(), MAX_MATCH_ROWS);
         assert_eq!(errors, [cut_note()]);
         // a file list (one row a file) is not cut
