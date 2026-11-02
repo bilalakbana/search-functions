@@ -378,7 +378,7 @@ fn read_items(
         }
     }
     match kind {
-        ParseKind::Git => batch = numbered(&records),
+        ParseKind::Git => batch = numbered(std::mem::take(&mut records)),
         ParseKind::Files => items::sort_files(&mut batch),
         ParseKind::Folders => {
             items::sort_folders(&mut batch);
@@ -457,13 +457,13 @@ fn rejoin(kind: ParseKind, split: &mut Vec<Vec<u8>>, record: &mut Vec<u8>, root:
 }
 
 /// Git rows numbered as sub-functions/git_logs does: the oldest commit 1, the newest the count.
-fn numbered(records: &[Vec<u8>]) -> Vec<Item> {
+fn numbered(records: Vec<Vec<u8>>) -> Vec<Item> {
     let mut number = records.iter().filter(|r| r.contains(&SEP)).count() as u32;
     records
-        .iter()
-        .filter_map(|r| {
+        .into_iter()
+        .map(|r| {
             let commit = r.contains(&SEP);
-            let item = parse(ParseKind::Git, r, number);
+            let item = items::git_row(r, number);
             if commit {
                 number = number.saturating_sub(1);
             }

@@ -42,7 +42,15 @@ enum Look {
     /// as the short version, the path, the line number and `text` (printable; matches are marked when
     /// drawn).
     Version { text: Box<str>, cut: bool },
-    /// Drawn as it is: Git rows, notes, the parent row.
+    /// A `git log --graph` row as git wrote it (its colours), made into spans only when drawn: a graph
+    /// of many branches has hundreds of escape bytes a row, and a span for each colour took kilobytes
+    /// (git/git with --all: 146,309 rows, 1.75 GB). `number`: a commit's, None on a graph-only row.
+    Git {
+        number: Option<u32>,
+        raw: Box<[u8]>,
+        lower: Box<str>,
+    },
+    /// Drawn as it is: notes, the parent row.
     Styled {
         line: Box<Line<'static>>,
         lower: Box<str>,
@@ -145,6 +153,15 @@ impl Item {
                 }
                 Line::from(spans)
             }
+            Look::Git { number, raw, .. } => {
+                let mut spans = Vec::new();
+                if let Some(n) = number {
+                    spans.push(Span::styled(n.to_string(), Style::new().fg(theme::info())));
+                    spans.push(Span::raw(" "));
+                }
+                spans.extend(first_line(raw).spans);
+                Line::from(spans)
+            }
             Look::Styled { line, .. } => (**line).clone(),
         }
     }
@@ -182,7 +199,7 @@ impl Item {
                 let (path, text) = self.match_parts().unwrap_or_default();
                 format!("{path}:{}:{text}", self.line.unwrap_or(0))
             }
-            Look::Version { .. } => self
+            Look::Version { .. } | Look::Git { .. } => self
                 .display()
                 .spans
                 .iter()
@@ -206,7 +223,9 @@ impl Item {
     /// (Ctrl-Alt-F on Matching lines is rare, and rows stay small without a copy).
     pub fn haystack(&self) -> Cow<'_, str> {
         match &self.look {
-            Look::Path { lower, .. } | Look::Styled { lower, .. } => Cow::Borrowed(lower),
+            Look::Path { lower, .. } | Look::Styled { lower, .. } | Look::Git { lower, .. } => {
+                Cow::Borrowed(lower)
+            }
             Look::Match { .. } | Look::Version { .. } => Cow::Owned(self.text().to_lowercase()),
         }
     }
@@ -269,7 +288,7 @@ pub fn parse(kind: ParseKind, raw: &[u8], git_number: u32) -> Option<Item> {
         ParseKind::SearchLines => search_line(raw),
         ParseKind::SearchMatches => search_line(&marked(raw)),
         ParseKind::Versions => version_line(raw),
-        ParseKind::Git => Some(git_line(raw, git_number)),
+        ParseKind::Git => Some(git_row(raw.to_vec(), git_number)),
     }
 }
 
@@ -455,22 +474,35 @@ fn match_spans(text: &str) -> Vec<Span<'static>> {
 }
 
 /// A `git log --graph` line: coloured display, then SEP and the full hash; a graph-only line has none.
-fn git_line(raw: &[u8], number: u32) -> Item {
-    let Some(sep) = raw.iter().rposition(|&b| b == SEP) else {
-        return Item::styled(OsString::new(), first_line(raw), false);
-    };
-    let hash = std::str::from_utf8(&raw[sep + 1..])
-        .ok()
-        .filter(|h| is_hash(h));
-    let mut spans = vec![
-        Span::styled(number.to_string(), Style::new().fg(theme::info())),
-        Span::raw(" "),
-    ];
-    spans.extend(first_line(&raw[..sep]).spans);
-    match hash {
-        Some(h) => Item::styled(h.into(), Line::from(spans), true),
-        None => Item::styled(OsString::new(), Line::from(spans), false),
+/// Takes the line, so its bytes are kept without a copy.
+pub fn git_row(mut raw: Vec<u8>, number: u32) -> Item {
+    let mut key = OsString::new();
+    let mut commit = None;
+    if let Some(sep) = raw.iter().rposition(|&b| b == SEP) {
+        if let Some(h) = std::str::from_utf8(&raw[sep + 1..])
+            .ok()
+            .filter(|h| is_hash(h))
+        {
+            key = h.into();
+        }
+        raw.truncate(sep);
+        commit = Some(number);
     }
+    let mut item = Item {
+        selectable: !key.is_empty(),
+        key,
+        line: None,
+        look: Look::Git {
+            number: commit,
+            raw: raw.into_boxed_slice(),
+            lower: Box::default(),
+        },
+    };
+    let text = item.text().to_lowercase().into_boxed_str();
+    if let Look::Git { lower, .. } = &mut item.look {
+        *lower = text;
+    }
+    item
 }
 
 fn first_line(bytes: &[u8]) -> Line<'static> {
@@ -957,6 +989,26 @@ mod tests {
         );
         eprintln!("{per_row} bytes per matching-line row");
         assert!(per_row <= 240, "{per_row} bytes per matching-line row");
+    }
+
+    #[test]
+    fn git_rows_of_a_wide_graph_are_compact() {
+        // git/git with --all: 60 graph columns, each in a colour of its own (843 bytes a row on
+        // average); a span for each colour made a row take kilobytes (146,309 rows, 1.75 GB)
+        let hash = "374425a0123456789abcdef0123456789abcdef0";
+        let graph = "\x1b[31m|\x1b[m ".repeat(60);
+        let raw = |i: usize| {
+            format!("{graph}* \x1b[1;34m374425a\x1b[m T\x1b[1;33m (tag: v{i})\x1b[m subject {i}\x1f{hash}")
+                .into_bytes()
+        };
+        let per_row = bytes_per_row(10_000, raw, ParseKind::Git);
+        let len = raw(5000).len();
+        eprintln!("{per_row} bytes per Git row of {len} bytes");
+        assert!(per_row <= len + 300, "{per_row} bytes per Git row of {len}");
+        let it = parse(ParseKind::Git, &raw(7), 3).unwrap();
+        assert_eq!(it.key, hash);
+        assert!(text_of(&it.display()).starts_with("3 | | "));
+        assert!(it.haystack().ends_with("* 374425a t (tag: v7) subject 7"));
     }
 
     #[test]
