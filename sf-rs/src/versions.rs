@@ -561,10 +561,43 @@ fn documents(
     Ok(found)
 }
 
+/// The rows for a terminal (`sf grep-versions` run by hand): a file name or a line of a version can hold
+/// escape sequences (a title, OSC 52 to the clipboard), so each control byte but the newline and the tab
+/// is a `?` and the NUL between the fields a `:`. sf's own list reads the rows as they are, from a pipe.
+pub struct ForTerminal<W: Write>(pub W);
+
+impl<W: Write> Write for ForTerminal<W> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let shown: Vec<u8> = buf
+            .iter()
+            .map(|&b| match b {
+                0 => b':',
+                b'\n' | b'\t' => b,
+                0..0x20 | 0x7f => b'?',
+                _ => b,
+            })
+            .collect();
+        self.0.write_all(&shown)?;
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.0.flush()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::testutil::{calls, stub, temp_dir};
+
+    #[test]
+    fn a_terminal_gets_no_escape_sequence() {
+        let mut out = ForTerminal(Vec::new());
+        out.write_all(b"rev:a\x1b]0;title\x07.txt\x001\x00x\x1b[2Jy\tz\n")
+            .unwrap();
+        assert_eq!(out.0, b"rev:a?]0;title?.txt:1:x?[2Jy\tz\n");
+    }
     use std::path::PathBuf;
     use std::process::Command;
 

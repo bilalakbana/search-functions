@@ -167,15 +167,23 @@ fn grep_versions(query: &versions::Query) -> ExitCode {
         return ExitCode::from(2);
     };
     let root = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    let status = versions::search(
-        query,
-        &git,
-        engines.ugrep.as_deref(),
-        &versions::filters(&path),
-        &root,
-        &mut std::io::stdout().lock(),
-        &mut std::io::stderr(),
-    );
+    let search = |mut out: &mut dyn std::io::Write| {
+        versions::search(
+            query,
+            &git,
+            engines.ugrep.as_deref(),
+            &versions::filters(&path),
+            &root,
+            &mut out,
+            &mut std::io::stderr(),
+        )
+    };
+    let stdout = std::io::stdout();
+    let status = if stdout.is_terminal() {
+        search(&mut versions::ForTerminal(stdout.lock()))
+    } else {
+        search(&mut stdout.lock())
+    };
     ExitCode::from(status)
 }
 
@@ -771,8 +779,10 @@ impl TmuxWindow {
     }
 
     fn restore(&self) {
+        // rename-window expands formats in the name: a window called "#{session_name}" came back as
+        // the session's name; ## is a # as it is
         let _ = self
-            .tmux(&["rename-window", "--", &self.name])
+            .tmux(&["rename-window", "--", &self.name.replace('#', "##")])
             .stdout(Stdio::null())
             .status();
     }

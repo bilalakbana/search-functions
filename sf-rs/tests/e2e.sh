@@ -768,6 +768,18 @@ done
 ran=$(cd "$W" && ls evilgit-ran-* 2>/dev/null | tr '\n' ' ')
 [[ -z $ran ]] && ok "git config: the repository's textconv, external diff and fsmonitor do not run" \
     || bad "git config: the repository's programs ran: $ran"
+# sf gives its tmux window its name back as it was: rename-window expands formats, a # is written ##
+idx=$(tm new-window -d -P -F '#{window_index}' -t e2e "env -i HOME=$HOME PATH=${PANE_PATH@Q} \
+    TERM=xterm-256color LANG=C.UTF-8 XDG_CONFIG_HOME=$XDG TMUX=\$TMUX TMUX_PANE=\$TMUX_PANE bash --norc --noprofile")
+tm rename-window -t "e2e:$idx" -- '##{session_name}x'
+tm send-keys -t "e2e:$idx" "'$SF' files" Enter
+for i in $(seq 50); do [[ $(tm display-message -p -t "e2e:$idx" '#W') == search ]] && break; sleep 0.1; done
+tm send-keys -t "e2e:$idx" Escape
+for i in $(seq 50); do [[ $(tm display-message -p -t "e2e:$idx" '#W') != search ]] && break; sleep 0.1; done
+name=$(tm display-message -p -t "e2e:$idx" '#W')
+[[ $name == '#{session_name}x' ]] && ok 'tmux: a window name with # comes back as it was' \
+    || bad "tmux: the window came back as '$name', want '#{session_name}x'"
+tm kill-window -t "e2e:$idx"
 # ... but an sf started with SIGHUP ignored (nohup) keeps ignoring it, as its engine does
 ( cd "$W/hup" && trap '' HUP && exec env -i HOME="$HOME" PATH="$PANE_PATH" XDG_CONFIG_HOME="$W/xdg-hup" \
     "$SF" content 'a|zq' --print >/dev/null 2>&1 ) &

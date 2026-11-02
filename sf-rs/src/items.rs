@@ -523,11 +523,17 @@ fn first_line(bytes: &[u8]) -> Line<'static> {
         .unwrap_or_default()
 }
 
-/// Control characters (C0, DEL, C1) as U+FFFD, so nothing raw reaches the terminal.
+/// Control characters (C0, DEL, C1) and the bidirectional formatting ones as U+FFFD, so nothing raw
+/// reaches the terminal and no name reads backwards ("rtl-\u{202e}txt.exe" drawn as "rtl-exe.txt").
 pub fn printable(s: &str) -> String {
     s.chars()
-        .map(|c| if c.is_control() { '\u{fffd}' } else { c })
+        .map(|c| if unshown(c) { '\u{fffd}' } else { c })
         .collect()
+}
+
+fn unshown(c: char) -> bool {
+    c.is_control()
+        || matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
 }
 
 /// A file's type for Ctrl-S: its extension as written (`a.tar.gz` → "gz"), None when it has none
@@ -557,9 +563,11 @@ pub fn ansi_text(bytes: &[u8]) -> Text<'static> {
         .unwrap_or_else(|_| Text::raw(lossy.into_owned()));
     for line in &mut text.lines {
         for span in &mut line.spans {
-            if span.content.chars().any(char::is_control) {
+            if span.content.chars().any(unshown) {
                 span.content = printable(&span.content.replace('\t', "    ")).into();
             }
+            // a file's own ESC[8m (concealed) must not hide its text in the preview
+            span.style = span.style.remove_modifier(Modifier::HIDDEN);
         }
     }
     text
@@ -935,6 +943,25 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn no_name_reads_backwards_and_no_text_is_concealed() {
+        assert_eq!(printable("rtl-\u{202e}txt.exe"), "rtl-\u{fffd}txt.exe");
+        assert_eq!(printable("a\u{2067}b\u{200f}c"), "a\u{fffd}b\u{fffd}c");
+        assert_eq!(
+            printable("çay\u{200b}"),
+            "çay\u{200b}",
+            "a zero-width space is no bidi control"
+        );
+        let t = ansi_text("x \x1b[8mHIDDEN\x1b[0m \u{202e}y".as_bytes());
+        let spans = &t.lines[0].spans;
+        assert!(
+            spans
+                .iter()
+                .all(|s| !s.style.add_modifier.contains(Modifier::HIDDEN))
+        );
+        assert_eq!(text_of(&t.lines[0]), "x HIDDEN \u{fffd}y");
     }
 
     #[test]
