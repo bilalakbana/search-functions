@@ -208,7 +208,29 @@ pub fn end_engines_with_sf() {
 
 /// ugrep's warning about a path it cannot read or open, or one that is gone (ugrep runs without -s).
 pub fn unreadable(line: &[u8]) -> bool {
-    line.starts_with(b"ugrep: warning: ")
+    uncoloured(line).starts_with(b"ugrep: warning: ")
+}
+
+/// `line` without its colour sequences (`ESC [ digits ; m`): Each match runs ugrep with --color=always,
+/// which colours its messages too.
+fn uncoloured(line: &[u8]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(line.len());
+    let mut i = 0;
+    while i < line.len() {
+        if line[i] == 0x1b && line.get(i + 1) == Some(&b'[') {
+            let end = line[i + 2..]
+                .iter()
+                .position(|b| !(b.is_ascii_digit() || *b == b';'))
+                .map(|n| i + 2 + n);
+            if let Some(end) = end.filter(|&e| line[e] == b'm') {
+                i = end + 1;
+                continue;
+            }
+        }
+        out.push(line[i]);
+        i += 1;
+    }
+    out
 }
 
 /// The one line that stands for `n` such warnings.
@@ -261,7 +283,9 @@ fn read_errors(generation: u64, stderr: impl Read, tx: &Sender<ListMsg>) {
     let (mut reader, mut line) = (BufReader::new(stderr), Vec::new());
     let mut held = Vec::new();
     while let Ok(Some(_)) = read_record(&mut reader, b'\n', &mut line, MAX_ERROR_LINE) {
-        let line = String::from_utf8_lossy(&line).trim().to_string();
+        let line = String::from_utf8_lossy(&uncoloured(&line))
+            .trim()
+            .to_string();
         if line.is_empty() {
             continue;
         }
@@ -780,6 +804,11 @@ mod tests {
             ParseKind::SearchFiles { archives: false },
         );
         assert_eq!(errors, ["1 path could not be read"]);
+        // Each match runs ugrep with --color=always: its warnings come coloured
+        let script = "printf '\\033[mugrep: warning:\\033[m cannot read u.txt:\\033[m Permission denied\\n' >&2; \
+                      printf '\\033[1;31mugrep: error:\\033[m boom\\n' >&2";
+        let (_, errors) = run(sh(script), ParseKind::SearchMatches);
+        assert_eq!(errors, ["ugrep: error: boom", "1 path could not be read"]);
     }
 
     #[test]
