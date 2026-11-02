@@ -1701,16 +1701,41 @@ mod tests {
         // --regexp= with nothing after = would take the next argument (`--`) as the pattern
         assert_eq!(regexp(""), ["-e", ""]);
         // ugrep loads a config file named by any argument that starts with --- or --config
+        let safe = |cmd: &Cmd, q: &str| {
+            let args: Vec<String> = cmd
+                .args
+                .iter()
+                .map(|a| a.to_string_lossy().into_owned())
+                .collect();
+            assert!(
+                !args
+                    .iter()
+                    .any(|a| a == q || a.starts_with("---") || a.starts_with("--config")),
+                "{args:?}"
+            );
+        };
+        let mut views = vec![
+            (Tab::Content, Options::default()),
+            (Tab::Deep, Options::default()),
+        ];
+        for (tab, opt) in [
+            (Tab::Content, Opt::MatchingLines),
+            (Tab::Content, Opt::EachMatch),
+            (Tab::Content, Opt::Archives),
+            (Tab::Deep, Opt::Documents),
+        ] {
+            let mut o = Options::default();
+            o.toggle(tab, opt);
+            views.push((tab, o));
+        }
         for q in ["-rf", "---", "---evil", "--config=x"] {
             let (cmd, _) = run(list_plan(Tab::Content, &Options::default(), q, &engines()));
             assert_eq!(patterns_of(&cmd), [q]);
-            assert!(
-                !cmd.args
-                    .iter()
-                    .any(|a| a == q || a.to_string_lossy().starts_with("---")),
-                "{:?}",
-                cmd.args
-            );
+            for (tab, o) in &views {
+                safe(&run(list_plan(*tab, o, q, &engines())).0, q);
+            }
+            let ctrl_t = in_file_plan("a.txt".as_ref(), q, &InFileOpts::default(), &engines());
+            safe(&run(ctrl_t).0, q);
         }
     }
 

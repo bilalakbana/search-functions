@@ -613,6 +613,18 @@ mod tests {
     }
 
     #[test]
+    fn a_pattern_like_an_option_is_one_regexp_argument() {
+        // ugrep loads a config file named by any argument that starts with --- or --config
+        for q in ["---", "--config=x"] {
+            for doc in [Doc::Archive, Doc::Filtered] {
+                let a = ugrep_args(&query(q), "p", doc, "");
+                assert_eq!(a.last().unwrap(), &format!("--regexp={q}"));
+                assert!(!a.iter().any(|x| x == q), "{a:?}");
+            }
+        }
+    }
+
+    #[test]
     fn the_versions_to_choose_from_come_from_git_log() {
         assert_eq!(
             LOG_ARGS,
