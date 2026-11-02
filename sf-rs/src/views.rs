@@ -56,13 +56,13 @@ fn programs_off(scoped: &[u8]) -> Option<Vec<OsString>> {
         } else {
             continue;
         };
-        // the name is the subsection: from the section to the last dot (a name may hold dots)
-        let Some(name) = key[section.len()..]
-            .iter()
-            .rposition(|&b| b == b'.')
-            .map(|dot| &key[section.len()..section.len() + dot])
-        else {
-            continue;
+        // the name is the subsection: from the section to the last dot (a name may hold dots); a
+        // `[hook]` with no subsection is a hook with the empty name, a `[filter]` is no filter
+        let rest = &key[section.len()..];
+        let name = match rest.iter().rposition(|&b| b == b'.') {
+            Some(dot) => &rest[..dot],
+            None if section == b"hook." => &rest[..0],
+            None => continue,
         };
         if name.contains(&b'=') {
             return None;
@@ -510,7 +510,8 @@ mod tests {
     fn the_repositorys_own_filters_are_turned_off_in_a_diff() {
         let scoped = b"global\0filter.lfs.clean\0local\0filter.ev.clean\0local\0filter.ev.smudge\0\
                        worktree\0filter.a.b.process\0local\0hook.x.y.event\0local\0hook.x.y.command\0\
-                       global\0hook.mine.command\0local\0hook.jobs\0";
+                       global\0hook.mine.command\0local\0hook.event\0local\0hook.command\0\
+                       local\0filter.clean\0";
         let args: Vec<String> = programs_off(scoped)
             .unwrap()
             .iter()
@@ -521,12 +522,19 @@ mod tests {
                 .map(|s| ["-c".to_string(), format!("filter.{n}.{s}")])
         };
         let hook = |n: &str| [["-c".to_string(), format!("hook.{n}.enabled=false")]];
-        let want: Vec<String> = [&off("ev")[..], &off("a.b"), &hook("x.y"), &hook("mine")]
-            .concat()
-            .concat();
+        let want: Vec<String> = [
+            &off("ev")[..],
+            &off("a.b"),
+            &hook("x.y"),
+            &hook("mine"),
+            &hook(""),
+        ]
+        .concat()
+        .concat();
         assert_eq!(
             args, want,
-            "git-lfs of the user's own config stays; every hook defined in config is off"
+            "git-lfs of the user's own config stays; every hook defined in config is off, also \
+             a [hook] with no name (git 2.54 runs it); a [filter] with no name is no filter"
         );
         assert_eq!(programs_off(b"local\0filter.x=y.clean\0"), None);
         assert_eq!(programs_off(b"global\0hook.x=y.command\0"), None);

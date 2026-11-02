@@ -799,10 +799,10 @@ ran=$(cd "$W" && ls evilgit-ran-* 2>/dev/null | tr '\n' ' ')
     || bad "git config: the repository's programs ran: $ran"
 # Nor do its hooks (git diff writes the index when a file has a new time but the same text, as in an
 # unpacked archive, and that runs post-index-change: a hook file, or from git 2.54 on a hook its config
-# defines), a submodule's own config (git diff looks into the submodule; git log -p with
-# diff.submodule=diff runs git diff in it) or a partial clone's fetch of a missing object (its
-# core.sshCommand)
-for p in hook:true cfghook:true subclean:cat subext:true ssh:false; do   # a clean filter writes its stdin back
+# defines, also one with no name; an older git ignores those keys, so only 2.54 or newer can fail them),
+# a submodule's own config (git diff looks into the submodule; git log -p with diff.submodule=diff runs
+# git diff in it) or a partial clone's fetch of a missing object (its core.sshCommand)
+for p in hook:true cfghook:true cfghook0:true subclean:cat subext:true ssh:false; do   # a clean filter writes its stdin back
     printf '#!/bin/sh\ntouch %s\n%s\n' "$W/evilgit2-ran-${p%:*}" "${p#*:}" > "$W/evil2-${p%:*}" \
         && chmod +x "$W/evil2-${p%:*}"
 done
@@ -810,7 +810,8 @@ G=(git -c user.name=T -c user.email=t@t -c protocol.file.allow=always)
 mkdir -p "$W/evilhook" "$W/evilsub-src" "$W/evilsub" "$W/evilpc"
 (cd "$W/evilhook" && git init -q && printf 'a\n' > a.txt && git add a.txt && "${G[@]}" commit -qm one \
     && cp "$W/evil2-hook" .git/hooks/post-index-change \
-    && git config hook.evil.event post-index-change && git config hook.evil.command "'$W/evil2-cfghook'")
+    && git config hook.evil.event post-index-change && git config hook.evil.command "'$W/evil2-cfghook'" \
+    && git config hook.event post-index-change && git config hook.command "'$W/evil2-cfghook0'")
 (cd "$W/evilsub-src" && git init -q && printf 's\n' > s.txt && printf 's.txt filter=sf\n' > .gitattributes \
     && git add -A && "${G[@]}" commit -qm s)
 (cd "$W/evilsub" && git init -q && printf 't\n' > t.txt && git add t.txt && "${G[@]}" commit -qm t \
